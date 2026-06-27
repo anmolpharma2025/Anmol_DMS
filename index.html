@@ -5546,14 +5546,17 @@ async function applyUpdate() {
     const res = await fetch(APP_URL + '?_=' + Date.now());
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const html = await res.text();
-    if(!html.includes('ANMOL') && !html.includes('anmolpharma')) {
-      throw new Error('Downloaded file does not look like the correct app.');
+    if(!html.includes('<!DOCTYPE') && !html.includes('<html') && !html.includes('<script')) {
+      throw new Error('Downloaded content does not appear to be a valid HTML file. Check your APP_URL.');
     }
-    // Save a backup of current data before replacing
-    const backupKey = 'anmolpharma_backup_' + Date.now();
-    try { localStorage.setItem(backupKey, localStorage.getItem('anmolpharma')||''); } catch(e) {}
+    // Save current session so user stays logged in after update
+    try {
+      const session = localStorage.getItem(SESSION_KEY);
+      if(session) localStorage.setItem('anmolpharma_update_session', session);
+      localStorage.setItem('anmolpharma_just_updated', '1');
+    } catch(e) {}
 
-    // Replace the page content with the new version
+    // Replace the page with the new version
     document.open();
     document.write(html);
     document.close();
@@ -6578,6 +6581,23 @@ function printReturn(id) {
   // Update version badge
   const vb = document.getElementById('app-ver-badge');
   if(vb) vb.textContent = 'v' + APP_VERSION;
+  // Restore session if this is a just-updated page
+  if(localStorage.getItem('anmolpharma_just_updated')) {
+    localStorage.removeItem('anmolpharma_just_updated');
+    const savedSession = localStorage.getItem('anmolpharma_update_session');
+    if(savedSession) {
+      localStorage.setItem(SESSION_KEY, savedSession);
+      localStorage.removeItem('anmolpharma_update_session');
+    }
+    // Show success toast after a short delay
+    setTimeout(()=>{
+      const toast = document.createElement('div');
+      toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#0f6e56;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;align-items:center;gap:8px;animation:slideIn 0.3s ease';
+      toast.innerHTML = '<i class="ti ti-check" style="font-size:16px"></i> App updated successfully to v' + APP_VERSION;
+      document.body.appendChild(toast);
+      setTimeout(()=>{ if(toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
+    }, 500);
+  }
 })();
 
 if (currentUser) {
