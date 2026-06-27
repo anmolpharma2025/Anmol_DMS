@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ANMOL PHARMACEUTICALS US CORP. — Accounting System</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -227,7 +227,7 @@
     </div>
     <div style="margin-top:auto;padding:12px 10px 0;border-top:1px solid var(--border-light)">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:10px;color:var(--text-tertiary);letter-spacing:0.04em">v${APP_VERSION}</span>
+        <span style="font-size:10px;color:var(--text-tertiary);letter-spacing:0.04em" id="app-ver-badge">v1.0.0</span>
         <button onclick="showUpdateSettings()" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:11px;padding:2px 6px;border-radius:var(--radius-md);display:flex;align-items:center;gap:4px" title="Auto-update settings">
           <i class="ti ti-refresh" style="font-size:12px"></i>Updates
         </button>
@@ -5238,7 +5238,21 @@ ${po.notes?`<div class="notes-box"><strong>Notes:</strong> ${po.notes}</div>`:''
   win.document.close();
 }
 
-// ── AUTO-UPDATE SYSTEM ────────────────────────────────────────────────────────
+// ── GLOBAL ERROR HANDLER ─────────────────────────────────────────────────────
+window.onerror = function(msg, src, line, col, err) {
+  // Show a visible error so we can debug blank-page issues
+  const existing = document.getElementById('startup-error');
+  if(existing) return;
+  const div = document.createElement('div');
+  div.id = 'startup-error';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:14px 18px;font-family:monospace;font-size:13px;z-index:99999;line-height:1.6';
+  div.innerHTML = '<strong>App Error</strong> (line ' + line + '): ' + msg + '<br><small>Please screenshot this and report it. <a href="" style="color:#fff" onclick="location.reload()">Reload</a></small>';
+  document.body.appendChild(div);
+};
+
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('Unhandled promise rejection:', e.reason);
+});
 const APP_VERSION = '1.0.0';
 
 // ── HOW TO SET UP ─────────────────────────────────────────────────────────────
@@ -6343,6 +6357,9 @@ function printReturn(id) {
   const users = getUsers();
   if (!localStorage.getItem(USERS_KEY)) saveUsers(users);
   loadLogo();
+  // Update version badge
+  const vb = document.getElementById('app-ver-badge');
+  if(vb) vb.textContent = 'v' + APP_VERSION;
 })();
 
 if (currentUser) {
