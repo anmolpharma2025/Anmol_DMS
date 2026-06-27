@@ -248,6 +248,8 @@
           <button class="btn no-print" style="font-size:12px;padding:6px 10px" onclick="showSheetsSettings()" title="Google Sheets Sync"><i class="ti ti-table-share"></i></button>
           <button class="btn no-print" style="font-size:12px;padding:6px 12px" onclick="exportToExcel()" title="Export all data to Excel"><i class="ti ti-file-spreadsheet"></i>Export</button>
           <button class="btn no-print" id="import-btn" style="font-size:12px;padding:6px 12px;display:none" onclick="showImportExcel()" title="Import from Excel"><i class="ti ti-file-import"></i>Import</button>
+          <button class="btn no-print" style="font-size:12px;padding:6px 12px;background:var(--green-bg);border-color:var(--green-border);color:var(--green)" onclick="saveBackup()" title="Save full backup as JSON file"><i class="ti ti-database-export"></i>Backup</button>
+          <button class="btn no-print" id="restore-btn" style="font-size:12px;padding:6px 12px;display:none" onclick="showRestoreBackup()" title="Restore from backup JSON"><i class="ti ti-database-import"></i>Restore</button>
           <span id="user-badge" style="font-size:12px;color:var(--text-secondary);align-self:center;background:var(--bg-card);padding:5px 14px;border-radius:20px;border:1px solid var(--border-light)"></span>
         </div>
       </div>
@@ -372,9 +374,11 @@ function showAppScreen() {
   // Update user badge
   const badge = document.getElementById('user-badge');
   if(badge) badge.textContent = currentUser.name + ' · ' + currentUser.role;
-  // Show Import button only for admin
+  // Show Import and Restore buttons only for admin
   const importBtn = document.getElementById('import-btn');
   if(importBtn) importBtn.style.display = isAdmin() ? '' : 'none';
+  const restoreBtn = document.getElementById('restore-btn');
+  if(restoreBtn) restoreBtn.style.display = isAdmin() ? '' : 'none';
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
   // Hide nav items user can't access
@@ -4479,14 +4483,21 @@ function showSheetsSettings() {
 <div class="modal-head"><h3><i class="ti ti-table-share" style="font-size:16px;margin-right:6px"></i>Google Sheets Sync</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:12px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:16px;font-size:13px;color:var(--accent)">
   <i class="ti ti-info-circle" style="font-size:14px;vertical-align:-2px;margin-right:6px"></i>
-  Uses Google Apps Script Web App to sync data. <a href="https://script.google.com/home" target="_blank" style="color:var(--accent);font-weight:600">Set up your script here</a>, then paste the Web App URL below.
+  Uses Google Apps Script Web App to sync data. <a href="https://script.google.com/home" target="_blank" style="color:var(--accent);font-weight:600">Set up your script here</a>, then paste the details below.
 </div>
 <div class="form-group">
   <label>Apps Script Web App URL</label>
   <input type="text" id="gs-url" placeholder="https://script.google.com/macros/s/..." value="${cfg.url||''}">
 </div>
 <div class="form-group">
-  <label>Spreadsheet Name / Label</label>
+  <label>Spreadsheet ID</label>
+  <input type="text" id="gs-sheet-id" placeholder="Paste the ID from your Google Sheet URL" value="${cfg.sheetId||''}">
+  <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+    Found in your Sheet URL: docs.google.com/spreadsheets/d/<strong style="color:var(--accent)">THIS-PART-HERE</strong>/edit
+  </div>
+</div>
+<div class="form-group">
+  <label>Label / Name</label>
   <input type="text" id="gs-label" placeholder="e.g. ANMOL Accounting 2026" value="${cfg.label||''}">
 </div>
 <div id="gs-status" style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;min-height:16px">${cfg.url?'Connected to: '+cfg.label:'Not connected'}</div>
@@ -4502,13 +4513,6 @@ function showSheetsSettings() {
   </div>
   <button class="btn primary" style="width:100%;margin-top:10px;justify-content:center" onclick="syncAllToSheets()"><i class="ti ti-refresh"></i>Sync All Data Now</button>
 </div>
-<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:12px;border:1px solid var(--border-light);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
-  <strong style="color:var(--text-primary);display:block;margin-bottom:6px">Apps Script setup guide:</strong>
-  1. Go to script.google.com → New project<br>
-  2. Paste the doPost(e) handler code (copy from Help > Script Template)<br>
-  3. Deploy → New deployment → Web App → Anyone can access<br>
-  4. Copy the Web App URL and paste above
-</div>
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn primary" onclick="saveSheetsUrl()"><i class="ti ti-check"></i>Save & Connect</button>
@@ -4516,43 +4520,71 @@ function showSheetsSettings() {
 }
 
 function saveSheetsUrl() {
-  const url = document.getElementById('gs-url').value.trim();
-  const label = document.getElementById('gs-label').value.trim() || 'ANMOL Sheets';
-  if (!url) { alert('Please enter the Apps Script Web App URL.'); return; }
-  saveSheetsConfig({ url, label });
+  const url     = document.getElementById('gs-url').value.trim();
+  const sheetId = document.getElementById('gs-sheet-id').value.trim();
+  const label   = document.getElementById('gs-label').value.trim() || 'ANMOL Sheets';
+  if (!url)     { alert('Please enter the Apps Script Web App URL.'); return; }
+  if (!sheetId) { alert('Please enter the Spreadsheet ID.'); return; }
+  saveSheetsConfig({ url, sheetId, label });
   const s = document.getElementById('gs-status');
   if(s) s.textContent = 'Saved! Connected to: ' + label;
 }
 
 async function syncToSheets(dataKey) {
   const cfg = getSheetsConfig();
-  if (!cfg.url) { alert('Please configure your Google Sheets URL first (Settings > Google Sheets Sync).'); return; }
+  if (!cfg.url)     { alert('Please configure your Google Sheets URL first.'); return; }
+  if (!cfg.sheetId) { alert('Please enter your Spreadsheet ID in the Google Sheets settings.'); return; }
   const dataMap = {
-    invoices: { sheet:'Invoices', data: state.invoices },
-    purchases: { sheet:'Purchases', data: state.purchases||[] },
-    expenses: { sheet:'Expenses', data: state.expenses||[] },
+    invoices:    { sheet:'Invoices',    data: state.invoices },
+    purchases:   { sheet:'Purchases',   data: state.purchases||[] },
+    expenses:    { sheet:'Expenses',    data: state.expenses||[] },
     collections: { sheet:'Collections', data: state.collections||[] },
-    payroll: { sheet:'Payroll', data: state.payrolls||[] },
-    attendance: { sheet:'Attendance', data: state.attendance||[] },
-    employees: { sheet:'Employees', data: state.employees||[] },
-    journal: { sheet:'Journal', data: state.journal },
+    payroll:     { sheet:'Payroll',     data: state.payrolls||[] },
+    attendance:  { sheet:'Attendance',  data: state.attendance||[] },
+    employees:   { sheet:'Employees',   data: state.employees||[] },
+    journal:     { sheet:'Journal',     data: state.journal },
   };
   const target = dataMap[dataKey];
   if (!target) return;
   const statusEl = document.getElementById('gs-status');
   if(statusEl) statusEl.textContent = 'Syncing ' + target.sheet + '...';
+
   try {
-    const resp = await fetch(cfg.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'sync', sheet: target.sheet, rows: target.data })
+    const payload = JSON.stringify({
+      action: 'sync',
+      sheetId: cfg.sheetId,
+      sheet: target.sheet,
+      rows: target.data
     });
-    const result = await resp.json();
-    if(statusEl) statusEl.textContent = (result.status==='ok') ? target.sheet + ' synced ✓ ' + new Date().toLocaleTimeString() : 'Error: ' + (result.message||'Unknown error');
-    if(result.status==='ok') alert(target.sheet + ' synced to Google Sheets successfully!');
+
+    // Use hidden iframe + form POST to bypass CORS
+    const old = document.getElementById('gs-iframe');
+    if(old) old.remove();
+    const iframe = document.createElement('iframe');
+    iframe.id = 'gs-iframe';
+    iframe.name = 'gs-iframe';
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = cfg.url;
+    form.target = 'gs-iframe';
+    form.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'data';
+    input.value = payload;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+
+    if(statusEl) statusEl.textContent = target.sheet + ' sync sent ✓ ' + new Date().toLocaleTimeString();
   } catch(err) {
     if(statusEl) statusEl.textContent = 'Sync failed: ' + err.message;
-    alert('Sync failed. Check your Apps Script URL and try again.\nError: ' + err.message);
+    alert('Sync failed: ' + err.message);
   }
 }
 
@@ -6570,6 +6602,103 @@ function printReturn(id) {
 <script>window.onload=()=>{window.print();}<\/script>
 </body></html>`);
   win.document.close();
+}
+
+// ── BACKUP & RESTORE ──────────────────────────────────────────────────────────
+function saveBackup() {
+  try {
+    const backup = {
+      version: APP_VERSION,
+      timestamp: new Date().toISOString(),
+      data: JSON.parse(localStorage.getItem('anmolpharma')||'{}'),
+      company: JSON.parse(localStorage.getItem(COMPANY_KEY)||'{}'),
+      branches: JSON.parse(localStorage.getItem('anmolpharma_branches')||'[]'),
+      users: JSON.parse(localStorage.getItem(USERS_KEY)||'[]'),
+      sheetsConfig: JSON.parse(localStorage.getItem(SHEETS_CONFIG_KEY)||'{}'),
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const date = new Date().toISOString().slice(0,10);
+    a.href     = url;
+    a.download = `ANMOL_Backup_${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    // Show toast
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#0f6e56;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;align-items:center;gap:8px;animation:slideIn 0.3s ease';
+    toast.innerHTML = '<i class="ti ti-check" style="font-size:16px"></i> Backup saved: ANMOL_Backup_' + date + '.json';
+    document.body.appendChild(toast);
+    setTimeout(()=>{ if(toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
+  } catch(e) {
+    alert('Backup failed: ' + e.message);
+  }
+}
+
+function showRestoreBackup() {
+  if(!requireAdmin('restore backup data')) return;
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-database-import" style="margin-right:6px"></i>Restore from Backup</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:12px 14px;background:rgba(240,92,110,0.12);border:1px solid var(--red);border-radius:var(--radius-md);margin-bottom:16px;font-size:13px;color:var(--red)">
+  <i class="ti ti-alert-triangle" style="margin-right:6px"></i>
+  <strong>Warning:</strong> Restoring will completely replace ALL current data with the backup. This cannot be undone. Make a fresh backup first if needed.
+</div>
+<div class="form-group">
+  <label>Select backup file (.json)</label>
+  <input type="file" id="restore-file" accept=".json" style="padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);width:100%;font-size:13px">
+</div>
+<div id="restore-preview" style="min-height:20px;font-size:12px;color:var(--text-secondary);margin-bottom:8px"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn danger" onclick="runRestore()"><i class="ti ti-database-import"></i>Restore Now</button>
+</div>`);
+
+  document.getElementById('restore-file').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        const bk = JSON.parse(ev.target.result);
+        const ts = bk.timestamp ? new Date(bk.timestamp).toLocaleString('en-PH') : 'Unknown';
+        const inv = bk.data?.invoices?.length || 0;
+        const emp = bk.data?.employees?.length || 0;
+        const pr  = bk.data?.payrolls?.length || 0;
+        document.getElementById('restore-preview').innerHTML = `
+<div style="padding:10px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+  <div style="font-weight:600;margin-bottom:6px;color:var(--text-primary)">Backup details:</div>
+  <div>Version: <strong>v${bk.version||'unknown'}</strong></div>
+  <div>Created: <strong>${ts}</strong></div>
+  <div>Invoices: <strong>${inv}</strong> &nbsp;·&nbsp; Employees: <strong>${emp}</strong> &nbsp;·&nbsp; Payrolls: <strong>${pr}</strong></div>
+  <div style="margin-top:6px;color:var(--green);font-weight:500"><i class="ti ti-check"></i> Valid backup file — ready to restore</div>
+</div>`;
+        window._restoreData = bk;
+      } catch(err) {
+        document.getElementById('restore-preview').innerHTML = `<span style="color:var(--red)">Invalid backup file: ${err.message}</span>`;
+        window._restoreData = null;
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+function runRestore() {
+  if(!window._restoreData) { alert('Please select a valid backup file first.'); return; }
+  if(!confirm('Are you sure? ALL current data will be replaced with this backup.')) return;
+  try {
+    const bk = window._restoreData;
+    if(bk.data)        localStorage.setItem('anmolpharma', JSON.stringify(bk.data));
+    if(bk.company)     localStorage.setItem(COMPANY_KEY, JSON.stringify(bk.company));
+    if(bk.branches)    localStorage.setItem('anmolpharma_branches', JSON.stringify(bk.branches));
+    if(bk.users)       localStorage.setItem(USERS_KEY, JSON.stringify(bk.users));
+    if(bk.sheetsConfig)localStorage.setItem(SHEETS_CONFIG_KEY, JSON.stringify(bk.sheetsConfig));
+    window._restoreData = null;
+    closeModal();
+    // Reload page to apply restored data
+    setTimeout(()=>location.reload(), 300);
+  } catch(e) {
+    alert('Restore failed: ' + e.message);
+  }
 }
 
 // ── BOOT ─────────────────────────────────────────────────────────────────────
