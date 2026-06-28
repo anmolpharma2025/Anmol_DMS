@@ -911,7 +911,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
 
 function closeModal() { document.getElementById('modal').style.display = 'none'; }
 function overlayClick(e) { if (e.target === document.getElementById('modal')) closeModal(); }
-function showModal(html) { document.getElementById('modal-inner').innerHTML = html; document.getElementById('modal').style.display = 'flex'; }
+// showModal is defined later with searchable-select support
 
 function render() {
   const titles = { dashboard:'Dashboard', journal:'Journal Entries', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', vouchers:'Disbursement Vouchers', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
@@ -6771,20 +6771,21 @@ function makeSearchable(selectId, placeholder) {
 }
 
 // Auto-apply searchable to key dropdowns after modal renders
-const _origShowModal = showModal;
 function showModal(html) {
-  _origShowModal(html);
+  // Call the original modal display logic directly (avoid re-wrapping)
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modal-inner').innerHTML = html;
   // Apply searchable selects to common modal dropdowns
   setTimeout(() => {
     const ids = [
       'inv-cust','inv-so','col-cust','col-inv',
-      'so-cust','po-sup','dv-payee',
+      'so-cust','po-sup',
       'pr-emp','att-emp','ret-cust','ret-inv',
       'con-consignee','con-item',
       'tx-from','tx-to','nu-role','eu-role',
     ];
     ids.forEach(id => { const el=document.getElementById(id); if(el&&el.tagName==='SELECT'&&!el.dataset.searchable) makeSearchable(id); });
-  }, 50);
+  }, 80);
 }
 function auditStamp() {
   return {
