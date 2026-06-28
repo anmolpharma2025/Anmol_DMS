@@ -166,11 +166,27 @@
 </head>
 <body>
 
-<div id="login-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;background:var(--bg-tertiary)">
-  <div style="background:var(--bg-secondary);border-radius:var(--radius-lg);padding:40px 44px;width:420px;border:1px solid var(--border-mid);box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+<div id="login-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;position:relative;overflow:hidden;background:var(--bg-tertiary)">
+
+  <!-- Logo background layer (shown when logo is uploaded) -->
+  <div id="login-bg" style="position:absolute;inset:0;background-size:cover;background-position:center;background-repeat:no-repeat;opacity:0;transition:opacity 0.6s ease;z-index:0"></div>
+  <!-- Dark overlay so the login card stays readable -->
+  <div id="login-overlay" style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(10,16,32,0.82) 0%,rgba(10,16,32,0.65) 100%);z-index:1;opacity:0;transition:opacity 0.6s ease"></div>
+  <!-- Fallback solid background when no logo -->
+  <div style="position:absolute;inset:0;background:var(--bg-tertiary);z-index:0"></div>
+
+  <!-- Login card -->
+  <div style="position:relative;z-index:2;background:rgba(22,32,64,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-lg);padding:40px 44px;width:420px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 24px 80px rgba(0,0,0,0.7)">
     <div style="text-align:center;margin-bottom:32px">
-      <i class="ti ti-pill" style="font-size:36px;color:var(--accent);display:block;margin-bottom:12px"></i>
-      <div style="font-size:13px;font-weight:800;letter-spacing:0.04em;color:var(--text-primary);line-height:1.5">ANMOL PHARMACEUTICALS<br>US CORP.</div>
+      <!-- Logo image (shown when uploaded) -->
+      <div id="login-logo-wrap" style="display:none;margin-bottom:14px">
+        <img id="login-logo-img" src="" alt="Logo" style="height:72px;max-width:220px;object-fit:contain;filter:drop-shadow(0 2px 12px rgba(0,0,0,0.5))">
+      </div>
+      <!-- Pill icon fallback -->
+      <div id="login-icon-wrap">
+        <i class="ti ti-pill" style="font-size:36px;color:var(--accent);display:block;margin-bottom:12px"></i>
+      </div>
+      <div style="font-size:13px;font-weight:800;letter-spacing:0.04em;color:var(--text-primary);line-height:1.5" id="login-company-name">ANMOL PHARMACEUTICALS<br>US CORP.</div>
       <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px;text-transform:uppercase;letter-spacing:0.08em">Accounting System</div>
     </div>
     <div class="form-group"><label>Username</label><input type="text" id="login-user" placeholder="Enter username" onkeydown="if(event.key==='Enter')doLogin()"></div>
@@ -4837,9 +4853,9 @@ function saveCompanyProfile2() {
     rdo:    document.getElementById('cp-rdo').value.trim(),
   };
   saveCompanyProfile(p);
-  // Update sidebar logo label
-  const logoSpan = document.querySelector('.logo span');
-  if(logoSpan) logoSpan.innerHTML = p.name.replace(/ /g,'<br>');
+  // Update login screen company name
+  const nameEl = document.getElementById('login-company-name');
+  if(nameEl) nameEl.innerHTML = p.name.replace(/ — /g,'<br>').replace(/ \/ /g,'<br>');
   closeModal(); render();
 }
 
@@ -5652,19 +5668,38 @@ function loadLogo() {
 }
 
 function applyLogo(dataUrl) {
-  const img = document.getElementById('logo-img');
+  // Sidebar logo
+  const img  = document.getElementById('logo-img');
   const wrap = document.getElementById('logo-img-wrap');
   const icon = document.getElementById('logo-icon-wrap');
   const btn  = document.getElementById('logo-btn-txt');
-  if (img && wrap && icon) {
+  if(img && wrap && icon) {
     img.src = dataUrl;
     wrap.style.display = 'block';
     icon.style.display = 'none';
-    if (btn) btn.textContent = 'Change logo';
-    // Also update login screen icon
-    const loginIcon = document.querySelector('#login-screen .ti-pill');
-    if (loginIcon) { loginIcon.style.display='none'; }
+    if(btn) btn.textContent = 'Change logo';
   }
+  // Login screen — logo as full-page background
+  const bg      = document.getElementById('login-bg');
+  const overlay = document.getElementById('login-overlay');
+  const loginLogo = document.getElementById('login-logo-img');
+  const loginLogoWrap = document.getElementById('login-logo-wrap');
+  const loginIcon = document.getElementById('login-icon-wrap');
+  if(bg) {
+    bg.style.backgroundImage = `url('${dataUrl}')`;
+    bg.style.opacity = '1';
+  }
+  if(overlay) overlay.style.opacity = '1';
+  // Also show logo in the card
+  if(loginLogo && loginLogoWrap && loginIcon) {
+    loginLogo.src = dataUrl;
+    loginLogoWrap.style.display = 'block';
+    loginIcon.style.display = 'none';
+  }
+  // Update company name from profile
+  const cp = getCompanyProfile();
+  const nameEl = document.getElementById('login-company-name');
+  if(nameEl && cp.name) nameEl.innerHTML = cp.name.replace(/ — /g,'<br>').replace(/ \/ /g,'<br>');
 }
 
 function handleLogoUpload(event) {
