@@ -313,13 +313,28 @@ function getCompanyName() { return getCompanyProfile().name; }
 
 // Role → allowed pages (empty = all)
 const ROLE_ACCESS = {
-  admin:   [], // all pages
-  accountant: ['dashboard','journal','invoices','purchases','expenses','coa','reports','collections','payroll'],
-  sales:   ['dashboard','invoices','collections','customers'],
-  warehouse: ['dashboard','inventory','purchases'],
-  hr:      ['dashboard','employees','attendance','payroll'],
-  viewer:  ['dashboard','reports'],
+  admin:       [], // all pages
+  accountant:  ['dashboard','journal','invoices','purchases','expenses','coa','reports','collections','payroll'],
+  sales:       ['dashboard','invoices','collections','customers','salesorders'],
+  warehouse:   ['dashboard','inventory','purchases','purchaseorders'],
+  hr:          ['dashboard','employees','attendance','payroll'],
+  viewer:      ['dashboard','reports'],
 };
+
+// Custom roles stored in localStorage
+function getCustomRoles() {
+  try { return JSON.parse(localStorage.getItem('anmolpharma_custom_roles')||'{}'); } catch(e) { return {}; }
+}
+function saveCustomRoles(roles) {
+  try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(roles)); } catch(e) {} 
+}
+function getAllRoles() {
+  return { ...ROLE_ACCESS, ...getCustomRoles() };
+}
+function getRolePages(role) {
+  const all = getAllRoles();
+  return all[role] || [];
+}
 
 function getUsers() {
   try {
@@ -365,14 +380,12 @@ function requireAdmin(action) {
 function canAccess(page) {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true;
-  // Check per-user custom pages first (set by admin)
   const users = getUsers();
   const u = users.find(u=>u.id===currentUser.id);
   if (u && u.customPages && u.customPages.length > 0) {
     return u.customPages.includes(page);
   }
-  // Fall back to role defaults
-  const allowed = ROLE_ACCESS[currentUser.role] || [];
+  const allowed = getRolePages(currentUser.role);
   return allowed.length === 0 || allowed.includes(page);
 }
 
@@ -490,7 +503,9 @@ function getCheckedPages(prefix) {
 
 function renderUsers(c, ta) {
   if (currentUser.role !== 'admin') { c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary)">Access restricted.</div>'; return; }
-  ta.innerHTML = `<button class="btn primary" onclick="showAddUser()"><i class="ti ti-plus"></i>Add User</button>`;
+  ta.innerHTML = `
+    <button class="btn" onclick="showManageRoles()"><i class="ti ti-shield-cog"></i>Manage Roles</button>
+    <button class="btn primary" onclick="showAddUser()"><i class="ti ti-plus"></i>Add User</button>`;
   const users = getUsers();
   const roleColors = { admin:'var(--accent)', accountant:'var(--green)', sales:'var(--amber)', hr:'#34c98a', warehouse:'#a78bfa', viewer:'var(--text-secondary)' };
 
@@ -611,7 +626,7 @@ function setAllPagesAccess(prefix, checked) {
 }
 
 function setRoleDefaultAccess(prefix, role) {
-  const defaults = ROLE_ACCESS[role] || [];
+  const defaults = getRolePages(role);
   ALL_PAGES.forEach(p => {
     const el = document.getElementById(`${prefix}-${p.id}`);
     if(el) el.checked = defaults.length === 0 || defaults.includes(p.id);
@@ -641,8 +656,71 @@ function deleteUser(id) { if(!requireAdmin("delete user accounts")) return;
   saveUsers(users); render();
 }
 
+function showManageRoles() {
+  const custom = getCustomRoles();
+  const builtIn = Object.keys(ROLE_ACCESS);
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-shield-cog" style="margin-right:6px"></i>Manage Roles</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="margin-bottom:14px">
+  <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">Built-in Roles</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+    ${builtIn.map(r=>`<div style="padding:8px 12px;background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-md)">
+      <div style="font-weight:500;font-size:13px">${r.charAt(0).toUpperCase()+r.slice(1)}</div>
+      <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${r==='admin'?'All pages':((ROLE_ACCESS[r]||[]).join(', ')||'—')}</div>
+    </div>`).join('')}
+  </div>
+</div>
+${Object.keys(custom).length>0?`<div style="margin-bottom:14px">
+  <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">Custom Roles</div>
+  ${Object.entries(custom).map(([name,pages])=>`<div style="padding:10px 12px;background:var(--bg-primary);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-weight:500;font-size:13px;color:var(--accent)">${name.charAt(0).toUpperCase()+name.slice(1)}</div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">${pages.join(', ')||'No pages'}</div></div>
+    <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteCustomRole('${name}')"><i class="ti ti-trash"></i></button>
+  </div>`).join('')}
+</div>`:''}
+<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:14px;border:1px solid var(--border-light)">
+  <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:10px"><i class="ti ti-plus" style="margin-right:5px"></i>Add New Role</div>
+  <div class="form-group" style="margin-bottom:10px"><label>Role Name (lowercase, no spaces)</label>
+    <input type="text" id="new-role-name" placeholder="e.g. supervisor" style="width:100%;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+  </div>
+  <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">Page access for this role:</div>
+  <div style="display:flex;gap:6px;margin-bottom:8px">
+    <button class="btn" style="font-size:11px;padding:2px 8px" onclick="setAllPagesAccess('nr',true)" type="button">All</button>
+    <button class="btn" style="font-size:11px;padding:2px 8px" onclick="setAllPagesAccess('nr',false)" type="button">None</button>
+  </div>
+  <div style="max-height:240px;overflow-y:auto">${buildPageCheckboxes([], 'nr')}</div>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+  <button class="btn" onclick="closeModal()">Close</button>
+  <button class="btn primary" onclick="saveNewRole()"><i class="ti ti-plus"></i>Add Role</button>
+</div>`);
+}
+
+function saveNewRole() {
+  const name = document.getElementById('new-role-name').value.trim().toLowerCase().replace(/\s+/g,'-');
+  if(!name) { alert('Role name is required.'); return; }
+  if(getAllRoles()[name]) { alert('A role named "'+name+'" already exists.'); return; }
+  const pages = getCheckedPages('nr');
+  const custom = getCustomRoles();
+  custom[name] = pages;
+  saveCustomRoles(custom);
+  closeModal();
+  render();
+}
+
+function deleteCustomRole(name) {
+  if(!confirm('Delete the "'+name+'" role?')) return;
+  const custom = getCustomRoles();
+  delete custom[name];
+  saveCustomRoles(custom);
+  closeModal();
+  render();
+}
+
 function showAddUser() {
-  const defaultPages = ROLE_ACCESS['accountant'] || [];
+  const allRoles = getAllRoles();
+  const roleOpts = Object.keys(allRoles).filter(r=>r!=='admin').map(r=>`<option value="${r}">${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('') + '<option value="admin">Admin — Full access</option>';
+  const defaultPages = getRolePages('accountant');
   showModal(`
 <div class="modal-head"><h3>Add User Account</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
@@ -655,12 +733,7 @@ function showAddUser() {
 </div>
 <div class="form-group"><label>Role</label>
   <select id="nu-role" onchange="setRoleDefaultAccess('nu', this.value)">
-    <option value="accountant">Accountant</option>
-    <option value="sales">Sales</option>
-    <option value="hr">HR</option>
-    <option value="warehouse">Warehouse</option>
-    <option value="viewer">Viewer</option>
-    <option value="admin">Admin — Full access</option>
+    ${roleOpts}
   </select>
 </div>
 <div id="nu-pages-section">
@@ -693,7 +766,7 @@ function saveNewUser() {
   const id = 'U' + String(users.length+1).padStart(3,'0');
   // Store custom pages only if they differ from role default
   const selectedPages = getCheckedPages('nu');
-  const roleDefaults = ROLE_ACCESS[role] || [];
+  const roleDefaults = getRolePages(role);
   const isDifferent = role !== 'admin' && JSON.stringify([...selectedPages].sort()) !== JSON.stringify([...roleDefaults].sort());
   const userObj = { id, username, password:pass, name, role, active:true };
   if(isDifferent && selectedPages.length > 0) userObj.customPages = selectedPages;
@@ -713,13 +786,10 @@ function showEditUser(id) {
 </div>
 <div class="form-group"><label>Role</label>
   <select id="eu-role">
-    <option value="accountant" ${u.role==='accountant'?'selected':''}>Accountant</option>
-    <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
-    <option value="hr" ${u.role==='hr'?'selected':''}>HR</option>
-    <option value="warehouse" ${u.role==='warehouse'?'selected':''}>Warehouse</option>
-    <option value="viewer" ${u.role==='viewer'?'selected':''}>Viewer</option>
-    <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+    ${Object.keys(getAllRoles()).filter(r=>r!=='admin').map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
+    <option value="admin" ${u.role==='admin'?'selected':''}>Admin — Full access</option>
   </select>
+</div>
 </div>
 <div style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
   <i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px;margin-right:4px"></i>
@@ -1521,7 +1591,6 @@ function renderInvLines() {
         <select style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none;margin-bottom:2px" onchange="selectInvItem(${i},this)">
           ${itemOpts.replace(`value="${l.itemId||''}"`, `value="${l.itemId||''}" selected`)}
         </select>
-        <input type="text" placeholder="Description / custom item" value="${l.desc||''}" oninput="updateInvLine(${i},'desc',this.value)" style="width:100%;padding:3px 6px;border:none;border-top:1px solid var(--border-light);background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
         ${stockWarn}
       </td>
       <td style="padding:4px 6px;vertical-align:top">
@@ -1977,6 +2046,7 @@ function renderExpenses(c, ta) {
       <td><span class="badge ${e.status}">${e.status}</span></td>
       ${lastUpdatedCell(e)}
       <td><div class="action-btns">
+        ${e.status==='pending'?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markExpPaid('${e.id}')">Mark paid</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteExp('${e.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
