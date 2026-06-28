@@ -5322,7 +5322,7 @@ function viewPO(id) {
   ${sup.address?`<div style="font-size:12px;color:var(--text-secondary)">${sup.address}</div>`:''}
   ${sup.tin?`<div style="font-size:12px;color:var(--accent)">TIN: ${sup.tin}</div>`:''}
 </div>
-${canReceive && po.status==='approved'?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Mark each line as <strong>Delivered</strong> when received. Delivered items are added to inventory immediately. You can also enter a partial quantity.</div>`:''}
+${canReceive && (po.status==='approved'||po.status==='partial')?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Mark each line as <strong>Delivered</strong> when received. Delivered items are added to inventory immediately. You can also enter a partial quantity.</div>`:''}
 <div id="po-view-lines">${renderPOViewLines(po, canReceive)}</div>
 <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-light);padding-top:12px;margin-top:4px">
   <div style="font-size:15px;font-weight:700">Total: ${fmt(poTotal)}</div>
@@ -5333,7 +5333,7 @@ ${canReceive && po.status==='approved'?`<div style="padding:8px 12px;background:
   <button class="btn" onclick="closeModal();render()">Close</button>
   <button class="btn" onclick="closeModal();render();printPO('${po.id}')"><i class="ti ti-printer"></i>Print</button>
   ${po.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approvePO('${po.id}')">Approve PO</button>`:''}
-  ${po.status==='approved'&&canReceive?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="receiveAllPOLines('${po.id}')"><i class="ti ti-package-import"></i>Receive All</button>`:''}
+  ${(po.status==='approved'||po.status==='partial')&&canReceive?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="receiveAllPOLines('${po.id}')"><i class="ti ti-package-import"></i>Receive All</button>`:''}
 </div>`);
 }
 
@@ -5354,7 +5354,7 @@ function renderPOViewLines(po, canReceive) {
           ? `<span style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">PARTIAL (${line.deliveredQty}/${line.qty})</span>`
           : '<span style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600">PENDING</span>';
 
-    const actionBtns = canReceive && po.status==='approved' ? `
+    const actionBtns = canReceive && (po.status==='approved'||po.status==='partial') ? `
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${!isDelivered?`<button class="btn" style="padding:3px 9px;font-size:11px;background:var(--green-bg);color:var(--green);border-color:var(--green-border)" onclick="markPOLineDelivered('${po.id}',${i},true)"><i class="ti ti-check"></i>Delivered</button>`:''}
         ${isDelivered||isPartial?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="undoPOLineDelivery('${po.id}',${i})">Undo</button>`:''}
