@@ -861,7 +861,20 @@ function save() { try { localStorage.setItem('anmolpharma', JSON.stringify(state
 function load() {
   try {
     const d = localStorage.getItem('anmolpharma');
-    if(d) { const p = JSON.parse(d); state = {...state, ...p, page: state.page}; }
+    if(d) {
+      const p = JSON.parse(d);
+      state = {...state, ...p, page: state.page};
+    } else {
+      // No data found — check if we have a pre-update backup to restore
+      const backup = localStorage.getItem('anmolpharma_pre_update_backup');
+      if(backup) {
+        const p = JSON.parse(backup);
+        state = {...state, ...p, page: state.page};
+        // Restore it as the main data
+        localStorage.setItem('anmolpharma', backup);
+        console.log('Restored data from pre-update backup');
+      }
+    }
   } catch(e) {}
   // Always recompute balances on load to fix any stale data
   recomputeBalances();
@@ -5597,17 +5610,22 @@ async function applyUpdate() {
     if(!html.includes('<!DOCTYPE') && !html.includes('<html') && !html.includes('<script')) {
       throw new Error('Downloaded content does not appear to be a valid HTML file. Check your APP_URL.');
     }
-    // Save current session so user stays logged in after update
+
+    // ── SAFE UPDATE: backup all data, then navigate to the new version URL ──
+    // We navigate directly to APP_URL instead of using document.write()
+    // This is safe because localStorage is preserved across same-origin navigation.
     try {
+      // Save session so user stays logged in
       const session = localStorage.getItem(SESSION_KEY);
       if(session) localStorage.setItem('anmolpharma_update_session', session);
+      // Save current data as extra backup just in case
+      const currentData = localStorage.getItem('anmolpharma');
+      if(currentData) localStorage.setItem('anmolpharma_pre_update_backup', currentData);
       localStorage.setItem('anmolpharma_just_updated', '1');
     } catch(e) {}
 
-    // Replace the page with the new version
-    document.open();
-    document.write(html);
-    document.close();
+    // Navigate directly to the hosted URL — localStorage survives navigation
+    window.location.href = APP_URL;
   } catch(err) {
     alert('Update failed: ' + err.message + '\n\nPlease reload the page manually or contact your admin.');
     const btn2 = document.querySelector('#update-banner button');
