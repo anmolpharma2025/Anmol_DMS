@@ -4878,7 +4878,7 @@ function saveCompanyProfile2() {
 }
 
 // ── SALES ORDERS ──────────────────────────────────────────────────────────────
-const SO_STATUS_COLORS = { pending:'var(--amber)', approved:'var(--accent)', delivered:'var(--green)', cancelled:'var(--red)' };
+const SO_STATUS_COLORS = { pending:'var(--amber)', approved:'var(--accent)', dispatched:'#a78bfa', delivered:'var(--green)', cancelled:'var(--red)' };
 
 function renderSalesOrders(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddSO()"><i class="ti ti-plus"></i>New Sales Order</button>`;
@@ -4886,10 +4886,11 @@ function renderSalesOrders(c, ta) {
   const total = sos.reduce((s,so)=>s+so.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
   const byStatus = s => sos.filter(so=>so.status===s).length;
   c.innerHTML = `
-<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
   <div class="kpi"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
   <div class="kpi"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
   <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
+  <div class="kpi"><div class="kpi-label">Dispatched</div><div class="kpi-value" style="color:#a78bfa">${byStatus('dispatched')}</div></div>
   <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value pos">${fmt(total)}</div></div>
 </div>
 <table>
@@ -4910,7 +4911,8 @@ function renderSalesOrders(c, ta) {
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewSO('${so.id}')"><i class="ti ti-eye"></i>View</button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printSO('${so.id}')"><i class="ti ti-printer"></i></button>
         ${so.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="approveSO('${so.id}')">Approve</button>`:''}
-        ${so.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="deliverSO('${so.id}')">Delivered</button>`:''}
+        ${so.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px;background:#a78bfa22;color:#a78bfa;border-color:#a78bfa" onclick="dispatchSO('${so.id}')"><i class="ti ti-truck"></i>Dispatch</button>`:''}
+        ${so.status==='dispatched'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="deliverSO('${so.id}')"><i class="ti ti-check"></i>Delivered</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteSO('${so.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -4942,6 +4944,8 @@ function viewSO(id) {
     <h3>${so.id} — ${so.customer}</h3>
     <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">
       Order Date: ${so.date} &nbsp;·&nbsp; Delivery: ${so.deliveryDate||'TBD'} &nbsp;·&nbsp; Prepared by: ${so.preparedBy||'—'}
+      ${so.dispatchedDate?` &nbsp;·&nbsp; <span style="color:#a78bfa;font-weight:500"><i class="ti ti-truck" style="font-size:11px"></i> Dispatched: ${so.dispatchedDate} by ${so.dispatchedBy||'—'}</span>`:''}
+      ${so.deliveredDate?` &nbsp;·&nbsp; <span style="color:var(--green);font-weight:500"><i class="ti ti-check" style="font-size:11px"></i> Delivered: ${so.deliveredDate}</span>`:''}
     </div>
   </div>
   <button class="close-btn" onclick="closeModal()">×</button>
@@ -4972,7 +4976,8 @@ ${canApproveItems?`<div style="padding:8px 12px;background:var(--accent-bg);bord
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print</button>
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
-  ${so.status==='approved'&&isAdmin()?`<button class="btn primary" onclick="closeModal();deliverSO('${so.id}')">Mark Delivered</button>`:''}
+  ${so.status==='approved'&&isAdmin()?`<button class="btn primary" style="background:#a78bfa;border-color:#a78bfa" onclick="closeModal();dispatchSO('${so.id}')"><i class="ti ti-truck"></i>Dispatch</button>`:''}
+  ${so.status==='dispatched'&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
 </div>`);
 }
 
@@ -5044,7 +5049,8 @@ function approveAllSOItems(soId) {
 }
 
 function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so) so.status='approved'; save(); render(); }
-function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so) so.status='delivered'; save(); render(); }
+function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; } save(); render(); }
+function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='delivered'; so.deliveredDate=today(); } save(); render(); }
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
 
 function showAddSO() {
