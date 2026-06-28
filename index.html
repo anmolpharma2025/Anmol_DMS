@@ -500,7 +500,7 @@ function renderUsers(c, ta) {
   Only <strong>Admin</strong> users can manage accounts. Click <strong>Customize Access</strong> to set per-user page permissions that override the role defaults.
 </div>
 <table>
-  <thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>Access Mode</th><th>Pages Accessible</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>Access Mode</th><th>Pages Accessible</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
   <tbody>
   ${users.map(u => {
     const hasCustom = u.customPages && u.customPages.length > 0 && u.role !== 'admin';
@@ -1345,7 +1345,7 @@ function saveJournal() {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
-    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc, ...auditStamp() });
+    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc });
   });
   save(); closeModal(); render();
 }
@@ -1370,7 +1370,7 @@ function renderInvoices(c, ta) {
   <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value neg">${fmt(outstanding)}</div></div>
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Created by</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${state.invoices.map(inv => {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
@@ -1381,9 +1381,8 @@ function renderInvoices(c, ta) {
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
-      <td><span class="badge ${inv.status}">${inv.status}</span>
-        ${inv.updatedBy?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">Paid by: ${inv.updatedBy}</div>`:''}</td>
-      <td style="font-size:11px;color:var(--text-secondary)">${inv.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${inv.createdAt||''}</div></td>
+      <td><span class="badge ${inv.status}">${inv.status}</span></td>
+      ${lastUpdatedCell(inv)}
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
@@ -1408,8 +1407,7 @@ function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   if(!inv) return;
   inv.status = 'paid';
   inv.manuallyPaid = true;
-  inv.updatedBy=currentUser?.name;
-  inv.updatedAt=new Date().toISOString().slice(0,16).replace('T',' ');
+  stampUpdate(inv);
   recomputeBalances();
   save(); render();
 }
@@ -1632,7 +1630,7 @@ function saveInvoice() {
   const id = 'INV-' + String(state.invoices.length + 1).padStart(3, '0');
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
   const soRef = window._invLinkedSO || '';
-  state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef, ...auditStamp() });
+  state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef });
   // ── Deduct inventory for each linked item (stock out on sale) ──
   lines.forEach(l => {
     if(!l.itemId) return;
@@ -1860,7 +1858,7 @@ function renderPurchases(c, ta) {
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(p.amount||0)}</td>
       <td><span class="badge ${p.status}">${p.status}</span></td>
-      <td style="font-size:11px;color:var(--text-secondary)">${p.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${p.createdAt||''}</div></td>
+      ${lastUpdatedCell(p)}
       <td><div class="action-btns">
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePur('${p.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
@@ -1877,7 +1875,7 @@ function renderPurchases(c, ta) {
 </table>`;
 }
 
-function markPurPaid(id) { if(!requireAdmin("update purchase status")) return; const p=(state.purchases||[]).find(p=>p.id===id); if(p) p.status='paid'; save(); render(); }
+function markPurPaid(id) { if(!requireAdmin("update purchase status")) return; const p=(state.purchases||[]).find(p=>p.id===id); if(p){ p.status='paid'; stampUpdate(p); } save(); render(); }
 function deletePur(id) { if(!requireAdmin("delete purchases")) return; if(confirm('Delete this purchase?')) { state.purchases=(state.purchases||[]).filter(p=>p.id!==id); save(); render(); } }
 
 function showAddPurchase() {
@@ -1944,7 +1942,7 @@ function savePurchase() {
   else                           { vatBase=raw; vat=0; amount=raw; }
   const id = 'PUR-' + String((state.purchases||[]).length+1).padStart(3,'0');
   if(!state.purchases) state.purchases=[];
-  state.purchases.push({ id, date, vendor, category, vatBase, vat, amount, vatType, status:'pending', notes, ...auditStamp() });
+  state.purchases.push({ id, date, vendor, category, vatBase, vat, amount, vatType, status:'pending', notes });
   save(); closeModal(); render();
 }
 
@@ -1962,7 +1960,7 @@ function renderExpenses(c, ta) {
 
   const expTable = (rows) => rows.length===0 ? '<p style="padding:16px;color:var(--text-tertiary);font-size:13px">No entries.</p>' : `
 <table>
-  <thead><tr><th>ID</th><th>Date</th><th>Vendor</th><th>Category</th><th>Type</th><th style="text-align:right">VAT Base</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Total</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Date</th><th>Vendor</th><th>Category</th><th>Type</th><th style="text-align:right">VAT Base</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Total</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
   <tbody>
   ${rows.map(e=>{
     const base=e.vatBase!=null?e.vatBase:e.amount||0;
@@ -1977,7 +1975,7 @@ function renderExpenses(c, ta) {
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(e.amount||0)}</td>
       <td><span class="badge ${e.status}">${e.status}</span></td>
-      <td style="font-size:11px;color:var(--text-secondary)">${e.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${e.createdAt||''}</div></td>
+      ${lastUpdatedCell(e)}
       <td><div class="action-btns">
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteExp('${e.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
@@ -2036,7 +2034,7 @@ function expTab(type, el) {
   if(body) body.innerHTML = window._expTableFn(rows);
 }
 
-function markExpPaid(id) { if(!requireAdmin("update expense status")) return; const e=(state.expenses||[]).find(e=>e.id===id); if(e) e.status='paid'; save(); render(); }
+function markExpPaid(id) { if(!requireAdmin("update expense status")) return; const e=(state.expenses||[]).find(e=>e.id===id); if(e){ e.status='paid'; stampUpdate(e); } save(); render(); }
 function deleteExp(id) { if(!requireAdmin("delete expenses")) return; if(confirm('Delete this expense?')) { state.expenses=(state.expenses||[]).filter(e=>e.id!==id); save(); render(); } }
 
 function showAddExpense() {
@@ -2109,7 +2107,7 @@ function saveExpense() {
   else                           { vatBase=raw; vat=0; amount=raw; }
   const id='EXP-'+String((state.expenses||[]).length+10).padStart(3,'0');
   if(!state.expenses) state.expenses=[];
-  state.expenses.push({ id, date, vendor, category, expType, vatBase, vat, amount, vatType, status:'pending', ...auditStamp() });
+  state.expenses.push({ id, date, vendor, category, expType, vatBase, vat, amount, vatType, status:'pending' });
   save(); closeModal(); render();
 }
 
@@ -2637,7 +2635,7 @@ function renderVouchers(c, ta) {
 </table>`;
 }
 
-function approveVoucher(id) { if(!requireAdmin("approve vouchers")) return; const v=state.vouchers.find(v=>v.id===id); if(v) v.status='approved'; save(); render(); }
+function approveVoucher(id) { if(!requireAdmin("approve vouchers")) return; const v=state.vouchers.find(v=>v.id===id); if(v){ v.status='approved'; stampUpdate(v); } save(); render(); }
 function deleteVoucher(id) { if(!requireAdmin("delete disbursement vouchers")) return; if(confirm('Delete this voucher?')) { state.vouchers=state.vouchers.filter(v=>v.id!==id); save(); render(); } }
 
 function printVoucher(id) {
@@ -2732,7 +2730,7 @@ function saveVoucher() {
   if (!payee || !amount) { alert('Payee and amount are required.'); return; }
   const id = 'DV-' + String(state.vouchers.length + 1).padStart(3,'0');
   const status = approvedBy ? 'approved' : 'pending';
-  state.vouchers.push({ id, date, payee, purpose, amount, account, preparedBy, approvedBy, status, ...auditStamp() });
+  state.vouchers.push({ id, date, payee, purpose, amount, account, preparedBy, approvedBy, status });
   save(); closeModal(); render();
 }
 
@@ -2924,7 +2922,7 @@ function saveCollection() {
   if (!amount) { alert('Please enter the amount received.'); return; }
 
   const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
-  state.collections.push({ id, date, customer, invoice, amount, mode, reference, receivedBy, ...auditStamp() });
+  state.collections.push({ id, date, customer, invoice, amount, mode, reference, receivedBy });
 
   // Recompute all balances and invoice statuses from scratch
   recomputeBalances();
@@ -3148,7 +3146,7 @@ function saveConsignment() {
 
   if(!state.consignedItems) state.consignedItems=[];
   const id = 'CON-'+String(state.consignedItems.length+1).padStart(3,'0');
-  state.consignedItems.push({ id, dateOut, consignee, itemId, itemDesc, qty, unitPrice, dueDate, preparedBy, notes, status:'active', ...auditStamp() });
+  state.consignedItems.push({ id, dateOut, consignee, itemId, itemDesc, qty, unitPrice, dueDate, preparedBy, notes, status:'active' });
   save(); closeModal();
   // Switch to consigned tab
   render();
@@ -3471,7 +3469,7 @@ function saveTransfer() {
   });
   const id='TX-'+String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
   if(!state.inventoryTransfers) state.inventoryTransfers=[];
-  state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending',...auditStamp()});
+  state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending'});
   save(); closeModal(); render();
   setTimeout(()=>{ const tabs=document.querySelectorAll('#inv-tabs .tab'); if(tabs[3]){ tabs.forEach(t=>t.classList.remove('active')); tabs[3].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildInventoryTransfers(); } },100);
 }
@@ -5068,9 +5066,9 @@ function approveAllSOItems(soId) {
   render();
 }
 
-function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
-function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; } save(); render(); }
-function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='delivered'; so.deliveredDate=today(); } save(); render(); }
+function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(so); } save(); render(); }
+function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; stampUpdate(so); } save(); render(); }
+function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='delivered'; so.deliveredDate=today(); stampUpdate(so); } save(); render(); }
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
 
 function showAddSO() {
@@ -5168,7 +5166,7 @@ function saveSO() {
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id='SO-'+String((state.salesOrders||[]).length+1).padStart(3,'0');
   if(!state.salesOrders) state.salesOrders=[];
-  state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending',...auditStamp()});
+  state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending'});
   save(); closeModal(); render();
 }
 
@@ -5247,7 +5245,7 @@ function renderPurchaseOrders(c, ta) {
 </table>`;
 }
 
-function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
+function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(po); } save(); render(); }
 function receivePO(id) {
   // Warehouse and admin can mark received
   if(!currentUser || (currentUser.role!=='admin'&&currentUser.role!=='warehouse')) {
@@ -5310,7 +5308,7 @@ function savePO() {
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id='PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
   if(!state.purchaseOrders) state.purchaseOrders=[];
-  state.purchaseOrders.push({id,date,deliveryDate,supplier,lines,notes,preparedBy,status:'pending',...auditStamp()});
+  state.purchaseOrders.push({id,date,deliveryDate,supplier,lines,notes,preparedBy,status:'pending'});
   save(); closeModal(); render();
 }
 
@@ -5923,6 +5921,7 @@ function saveEditEmployee(id) { if(!requireAdmin("edit employee records")) retur
   e.pagibigNo = document.getElementById('ee-pig').value.trim();
   e.tinNo = document.getElementById('ee-tin').value.trim();
   e.status = document.getElementById('ee-status').value;
+  stampUpdate(e);
   save(); closeModal(); render();
 }
 
@@ -6131,6 +6130,7 @@ function renderPayroll(c, ta) {
       <td style="text-align:right;font-size:12px">${fmt(p.withholdingTax||0)}</td>
       <td style="text-align:right;font-weight:600;color:var(--green)">${fmt(p.netPay||0)}</td>
       <td><span class="badge ${p.status==='released'?'paid':'pending'}">${p.status}</span></td>
+      ${lastUpdatedCell(p)}
       <td><div class="action-btns">
         ${p.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="releasePayroll('${p.id}')">Release</button>`:''}
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printPayslip('${p.id}')"><i class="ti ti-printer"></i></button>
@@ -6151,7 +6151,7 @@ function renderPayroll(c, ta) {
 </table>`;
 }
 
-function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
+function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(p); } save(); render(); }
 function deletePayroll(id) { if(!requireAdmin("delete payroll records")) return; if(confirm('Delete payroll record?')) { state.payrolls=(state.payrolls||[]).filter(p=>p.id!==id); save(); render(); } }
 
 // Custom earnings/deductions line state
@@ -6309,8 +6309,7 @@ function savePayroll() {
   const allowLine= prEarnings.find(e=>e.label.toLowerCase().includes('allow'));
   const id = 'PR-'+String((state.payrolls||[]).length+1).padStart(3,'0');
   if(!state.payrolls) state.payrolls=[];
-  state.payrolls.push({ ...auditStamp(),
-    id, period, payDate:date, empId,
+  state.payrolls.push({ id, period, payDate:date, empId,
     basicPay:basicLine?basicLine.amount:gross,
     overtime:otLine?otLine.amount:0,
     allowance:allowLine?allowLine.amount:0,
@@ -6549,7 +6548,7 @@ function renderSalesReturns(c, ta) {
 function approveReturn(id) {
   if(!requireAdmin('approve sales returns')) return;
   const r=(state.salesReturns||[]).find(r=>r.id===id);
-  if(r){ r.status='approved'; r.approvedBy=currentUser?.name; r.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); }
+  if(r){ r.status='approved'; r.approvedBy=currentUser?.name; r.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(r); }
   recomputeBalances();
   save(); render();
 }
@@ -6660,7 +6659,7 @@ function saveReturn() {
   if(!lines.length){alert('Add at least one item to return.');return;}
   const id='SR-'+String((state.salesReturns||[]).length+1).padStart(3,'0');
   if(!state.salesReturns) state.salesReturns=[];
-  state.salesReturns.push({id,date,customer,invoiceRef,reason,lines,notes,status:'pending',restocked:false,...auditStamp()});
+  state.salesReturns.push({id,date,customer,invoiceRef,reason,lines,notes,status:'pending',restocked:false});
   save(); closeModal(); render();
 }
 
@@ -6787,11 +6786,16 @@ function showModal(html) {
     ids.forEach(id => { const el=document.getElementById(id); if(el&&el.tagName==='SELECT'&&!el.dataset.searchable) makeSearchable(id); });
   }, 80);
 }
-function auditStamp() {
-  return {
-    createdBy: currentUser ? currentUser.name : 'System',
-    createdAt: new Date().toISOString().slice(0,16).replace('T',' '),
-  };
+
+// ── LAST UPDATED STAMP ────────────────────────────────────────────────────────
+function stampUpdate(record) {
+  if(!record) return;
+  record.lastUpdatedBy  = currentUser ? currentUser.name : 'System';
+  record.lastUpdatedAt  = new Date().toISOString().slice(0,16).replace('T',' ');
+}
+function lastUpdatedCell(rec) {
+  if(!rec || !rec.lastUpdatedBy) return '<td style="font-size:11px;color:var(--text-tertiary)">—</td>';
+  return `<td style="font-size:11px;color:var(--text-secondary)">${rec.lastUpdatedBy}<div style="font-size:10px;color:var(--text-tertiary)">${rec.lastUpdatedAt||''}</div></td>`;
 }
 
 // ── BACKUP & RESTORE ──────────────────────────────────────────────────────────
