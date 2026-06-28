@@ -5334,7 +5334,7 @@ ${canReceive && po.status==='approved'?`<div style="padding:8px 12px;background:
   <button class="btn" onclick="closeModal();render();printPO('${po.id}')"><i class="ti ti-printer"></i>Print</button>
   ${po.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approvePO('${po.id}')">Approve PO</button>`:''}
   ${po.status==='approved'&&canReceive?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="receiveAllPOLines('${po.id}')"><i class="ti ti-package-import"></i>Receive All</button>`:''}
-</div`);
+</div>`);
 }
 
 function renderPOViewLines(po, canReceive) {
@@ -5384,18 +5384,19 @@ function renderPOViewLines(po, canReceive) {
 }
 
 function _refreshPOModal(po) {
-  // Refresh just the lines container inside the open modal — keeps modal open
   const container = document.getElementById('po-view-lines');
   const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
-  // Update the delivered count badge in modal header
-  const deliveredCount = po.lines.filter(l=>l.deliveryStatus==='delivered').length;
-  const countEl = document.querySelector('#po-view-lines')?.previousElementSibling?.querySelector('span[data-delivered-count]');
-  // Update the PO list in background without closing modal
-  const listRow = document.querySelector(`tr [onclick*="viewPO('${po.id}')"]`);
-  if(listRow) {
-    // Silently save — list will reflect changes when modal closes
+  if(container) {
+    container.innerHTML = renderPOViewLines(po, canReceive);
   }
+  // Update delivered count badge inside the modal
+  const countEls = document.querySelectorAll('#modal-inner .badge ~ span');
+  countEls.forEach(el => {
+    if(el.textContent.includes('lines delivered')) {
+      const dc = po.lines.filter(l=>l.deliveryStatus==='delivered').length;
+      el.textContent = `${dc}/${po.lines.length} lines delivered`;
+    }
+  });
   save();
 }
 
