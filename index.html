@@ -1334,7 +1334,7 @@ function saveJournal() {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
-    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc });
+    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc, ...auditStamp() });
   });
   save(); closeModal(); render();
 }
@@ -1359,7 +1359,7 @@ function renderInvoices(c, ta) {
   <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value neg">${fmt(outstanding)}</div></div>
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Created by</th><th>Actions</th></tr></thead>
   <tbody>
   ${state.invoices.map(inv => {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
@@ -1370,7 +1370,9 @@ function renderInvoices(c, ta) {
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
-      <td><span class="badge ${inv.status}">${inv.status}</span></td>
+      <td><span class="badge ${inv.status}">${inv.status}</span>
+        ${inv.updatedBy?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">Paid by: ${inv.updatedBy}</div>`:''}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${inv.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${inv.createdAt||''}</div></td>
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
@@ -1393,7 +1395,7 @@ function renderInvoices(c, ta) {
 function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   const inv = state.invoices.find(i => i.id === id);
   if(!inv) return;
-  inv.status = 'paid';
+  inv.status = 'paid'; inv.updatedBy=currentUser?.name; inv.updatedAt=new Date().toISOString().slice(0,16).replace('T',' ');
   recomputeBalances();
   save(); render();
 }
@@ -1616,7 +1618,7 @@ function saveInvoice() {
   const id = 'INV-' + String(state.invoices.length + 1).padStart(3, '0');
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
   const soRef = window._invLinkedSO || '';
-  state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef });
+  state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef, ...auditStamp() });
   // ── Deduct inventory for each linked item (stock out on sale) ──
   lines.forEach(l => {
     if(!l.itemId) return;
@@ -1844,8 +1846,8 @@ function renderPurchases(c, ta) {
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(p.amount||0)}</td>
       <td><span class="badge ${p.status}">${p.status}</span></td>
+      <td style="font-size:11px;color:var(--text-secondary)">${p.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${p.createdAt||''}</div></td>
       <td><div class="action-btns">
-        ${p.status==='pending'?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markPurPaid('${p.id}')">Mark paid</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePur('${p.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -1928,7 +1930,7 @@ function savePurchase() {
   else                           { vatBase=raw; vat=0; amount=raw; }
   const id = 'PUR-' + String((state.purchases||[]).length+1).padStart(3,'0');
   if(!state.purchases) state.purchases=[];
-  state.purchases.push({ id, date, vendor, category, vatBase, vat, amount, vatType, status:'pending', notes });
+  state.purchases.push({ id, date, vendor, category, vatBase, vat, amount, vatType, status:'pending', notes, ...auditStamp() });
   save(); closeModal(); render();
 }
 
@@ -1961,8 +1963,8 @@ function renderExpenses(c, ta) {
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(e.amount||0)}</td>
       <td><span class="badge ${e.status}">${e.status}</span></td>
+      <td style="font-size:11px;color:var(--text-secondary)">${e.createdBy||'—'}<div style="font-size:10px;color:var(--text-tertiary)">${e.createdAt||''}</div></td>
       <td><div class="action-btns">
-        ${e.status==='pending'?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markExpPaid('${e.id}')">Mark paid</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteExp('${e.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -2093,7 +2095,7 @@ function saveExpense() {
   else                           { vatBase=raw; vat=0; amount=raw; }
   const id='EXP-'+String((state.expenses||[]).length+10).padStart(3,'0');
   if(!state.expenses) state.expenses=[];
-  state.expenses.push({ id, date, vendor, category, expType, vatBase, vat, amount, vatType, status:'pending' });
+  state.expenses.push({ id, date, vendor, category, expType, vatBase, vat, amount, vatType, status:'pending', ...auditStamp() });
   save(); closeModal(); render();
 }
 
@@ -2716,7 +2718,7 @@ function saveVoucher() {
   if (!payee || !amount) { alert('Payee and amount are required.'); return; }
   const id = 'DV-' + String(state.vouchers.length + 1).padStart(3,'0');
   const status = approvedBy ? 'approved' : 'pending';
-  state.vouchers.push({ id, date, payee, purpose, amount, account, preparedBy, approvedBy, status });
+  state.vouchers.push({ id, date, payee, purpose, amount, account, preparedBy, approvedBy, status, ...auditStamp() });
   save(); closeModal(); render();
 }
 
@@ -2908,7 +2910,7 @@ function saveCollection() {
   if (!amount) { alert('Please enter the amount received.'); return; }
 
   const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
-  state.collections.push({ id, date, customer, invoice, amount, mode, reference, receivedBy });
+  state.collections.push({ id, date, customer, invoice, amount, mode, reference, receivedBy, ...auditStamp() });
 
   // Recompute all balances and invoice statuses from scratch
   recomputeBalances();
@@ -3132,7 +3134,7 @@ function saveConsignment() {
 
   if(!state.consignedItems) state.consignedItems=[];
   const id = 'CON-'+String(state.consignedItems.length+1).padStart(3,'0');
-  state.consignedItems.push({ id, dateOut, consignee, itemId, itemDesc, qty, unitPrice, dueDate, preparedBy, notes, status:'active' });
+  state.consignedItems.push({ id, dateOut, consignee, itemId, itemDesc, qty, unitPrice, dueDate, preparedBy, notes, status:'active', ...auditStamp() });
   save(); closeModal();
   // Switch to consigned tab
   render();
@@ -3455,7 +3457,7 @@ function saveTransfer() {
   });
   const id='TX-'+String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
   if(!state.inventoryTransfers) state.inventoryTransfers=[];
-  state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending'});
+  state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending',...auditStamp()});
   save(); closeModal(); render();
   setTimeout(()=>{ const tabs=document.querySelectorAll('#inv-tabs .tab'); if(tabs[3]){ tabs.forEach(t=>t.classList.remove('active')); tabs[3].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildInventoryTransfers(); } },100);
 }
@@ -5020,16 +5022,20 @@ function toggleSOLineApproval(soId, lineIdx, approved) {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
   so.lines[lineIdx].approved = approved;
+
+  // Revert SO status if no items are approved anymore
+  const anyApproved = so.lines.some(l=>l.approved);
+  if(!anyApproved && so.status === 'approved') {
+    so.status = 'pending';
+  }
+  // If at least one item is approved and SO is still pending, keep it pending
+  // (SO-level approval is a separate admin action via the Approve button)
+
   save();
-  // Refresh the lines section without closing modal
   const container = document.getElementById('so-view-lines');
   const canApproveItems = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
   if(container) container.innerHTML = renderSOViewLines(so, canApproveItems);
-  // Update approve-all button
-  const allApproved = so.lines.every(l=>l.approved);
-  const soTotal = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-  // Re-render the SO list row in background
-  render(); // re-renders list; modal stays open because render() doesn't close it
+  render();
 }
 
 function approveAllSOItems(soId) {
@@ -5048,7 +5054,7 @@ function approveAllSOItems(soId) {
   render();
 }
 
-function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so) so.status='approved'; save(); render(); }
+function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
 function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; } save(); render(); }
 function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='delivered'; so.deliveredDate=today(); } save(); render(); }
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
@@ -5148,7 +5154,7 @@ function saveSO() {
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id='SO-'+String((state.salesOrders||[]).length+1).padStart(3,'0');
   if(!state.salesOrders) state.salesOrders=[];
-  state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending'});
+  state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending',...auditStamp()});
   save(); closeModal(); render();
 }
 
@@ -5227,7 +5233,7 @@ function renderPurchaseOrders(c, ta) {
 </table>`;
 }
 
-function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po) po.status='approved'; save(); render(); }
+function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
 function receivePO(id) {
   // Warehouse and admin can mark received
   if(!currentUser || (currentUser.role!=='admin'&&currentUser.role!=='warehouse')) {
@@ -5290,7 +5296,7 @@ function savePO() {
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id='PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
   if(!state.purchaseOrders) state.purchaseOrders=[];
-  state.purchaseOrders.push({id,date,deliveryDate,supplier,lines,notes,preparedBy,status:'pending'});
+  state.purchaseOrders.push({id,date,deliveryDate,supplier,lines,notes,preparedBy,status:'pending',...auditStamp()});
   save(); closeModal(); render();
 }
 
@@ -6131,7 +6137,7 @@ function renderPayroll(c, ta) {
 </table>`;
 }
 
-function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p) p.status='released'; save(); render(); }
+function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); } save(); render(); }
 function deletePayroll(id) { if(!requireAdmin("delete payroll records")) return; if(confirm('Delete payroll record?')) { state.payrolls=(state.payrolls||[]).filter(p=>p.id!==id); save(); render(); } }
 
 // Custom earnings/deductions line state
@@ -6289,7 +6295,7 @@ function savePayroll() {
   const allowLine= prEarnings.find(e=>e.label.toLowerCase().includes('allow'));
   const id = 'PR-'+String((state.payrolls||[]).length+1).padStart(3,'0');
   if(!state.payrolls) state.payrolls=[];
-  state.payrolls.push({
+  state.payrolls.push({ ...auditStamp(),
     id, period, payDate:date, empId,
     basicPay:basicLine?basicLine.amount:gross,
     overtime:otLine?otLine.amount:0,
@@ -6529,7 +6535,7 @@ function renderSalesReturns(c, ta) {
 function approveReturn(id) {
   if(!requireAdmin('approve sales returns')) return;
   const r=(state.salesReturns||[]).find(r=>r.id===id);
-  if(r) r.status='approved';
+  if(r){ r.status='approved'; r.approvedBy=currentUser?.name; r.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); }
   recomputeBalances();
   save(); render();
 }
@@ -6640,7 +6646,7 @@ function saveReturn() {
   if(!lines.length){alert('Add at least one item to return.');return;}
   const id='SR-'+String((state.salesReturns||[]).length+1).padStart(3,'0');
   if(!state.salesReturns) state.salesReturns=[];
-  state.salesReturns.push({id,date,customer,invoiceRef,reason,lines,notes,status:'pending',restocked:false});
+  state.salesReturns.push({id,date,customer,invoiceRef,reason,lines,notes,status:'pending',restocked:false,...auditStamp()});
   save(); closeModal(); render();
 }
 
@@ -6680,6 +6686,15 @@ function printReturn(id) {
 <script>window.onload=()=>{window.print();}<\/script>
 </body></html>`);
   win.document.close();
+}
+
+
+// ── AUDIT STAMP HELPER ────────────────────────────────────────────────────────
+function auditStamp() {
+  return {
+    createdBy: currentUser ? currentUser.name : 'System',
+    createdAt: new Date().toISOString().slice(0,16).replace('T',' '),
+  };
 }
 
 // ── BACKUP & RESTORE ──────────────────────────────────────────────────────────
