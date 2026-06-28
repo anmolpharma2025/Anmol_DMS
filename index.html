@@ -127,6 +127,17 @@
   .je-lines td input[type=number] { text-align: right; }
   .je-lines tr:last-child td { background: var(--bg-primary); }
   .je-line-btn { background: none; border: none; cursor: pointer; color: var(--red); font-size: 15px; line-height: 1; padding: 2px 4px; }
+  /* Searchable select wrapper */
+  .ss-wrap { position:relative; width:100%; }
+  .ss-input { width:100%; padding:8px 10px; border:1px solid var(--border-mid); border-radius:var(--radius-md); background:var(--bg-primary); color:var(--text-primary); font-size:13px; font-family:var(--font); outline:none; box-sizing:border-box; }
+  .ss-input:focus { border-color:var(--accent); }
+  .ss-dropdown { position:absolute; top:100%; left:0; right:0; z-index:9999; background:var(--bg-card); border:1px solid var(--border-mid); border-top:none; border-radius:0 0 var(--radius-md) var(--radius-md); max-height:220px; overflow-y:auto; display:none; box-shadow:0 8px 24px rgba(0,0,0,0.3); }
+  .ss-dropdown.open { display:block; }
+  .ss-option { padding:8px 12px; font-size:13px; cursor:pointer; color:var(--text-primary); }
+  .ss-option:hover, .ss-option.highlighted { background:var(--bg-hover); }
+  .ss-option.selected { color:var(--accent); font-weight:500; }
+  .ss-empty { padding:10px 12px; font-size:12px; color:var(--text-tertiary); }
+
   @keyframes slideIn { from { transform: translateX(120%); opacity:0; } to { transform: translateX(0); opacity:1; } }
   @media print {
     body { background: #fff !important; font-size: 12px; color: #111 !important; }
@@ -1395,7 +1406,10 @@ function renderInvoices(c, ta) {
 function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   const inv = state.invoices.find(i => i.id === id);
   if(!inv) return;
-  inv.status = 'paid'; inv.updatedBy=currentUser?.name; inv.updatedAt=new Date().toISOString().slice(0,16).replace('T',' ');
+  inv.status = 'paid';
+  inv.manuallyPaid = true;
+  inv.updatedBy=currentUser?.name;
+  inv.updatedAt=new Date().toISOString().slice(0,16).replace('T',' ');
   recomputeBalances();
   save(); render();
 }
@@ -2892,8 +2906,8 @@ function recomputeBalances() {
       .reduce((s, r) => s + (r.amount || 0), 0);
     if (totalCollected >= inv.amount) {
       inv.status = 'paid';
-    } else if (inv.status === 'paid') {
-      // Was marked paid but collections no longer cover it — revert
+    } else if (inv.status === 'paid' && !inv.manuallyPaid) {
+      // Only revert if NOT manually marked paid by admin
       inv.status = 'pending';
     }
   });
@@ -6689,7 +6703,89 @@ function printReturn(id) {
 }
 
 
-// ── AUDIT STAMP HELPER ────────────────────────────────────────────────────────
+// ── SEARCHABLE SELECT ─────────────────────────────────────────────────────────
+function makeSearchable(selectId, placeholder) {
+  const sel = document.getElementById(selectId);
+  if(!sel || sel.dataset.searchable) return;
+  sel.dataset.searchable = '1';
+  sel.style.display = 'none';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ss-wrap';
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'ss-input';
+  input.placeholder = placeholder || 'Search or select…';
+  // Show current value
+  const selectedOpt = sel.options[sel.selectedIndex];
+  if(selectedOpt && selectedOpt.value) input.value = selectedOpt.text;
+  wrap.insertBefore(input, sel);
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'ss-dropdown';
+  wrap.appendChild(dropdown);
+
+  function buildOptions(filter) {
+    dropdown.innerHTML = '';
+    let count = 0;
+    Array.from(sel.options).forEach(opt => {
+      if(!opt.value) return; // skip blank option
+      if(filter && !opt.text.toLowerCase().includes(filter.toLowerCase())) return;
+      const div = document.createElement('div');
+      div.className = 'ss-option' + (opt.value === sel.value ? ' selected' : '');
+      div.textContent = opt.text;
+      div.dataset.value = opt.value;
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        sel.value = opt.value;
+        input.value = opt.text;
+        dropdown.classList.remove('open');
+        // Trigger change event so existing onchange handlers fire
+        sel.dispatchEvent(new Event('change', { bubbles:true }));
+      });
+      dropdown.appendChild(div);
+      count++;
+    });
+    if(count === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'ss-empty';
+      empty.textContent = 'No results found';
+      dropdown.appendChild(empty);
+    }
+  }
+
+  input.addEventListener('focus', () => { buildOptions(input.value); dropdown.classList.add('open'); });
+  input.addEventListener('input', () => { buildOptions(input.value); dropdown.classList.add('open'); });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      dropdown.classList.remove('open');
+      // If nothing selected or typed text doesn't match, restore selected
+      const currentOpt = Array.from(sel.options).find(o=>o.value===sel.value);
+      if(currentOpt) input.value = currentOpt.text;
+      else input.value = '';
+    }, 150);
+  });
+}
+
+// Auto-apply searchable to key dropdowns after modal renders
+const _origShowModal = showModal;
+function showModal(html) {
+  _origShowModal(html);
+  // Apply searchable selects to common modal dropdowns
+  setTimeout(() => {
+    const ids = [
+      'inv-cust','inv-so','col-cust','col-inv',
+      'so-cust','po-sup','dv-payee',
+      'pr-emp','att-emp','ret-cust','ret-inv',
+      'con-consignee','con-item',
+      'tx-from','tx-to','nu-role','eu-role',
+    ];
+    ids.forEach(id => { const el=document.getElementById(id); if(el&&el.tagName==='SELECT'&&!el.dataset.searchable) makeSearchable(id); });
+  }, 50);
+}
 function auditStamp() {
   return {
     createdBy: currentUser ? currentUser.name : 'System',
