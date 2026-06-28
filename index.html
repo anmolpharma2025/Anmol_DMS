@@ -5325,8 +5325,8 @@ ${canReceive && po.status==='approved'?`<div style="padding:8px 12px;background:
   ${po.status==='partial'?'<span style="color:var(--amber);font-weight:600"><i class="ti ti-clock"></i> Partial delivery in progress</span>':''}
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-  <button class="btn" onclick="closeModal()">Close</button>
-  <button class="btn" onclick="closeModal();printPO('${po.id}')"><i class="ti ti-printer"></i>Print</button>
+  <button class="btn" onclick="closeModal();render()">Close</button>
+  <button class="btn" onclick="closeModal();render();printPO('${po.id}')"><i class="ti ti-printer"></i>Print</button>
   ${po.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approvePO('${po.id}')">Approve PO</button>`:''}
   ${po.status==='approved'&&canReceive?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="receiveAllPOLines('${po.id}')"><i class="ti ti-package-import"></i>Receive All</button>`:''}
 </div`);
@@ -5378,12 +5378,27 @@ function renderPOViewLines(po, canReceive) {
   }).join('');
 }
 
+function _refreshPOModal(po) {
+  // Refresh just the lines container inside the open modal — keeps modal open
+  const container = document.getElementById('po-view-lines');
+  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
+  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
+  // Update the delivered count badge in modal header
+  const deliveredCount = po.lines.filter(l=>l.deliveryStatus==='delivered').length;
+  const countEl = document.querySelector('#po-view-lines')?.previousElementSibling?.querySelector('span[data-delivered-count]');
+  // Update the PO list in background without closing modal
+  const listRow = document.querySelector(`tr [onclick*="viewPO('${po.id}')"]`);
+  if(listRow) {
+    // Silently save — list will reflect changes when modal closes
+  }
+  save();
+}
+
 function undoPOLineDelivery(poId, lineIdx) {
   const po = (state.purchaseOrders||[]).find(p=>p.id===poId);
   if(!po||!po.lines[lineIdx]) return;
   const line = po.lines[lineIdx];
-  // Reverse inventory addition
-  if(line.itemId && line.deliveredQty > 0) {
+  if(line.itemId && (line.deliveredQty||0) > 0) {
     const it = (state.inventory||[]).find(i=>i.id===line.itemId);
     if(it) it.qty = Math.max(0, (it.qty||0) - (line.deliveredQty||0));
   }
@@ -5392,11 +5407,7 @@ function undoPOLineDelivery(poId, lineIdx) {
   const anyDelivered = po.lines.some(l=>l.deliveryStatus==='delivered'||l.deliveryStatus==='partial');
   po.status = anyDelivered ? 'partial' : 'approved';
   if(po.status!=='received') delete po.receivedDate;
-  save();
-  const container = document.getElementById('po-view-lines');
-  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
-  render();
+  _refreshPOModal(po);
 }
 
 function markPOLineDelivered(poId, lineIdx, fullDelivery) {
@@ -5420,11 +5431,7 @@ function markPOLineDelivered(poId, lineIdx, fullDelivery) {
   const anyDelivered = po.lines.some(l=>l.deliveryStatus==='delivered'||l.deliveryStatus==='partial');
   if(allDelivered) { po.status='received'; po.receivedDate=today(); }
   else if(anyDelivered) po.status='partial';
-  save();
-  const container = document.getElementById('po-view-lines');
-  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
-  render();
+  _refreshPOModal(po);
 }
 
 function markPOLineUndelivered(poId, lineIdx) {
@@ -5432,14 +5439,9 @@ function markPOLineUndelivered(poId, lineIdx) {
   if(!po||!po.lines[lineIdx]) return;
   po.lines[lineIdx].deliveryStatus = 'undelivered';
   po.lines[lineIdx].deliveredQty = 0;
-  const allUndelivered = po.lines.every(l=>l.deliveryStatus==='undelivered');
   const anyDelivered = po.lines.some(l=>l.deliveryStatus==='delivered'||l.deliveryStatus==='partial');
-  if(!anyDelivered) po.status = 'approved';
-  save();
-  const container = document.getElementById('po-view-lines');
-  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
-  render();
+  po.status = anyDelivered ? 'partial' : 'approved';
+  _refreshPOModal(po);
 }
 
 function markPOLinePartial(poId, lineIdx) {
@@ -5464,19 +5466,30 @@ function markPOLinePartial(poId, lineIdx) {
   line.deliveryStatus = 'partial';
   line.deliveredQty = receivedQty;
   po.status = 'partial';
-  save();
-  const container = document.getElementById('po-view-lines');
-  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderPOViewLines(po, canReceive);
-  render();
+  _refreshPOModal(po);
 }
 
 function receiveAllPOLines(poId) {
   const po = (state.purchaseOrders||[]).find(p=>p.id===poId);
   if(!po) return;
   po.lines.forEach((line,i) => {
-    if(line.deliveryStatus !== 'delivered') markPOLineDelivered(poId, i, true);
+    if(line.deliveryStatus !== 'delivered') {
+      line.deliveryStatus = 'delivered';
+      line.deliveredQty = line.qty;
+      if(line.itemId) {
+        const it = (state.inventory||[]).find(inv=>inv.id===line.itemId);
+        if(it) {
+          it.qty = (it.qty||0) + (line.qty||0);
+          const movId = 'MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+          if(!state.inventoryMovements) state.inventoryMovements=[];
+          state.inventoryMovements.push({ id:movId, date:today(), item:line.itemId, type:'in', qty:line.qty||0, ref:poId, note:`PO Receipt — ${poId} (Receive All)` });
+        }
+      }
+    }
   });
+  po.status = 'received';
+  po.receivedDate = today();
+  _refreshPOModal(po);
 }
 
 function printPO(id) {
