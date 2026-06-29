@@ -271,7 +271,8 @@
     <div class="nav-item active" data-page="dashboard"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></div>
 
     <div class="nav-section">Transactions</div>
-    <div class="nav-item" title="Journal" data-page="journal"><i class="ti ti-notebook"></i><span>Journal</span></div>
+    <div class="nav-item" title="General Journal" data-page="journal"><i class="ti ti-notebook"></i><span>General Journal</span></div>
+    <div class="nav-item" title="Disbursement Journal" data-page="disbursement"><i class="ti ti-cash-banknote"></i><span>Disbursement Journal</span></div>
     <div class="nav-item" title="Sales Orders" data-page="salesorders"><i class="ti ti-clipboard-list"></i><span>Sales Orders</span></div>
     <div class="nav-item" title="Invoices" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Invoices</span></div>
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
@@ -289,7 +290,6 @@
     <div class="nav-item" title="Payroll" data-page="payroll"><i class="ti ti-moneybag"></i><span>Payroll</span></div>
 
     <div class="nav-section">Management</div>
-    <div class="nav-item" title="Disbursements" data-page="vouchers"><i class="ti ti-file-check"></i><span>Disbursements</span></div>
     <div class="nav-item" title="Collections" data-page="collections"><i class="ti ti-cash"></i><span>Collections</span></div>
     <div class="nav-item" title="Inventory" data-page="inventory"><i class="ti ti-packages"></i><span>Inventory</span></div>
     <div class="nav-item" title="Customers" data-page="customers"><i class="ti ti-users"></i><span>Customers</span></div>
@@ -515,10 +515,17 @@ function fbListenMeta() {
     const meta = doc.data();
     // Skip if this update came from this device
     if(meta.deviceId === FB_DEVICE_ID) return;
-    // Apply to localStorage
-    if(meta.users)       try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
-    if(meta.customRoles) try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
-    if(meta.company)     try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+    // Only apply users if remote has same or more users than local (prevent stale overwrite)
+    if(meta.users && meta.users.length > 0) {
+      const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+      if(meta.users.length >= localUsers.length) {
+        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+      }
+    }
+    if(meta.customRoles && Object.keys(meta.customRoles).length > 0)
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
+    if(meta.company && Object.keys(meta.company).length > 0)
+      try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
     if(typeof render === 'function') render();
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
@@ -844,7 +851,8 @@ function doLogin() {
 // All pages available for permission assignment
 const ALL_PAGES = [
   { id:'dashboard',   label:'Dashboard',            section:'Overview' },
-  { id:'journal',     label:'Journal Entries',       section:'Transactions' },
+  { id:'journal',      label:'General Journal',        section:'Transactions' },
+  { id:'disbursement', label:'Disbursement Journal',   section:'Transactions' },
   { id:'salesorders', label:'Sales Orders',           section:'Transactions' },
   { id:'invoices',    label:'Invoices',              section:'Transactions' },
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
@@ -853,7 +861,6 @@ const ALL_PAGES = [
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
   { id:'coa',         label:'Chart of Accounts',     section:'Accounting' },
   { id:'reports',     label:'Reports',               section:'Accounting' },
-  { id:'vouchers',    label:'Disbursements',         section:'Management' },
   { id:'collections', label:'Collections',           section:'Management' },
   { id:'inventory',   label:'Inventory',             section:'Management' },
   { id:'customers',   label:'Customers',             section:'Management' },
@@ -1519,7 +1526,7 @@ function overlayClick(e) { if (e.target === document.getElementById('modal')) cl
 // showModal is defined later with searchable-select support
 
 function render() {
-  const titles = { dashboard:'Dashboard', journal:'Journal Entries', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', vouchers:'Disbursement Vouchers', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
+  const titles = { dashboard:'Dashboard', journal:'General Journal', disbursement:'Disbursement Journal', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
   document.getElementById('page-title').textContent = titles[state.page] || state.page;
   document.title = `${titles[state.page]} — ${getCompanyName()}`;
   const c = document.getElementById('content');
@@ -1529,7 +1536,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, coa: renderCOA, reports: renderReports, vouchers: renderVouchers, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -1733,60 +1740,99 @@ function renderDashboard(c, ta) {
 }
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
-function renderJournal(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddJournal()"><i class="ti ti-plus"></i>New Entry</button>`;
-  // Group lines by entry group id
+function buildJournalRows(entries, label) {
+  const cashKeywords = ['cash','bank','petty'];
+  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   const groups = {};
-  state.journal.forEach(j => {
-    const gid = j.group || j.id;
-    if (!groups[gid]) groups[gid] = { id: gid, date: j.date, ref: j.ref, desc: j.desc, lines: [] };
+  entries.forEach(j => {
+    const gid = j.group||j.id;
+    if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[], type:j.type };
     groups[gid].lines.push(j);
   });
+  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No ${label} entries yet.</div>`;
+
   const rows = Object.values(groups).map(g => {
-    const lineRows = g.lines.map((l, idx) => {
-      const da = state.accounts.find(a => a.id === l.debit);
-      const ca = state.accounts.find(a => a.id === l.credit);
-      const isFirst = idx === 0;
+    return g.lines.map((l,idx) => {
+      const da = state.accounts.find(a=>a.id===l.debit);
+      const ca = state.accounts.find(a=>a.id===l.credit);
+      const isFirst = idx===0;
       const borderStyle = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
-      const totalDebit = g.lines.reduce((s,ln)=>s+(ln.debit?ln.amount:0),0);
-      const meta = isFirst
-        ? `<td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}</td>
-           <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
-           <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.ref}</td>
-           <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.desc}</td>`
-        : '';
-      const actions = isFirst
-        ? `<td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
-             <div class="action-btns">
-               <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i>View</button>
-               <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
-             </div>
-           </td>`
-        : '';
-      if (l.debit) return `<tr style="${borderStyle}">
-        ${meta}
-        <td style="padding-left:12px;color:var(--text-secondary)">${da ? da.name : l.debit}</td>
+      const meta = isFirst ? `
+        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}</td>
+        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
+        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.ref}</td>
+        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.desc}</td>` : '';
+      const actions = isFirst ? `
+        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
+          <div class="action-btns">
+            <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i>View</button>
+            <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
+          </div>
+        </td>` : '';
+      if(l.debit) return `<tr style="${borderStyle}">${meta}
+        <td style="padding-left:12px;color:var(--text-secondary)">${da?da.name:l.debit}</td>
         <td></td>
         <td style="text-align:right">${fmt(l.amount)}</td>
         <td></td>
         ${actions}
       </tr>`;
-      return `<tr style="${borderStyle}">
-        ${meta}
+      return `<tr style="${borderStyle}">${meta}
         <td></td>
-        <td style="padding-left:24px;color:var(--text-secondary);font-style:italic">${ca ? ca.name : l.credit}</td>
+        <td style="padding-left:24px;color:var(--text-secondary);font-style:italic">${ca?ca.name:l.credit}</td>
         <td></td>
         <td style="text-align:right">${fmt(l.amount)}</td>
         ${actions}
       </tr>`;
     }).join('');
-    return lineRows;
   }).join('');
+
+  return `<table>
+    <thead><tr>
+      <th>Entry #</th><th>Date</th><th>Reference</th><th>Description</th>
+      <th>Debit Account</th><th>Credit Account</th>
+      <th style="text-align:right">Debit</th><th style="text-align:right">Credit</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function renderJournal(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddJournal()"><i class="ti ti-plus"></i>New Entry</button>`;
+  const cashKeywords = ['cash','bank','petty'];
+  function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  // General Journal = entries where NO credit line is a cash/bank account
+  const generalEntries = state.journal.filter(j => {
+    if(j.type==='disbursement') return false;
+    if(j.type==='general') return true;
+    // Legacy entries: classify by accounts
+    const gid=j.group||j.id;
+    const groupLines=state.journal.filter(x=>(x.group||x.id)===gid);
+    return !groupLines.some(l=>l.credit&&isCashAcc(l.credit));
+  });
+  c.innerHTML = buildJournalRows(generalEntries, 'General Journal');
+}
+
+function renderDisbursementJournal(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddJournal('disbursement')"><i class="ti ti-plus"></i>New Entry</button>`;
+  const cashKeywords = ['cash','bank','petty'];
+  function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  // Disbursement Journal = entries where at least one credit line is a cash/bank account
+  const disbEntries = state.journal.filter(j => {
+    if(j.type==='disbursement') return true;
+    if(j.type==='general') return false;
+    // Legacy entries: classify by accounts
+    const gid=j.group||j.id;
+    const groupLines=state.journal.filter(x=>(x.group||x.id)===gid);
+    return groupLines.some(l=>l.credit&&isCashAcc(l.credit));
+  });
+  const totalDisbursed = disbEntries.filter(j=>j.credit).reduce((s,j)=>s+(j.amount||0),0);
   c.innerHTML = `
-<table>
-  <thead><tr><th>Entry #</th><th>Date</th><th>Reference</th><th>Description</th><th>Debit Account</th><th>Credit Account</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th>Actions</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table>`;
+<div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash-banknote"></i>Total Entries</div><div class="kpi-value">${[...new Set(disbEntries.map(j=>j.group||j.id))].length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-trending-down"></i>Total Disbursed</div><div class="kpi-value neg">${fmt(totalDisbursed)}</div></div>
+</div>
+${buildJournalRows(disbEntries, 'Disbursement Journal')}`;
 }
 
 function viewJournal(groupId) {
@@ -1866,12 +1912,17 @@ function deleteJournalGroup(groupId) {
 
 let jeLines = [];
 
-function showAddJournal() {
+function showAddJournal(type) {
+  const isDisbursement = type === 'disbursement';
   jeLines = [{ debit:'', credit:'', amount:'' }];
   const opts = state.accounts.map(a => `<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
+  const hint = isDisbursement
+    ? `<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Use a <strong>Cash / Bank account</strong> on the <strong>credit side</strong> to record a cash outflow.</div>`
+    : '';
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
-<div class="modal-head"><h3>New Journal Entry</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="modal-head"><h3>${isDisbursement ? 'New Disbursement Entry' : 'New Journal Entry'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+${hint}
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${today()}"></div>
   <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. INV-005"></div>
@@ -1945,13 +1996,24 @@ function saveJournal() {
   jeLines.forEach(l => { const a=parseFloat(l.amount)||0; if(l.debit) totalD+=a; if(l.credit) totalC+=a; });
   if(jeLines.every(l=>!l.debit&&!l.credit)) { alert('Add at least one journal line.'); return; }
   if(Math.abs(totalD-totalC)>0.01) { alert(`Entry is not balanced.\nDebits: ${fmt(totalD)}\nCredits: ${fmt(totalC)}`); return; }
+  const cashKeywords = ['cash','bank','petty'];
+  function isCashAccount(accId) {
+    const acc = state.accounts.find(a=>a.id===accId);
+    return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
+  }
+
+  // Determine type: disbursement if any credit line is a cash/bank account
+  const hasCashCredit = jeLines.some(l=>l.credit && isCashAccount(l.credit));
+  const entryType = hasCashCredit ? 'disbursement' : 'general';
+
   const groupId = 'JE-' + String(state.journal.length + 1).padStart(3,'0');
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
-    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc });
+    state.journal.push({ id: i===0 ? groupId : groupId+'-'+(i+1), group: groupId, date, ref, debit: l.debit||null, credit: l.credit||null, amount: a, desc, type: entryType });
   });
+
   save(); closeModal(); render();
 }
 
@@ -3221,11 +3283,12 @@ function renderVouchers(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddVoucher()"><i class="ti ti-plus"></i>New Voucher</button>`;
   c.innerHTML = `
 <table>
-  <thead><tr><th>DV No.</th><th>Date</th><th>Payee</th><th>Purpose</th><th style="text-align:right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>DV No.</th><th>Date</th><th>Payee</th><th>Purpose</th><th>JE Ref</th><th style="text-align:right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${state.vouchers.map(v => `<tr>
     <td class="mono">${v.id}</td><td>${v.date}</td><td style="font-weight:500">${v.payee}</td>
     <td style="color:var(--text-secondary);font-size:12px">${v.purpose}</td>
+    <td class="mono" style="font-size:11px;color:var(--accent)">${v.jeRef||'—'}</td>
     <td style="text-align:right;font-weight:500">${fmt(v.amount)}</td>
     <td><span class="badge ${v.status==='approved'?'paid':'pending'}">${v.status}</span></td>
     <td><div class="action-btns">
@@ -3302,12 +3365,23 @@ function printVoucher(id) {
 }
 
 function showAddVoucher() {
-  const accOpts = state.accounts.filter(a=>a.type==='Expense').map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
+  const expOpts  = state.accounts.filter(a=>a.type==='Expense').map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
+  // Cash accounts: filter by name containing cash, bank, or petty
+  const cashKeywords = ['cash','bank','petty'];
+  const cashAccs = state.accounts.filter(a =>
+    cashKeywords.some(k => a.name.toLowerCase().includes(k))
+  );
+  const cashOpts = `<option value="">— No journal entry —</option>` +
+    cashAccs.map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
   showModal(`
 <div class="modal-head"><h3>New Disbursement Voucher</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="dv-date" value="${today()}"></div>
-  <div class="form-group"><label>Expense Account</label><select id="dv-account">${accOpts}</select></div>
+  <div class="form-group"><label>Expense Account (Debit)</label><select id="dv-account">${expOpts}</select></div>
+</div>
+<div class="form-group"><label>Cash / Bank Account (Credit)</label>
+  <select id="dv-cash-account">${cashOpts}</select>
+  <div style="font-size:11px;color:var(--accent);margin-top:3px"><i class="ti ti-link" style="font-size:11px"></i> Selecting a cash account will auto-create a journal entry: DR Expense / CR Cash</div>
 </div>
 <div class="form-group"><label>Payee</label><input type="text" id="dv-payee" placeholder="Name of payee / vendor"></div>
 <div class="form-group"><label>Purpose / Description</label><input type="text" id="dv-purpose" placeholder="Brief description of payment"></div>
@@ -3323,17 +3397,31 @@ function showAddVoucher() {
 }
 
 function saveVoucher() {
-  const date = document.getElementById('dv-date').value;
-  const payee = document.getElementById('dv-payee').value.trim();
-  const purpose = document.getElementById('dv-purpose').value.trim();
-  const amount = parseFloat(document.getElementById('dv-amount').value) || 0;
-  const account = document.getElementById('dv-account').value;
+  const date       = document.getElementById('dv-date').value;
+  const payee      = document.getElementById('dv-payee').value.trim();
+  const purpose    = document.getElementById('dv-purpose').value.trim();
+  const amount     = parseFloat(document.getElementById('dv-amount').value) || 0;
+  const account    = document.getElementById('dv-account').value;
+  const cashAccount= document.getElementById('dv-cash-account').value;
   const preparedBy = document.getElementById('dv-prepared').value.trim();
   const approvedBy = document.getElementById('dv-approved').value.trim();
   if (!payee || !amount) { alert('Payee and amount are required.'); return; }
   const id = 'DV-' + String(state.vouchers.length + 1).padStart(3,'0');
   const status = approvedBy ? 'approved' : 'pending';
-  state.vouchers.push({ id, date, payee, purpose, amount, account, preparedBy, approvedBy, status });
+  state.vouchers.push({ id, date, payee, purpose, amount, account, cashAccount, preparedBy, approvedBy, status });
+
+  // Auto-create journal entry: DR expense account / CR cash account
+  if(account && cashAccount) {
+    const groupId = 'JE-' + String(state.journal.length + 1).padStart(3,'0');
+    const expAcc  = state.accounts.find(a=>a.id===account);
+    const cashAcc = state.accounts.find(a=>a.id===cashAccount);
+    const desc    = `Disbursement — ${purpose||payee} (${id})`;
+    // Debit: expense/payable account
+    state.journal.push({ id:groupId, group:groupId, date, ref:id, debit:account, credit:null, amount, desc });
+    // Credit: cash/bank account
+    state.journal.push({ id:groupId+'-2', group:groupId, date, ref:id, debit:null, credit:cashAccount, amount, desc });
+  }
+
   save(); closeModal(); render();
 }
 
