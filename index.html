@@ -278,6 +278,10 @@
         <div id="top-actions" class="btn-row"></div>
         <div class="btn-row" style="border-left:1px solid var(--border-light);padding-left:8px;margin-left:2px">
           <button class="btn no-print" style="font-size:12px;padding:6px 10px" onclick="showSheetsSettings()" title="Google Sheets Sync"><i class="ti ti-table-share"></i></button>
+          <div id="fb-status" title="Firebase sync status" style="display:flex;align-items:center;gap:3px;padding:5px 10px;background:var(--bg-card);border-radius:20px;border:1px solid var(--border-light);cursor:default">
+            <i class="ti ti-cloud" style="font-size:13px;color:var(--text-tertiary)"></i>
+            <span style="font-size:11px;color:var(--text-tertiary)">Cloud</span>
+          </div>
           <button class="btn no-print" style="font-size:12px;padding:6px 12px" onclick="exportToExcel()" title="Export all data to Excel"><i class="ti ti-file-spreadsheet"></i>Export</button>
           <button class="btn no-print" id="import-btn" style="font-size:12px;padding:6px 12px;display:none" onclick="showImportExcel()" title="Import from Excel"><i class="ti ti-file-import"></i>Import</button>
           <button class="btn no-print" style="font-size:12px;padding:6px 12px;background:var(--green-bg);border-color:var(--green-border);color:var(--green)" onclick="saveBackup()" title="Save full backup as JSON file"><i class="ti ti-database-export"></i>Backup</button>
@@ -293,6 +297,121 @@
 <div class="overlay" id="modal" style="display:none" onclick="overlayClick(event)">
   <div class="modal" id="modal-inner"></div>
 </div>
+
+<!-- Firebase SDK (CDN compat mode — works in plain HTML, no build tools) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+// ── FIREBASE INIT ─────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCtApiphcSMdEo-hmIkefIeQGvmusG2B6M",
+  authDomain: "anmol-accounting.firebaseapp.com",
+  projectId: "anmol-accounting",
+  storageBucket: "anmol-accounting.firebasestorage.app",
+  messagingSenderId: "838744686940",
+  appId: "1:838744686940:web:28d9b95c27031abf794199"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const FB_DOC = 'companies/anmol';
+
+let _fbSyncTimer = null;
+let _fbUnsubscribe = null;
+let _fbEnabled = true;
+let _fbLastSaved = null;
+let _fbInitialized = false;
+
+// Debounced save — batches rapid changes into one Firestore write
+function fbSave(stateData) {
+  if(!_fbEnabled || !_fbInitialized) return;
+  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
+  _fbSyncTimer = setTimeout(async () => {
+    try {
+      fbSetStatus('saving');
+      const updatedBy = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'System';
+      await db.doc(FB_DOC).set({
+        data: JSON.stringify(stateData),
+        updatedAt: new Date().toISOString(),
+        updatedBy
+      });
+      _fbLastSaved = Date.now();
+      fbSetStatus('saved');
+    } catch(err) {
+      fbSetStatus('error', err.message);
+      console.error('Firebase save:', err);
+    }
+  }, 1500);
+}
+
+// Load data from Firestore on login
+async function fbLoad() {
+  if(!_fbEnabled) return null;
+  try {
+    fbSetStatus('loading');
+    const doc = await db.doc(FB_DOC).get();
+    if(doc.exists && doc.data().data) {
+      fbSetStatus('loaded');
+      return JSON.parse(doc.data().data);
+    }
+    fbSetStatus('idle');
+    return null;
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase load:', err);
+    return null;
+  }
+}
+
+// Real-time listener — syncs changes from other devices instantly
+function fbListen() {
+  if(!_fbEnabled) return;
+  if(_fbUnsubscribe) _fbUnsubscribe();
+  _fbUnsubscribe = db.doc(FB_DOC).onSnapshot(doc => {
+    if(!doc.exists || !doc.data().data) return;
+    const remoteBy = doc.data().updatedBy;
+    const myName = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : null;
+    // Skip my own recent saves
+    if(remoteBy === myName && _fbLastSaved && (Date.now() - _fbLastSaved) < 4000) return;
+    try {
+      const remote = JSON.parse(doc.data().data);
+      Object.assign(state, remote);
+      recomputeBalances();
+      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
+      if(typeof render === 'function') render();
+      fbSetStatus('synced');
+      showFbToast(`Synced — updated by ${remoteBy||'another device'}`);
+    } catch(e) { console.error('Firebase sync:', e); }
+  }, err => fbSetStatus('error', err.message));
+}
+
+function fbSetStatus(status, msg) {
+  const el = document.getElementById('fb-status');
+  if(!el) return;
+  const map = {
+    saving:  ['ti-cloud-upload',   'var(--amber)',         'Saving…'],
+    saved:   ['ti-cloud-check',    'var(--green)',         'Saved to cloud'],
+    loaded:  ['ti-cloud-check',    'var(--green)',         'Cloud loaded'],
+    loading: ['ti-cloud-download', 'var(--accent)',        'Loading…'],
+    synced:  ['ti-refresh',        'var(--green)',         'Synced'],
+    idle:    ['ti-cloud',          'var(--text-tertiary)', 'Cloud'],
+    error:   ['ti-cloud-off',      'var(--red)',           'Offline — using local'],
+  };
+  const [icon, color, text] = map[status] || map.idle;
+  el.innerHTML = `<i class="ti ${icon}" style="font-size:13px;color:${color}"></i><span style="font-size:11px;color:${color};margin-left:3px">${text}</span>`;
+  el.title = msg || text;
+}
+
+function showFbToast(msg) {
+  const old = document.getElementById('fb-toast');
+  if(old) old.remove();
+  const t = document.createElement('div');
+  t.id = 'fb-toast';
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--bg-card);border:1px solid var(--accent);color:var(--text-primary);padding:10px 20px;border-radius:8px;font-size:12px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);display:flex;align-items:center;gap:8px;white-space:nowrap;animation:slideIn 0.3s ease';
+  t.innerHTML = `<i class="ti ti-refresh" style="color:var(--accent);font-size:14px"></i>${msg}`;
+  document.body.appendChild(t);
+  setTimeout(() => { if(t.parentNode) t.remove(); }, 3500);
+}
+</script>
 
 <script>
 const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -426,6 +545,17 @@ function showAppScreen() {
   if(restoreBtn) restoreBtn.style.display = isAdmin() ? '' : 'none';
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
+  // Load from Firebase then start real-time listener
+  fbLoad().then(remoteState => {
+    if(remoteState) {
+      Object.assign(state, remoteState);
+      recomputeBalances();
+      try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+      render();
+    }
+    _fbInitialized = true;
+    fbListen();
+  });
   // Hide nav items user can't access
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     const page = el.dataset.page;
@@ -943,7 +1073,10 @@ let state = {
 };
 
 // Persist to localStorage
-function save() { try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {} }
+function save() {
+  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+  fbSave(state);  // also push to Firestore
+}
 function load() {
   try {
     const d = localStorage.getItem('anmolpharma');
