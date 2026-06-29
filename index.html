@@ -2809,28 +2809,37 @@ function saveExpense() {
 function renderCOA(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddAccount()"><i class="ti ti-plus"></i>Add Account</button>`;
   const types = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
-  c.innerHTML = types.map(type => {
+  const allRows = types.map(type => {
     const accs = state.accounts.filter(a => a.type === type);
-    const total = accs.reduce((s, a) => s + a.balance, 0);
-    return `<div style="margin-bottom:22px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-secondary)">${type}s</span>
-        <span style="font-size:12px;font-weight:500">${fmt(total)}</span>
-      </div>
-      <table>
-        <thead><tr><th>Code</th><th>Account Name</th><th>Type</th><th style="text-align:right">Balance</th><th></th></tr></thead>
-        <tbody>
-        ${accs.map(a => `<tr>
-          <td class="mono">${a.id}</td><td>${a.name}</td>
-          <td><span class="badge" style="background:var(--accent-bg);color:var(--accent)">${a.type}</span></td>
-          <td style="text-align:right;font-weight:500">${fmt(a.balance)}</td>
-          <td><button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAccount('${a.id}')"><i class="ti ti-trash"></i></button></td>
-        </tr>`).join('')}
-        <tr class="total-row"><td colspan="3" style="font-size:12px">Total ${type}s</td><td style="text-align:right">${fmt(total)}</td><td></td></tr>
-        </tbody>
-      </table>
-    </div>`;
+    const total = accs.reduce((s,a) => s + a.balance, 0);
+    const typeRow = `<tr>
+      <td colspan="5" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">
+        ${type}s
+        <span style="float:right;font-weight:500;font-size:12px;color:var(--text-primary)">${fmt(total)}</span>
+      </td>
+    </tr>`;
+    const accRows = accs.map(a => `<tr>
+      <td class="mono">${a.id}</td>
+      <td>${a.name}</td>
+      <td><span class="badge" style="background:var(--accent-bg);color:var(--accent)">${a.type}</span></td>
+      <td style="text-align:right;font-weight:500">${fmt(a.balance)}</td>
+      <td><button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAccount('${a.id}')"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('');
+    const totalRow = `<tr style="background:var(--bg-card)">
+      <td colspan="3" style="padding:6px 12px;font-size:12px;color:var(--text-secondary)">Total ${type}s</td>
+      <td style="text-align:right;padding:6px 12px;font-weight:600">${fmt(total)}</td>
+      <td></td>
+    </tr>`;
+    return typeRow + accRows + totalRow;
   }).join('');
+
+  c.innerHTML = `<table>
+    <thead><tr>
+      <th>Code</th><th>Account Name</th><th>Type</th>
+      <th style="text-align:right">Balance</th><th></th>
+    </tr></thead>
+    <tbody>${allRows}</tbody>
+  </table>`;
 }
 
 function deleteAccount(id) { if(!requireAdmin("delete accounts")) return; if(confirm('Remove this account?')) { state.accounts = state.accounts.filter(a => a.id !== id); save(); render(); } }
