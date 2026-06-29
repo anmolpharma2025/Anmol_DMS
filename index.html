@@ -436,19 +436,19 @@ function fbListen() {
     if(!doc.exists || !doc.data() || !doc.data().data) return;
 
     const remoteDeviceId = doc.data().deviceId;
-    const remoteTime     = doc.data().updatedAt || 0;
-
     // Skip ONLY if this update came from THIS exact device (same tab/session)
     if(remoteDeviceId === FB_DEVICE_ID) return;
 
     try {
       const remote = JSON.parse(doc.data().data);
-      const by     = doc.data().updatedBy || 'another device';
-      const currentPage = window.state.page;
+      const by = doc.data().updatedBy || 'another device';
+      const currentPage = state.page;  // use local state variable directly
 
-      // Replace all state keys with remote values
-      Object.keys(remote).forEach(key => { window.state[key] = remote[key]; });
-      window.state.page = currentPage;
+      // Replace all keys in the actual state object
+      Object.keys(remote).forEach(key => {
+        state[key] = remote[key];
+      });
+      state.page = currentPage;  // preserve current page
 
       if(typeof recomputeBalances === 'function') recomputeBalances();
       try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
@@ -603,9 +603,9 @@ async function fbForceRefresh() {
     const doc = await db.doc(FB_DOC).get({ source: 'server' });
     if(doc.exists && doc.data() && doc.data().data) {
       const remote = JSON.parse(doc.data().data);
-      const currentPage = window.state.page;
-      Object.keys(remote).forEach(key => { window.state[key] = remote[key]; });
-      window.state.page = currentPage;
+      const currentPage = state.page;
+      Object.keys(remote).forEach(key => { state[key] = remote[key]; });
+      state.page = currentPage;
       recomputeBalances();
       try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
       // Also refresh meta (users/roles)
@@ -800,7 +800,9 @@ function showAppScreen() {
   // Load latest data from Firebase then start real-time listener
   Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
     if(remoteState) {
-      Object.assign(state, remoteState);
+      const currentPage = state.page;
+      Object.keys(remoteState).forEach(key => { state[key] = remoteState[key]; });
+      state.page = currentPage;
       recomputeBalances();
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       render();
