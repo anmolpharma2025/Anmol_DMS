@@ -321,7 +321,7 @@
         <div id="top-actions" class="btn-row"></div>
         <div class="btn-row" style="border-left:1px solid var(--border-light);padding-left:8px;margin-left:2px">
           <button class="btn no-print" style="font-size:12px;padding:6px 10px" onclick="showSheetsSettings()" title="Google Sheets Sync"><i class="ti ti-table-share"></i></button>
-          <div id="fb-status" title="Firebase sync status" style="display:flex;align-items:center;gap:3px;padding:5px 10px;background:var(--bg-card);border-radius:20px;border:1px solid var(--border-light);cursor:default">
+          <div id="fb-status" title="Firebase sync status — click to force refresh" onclick="fbForceRefresh()" style="display:flex;align-items:center;gap:3px;padding:5px 10px;background:var(--bg-card);border-radius:20px;border:1px solid var(--border-light);cursor:pointer" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border-light)'">
             <i class="ti ti-cloud" style="font-size:13px;color:var(--text-tertiary)"></i>
             <span style="font-size:11px;color:var(--text-tertiary)">Cloud</span>
           </div>
@@ -427,11 +427,11 @@ function fbListenMeta() {
   }, e => console.error('fbListenMeta:', e));
 }
 
-// ── SAVE to Firestore (debounced 2s) ─────────────────────────────────────────
+// ── SAVE to Firestore (debounced 500ms) ─────────────────────────────────────
 function fbSave(stateData) {
   if(!db) return;
   if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
-  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 2000);
+  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 500);
 }
 
 async function _fbDoSave(stateData) {
@@ -460,6 +460,7 @@ async function fbLoad() {
     fbSetStatus('loading');
     const doc = await db.doc(FB_DOC).get();
     if(doc.exists && doc.data() && doc.data().data) {
+      _fbLastWriteTime = doc.data().updatedAt || 0;
       fbSetStatus('loaded');
       return JSON.parse(doc.data().data);
     }
@@ -482,20 +483,21 @@ function fbListen() {
     if(!doc.exists || !doc.data() || !doc.data().data) return;
 
     const remoteTime = doc.data().updatedAt || 0;
-    // Skip if this is our own recent write (within 5 seconds)
-    if(remoteTime <= _fbLastWriteTime + 100) return;
-    // Skip if update is very old (older than what we loaded on login)
-    if(remoteTime === 0) return;
+    // Skip our own writes — allow 3 second window to avoid echo
+    if(remoteTime > 0 && remoteTime <= _fbLastWriteTime + 3000) return;
 
     try {
       const remote = JSON.parse(doc.data().data);
       const by = doc.data().updatedBy || 'another device';
 
-      // Merge remote state
+      // Deep replace state arrays (don't shallow merge — that misses nested changes)
       if(typeof window.state !== 'undefined') {
-        Object.assign(window.state, remote);
+        const currentPage = window.state.page;
+        Object.keys(remote).forEach(key => {
+          window.state[key] = remote[key];
+        });
+        window.state.page = currentPage; // preserve navigation
         if(typeof recomputeBalances === 'function') recomputeBalances();
-        // Update localStorage cache
         try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
         if(typeof render === 'function') render();
       }
@@ -509,7 +511,6 @@ function fbListen() {
     _fbListening = false;
     fbSetStatus('error', err.message);
     console.error('Firebase listener error:', err);
-    // Retry listener after 5s
     setTimeout(fbListen, 5000);
   });
 }
@@ -541,6 +542,30 @@ function showFbToast(msg) {
   t.innerHTML = `<i class="ti ti-refresh" style="color:var(--accent);font-size:14px"></i>${msg}`;
   document.body.appendChild(t);
   setTimeout(() => { if(t.parentNode) t.remove(); }, 3500);
+}
+
+// Manual force-refresh from Firestore (click the cloud badge in topbar)
+async function fbForceRefresh() {
+  if(!db) return;
+  fbSetStatus('loading');
+  try {
+    const doc = await db.doc(FB_DOC).get();
+    if(doc.exists && doc.data() && doc.data().data) {
+      const remote = JSON.parse(doc.data().data);
+      const currentPage = window.state.page;
+      Object.keys(remote).forEach(key => { window.state[key] = remote[key]; });
+      window.state.page = currentPage;
+      recomputeBalances();
+      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
+      render();
+      fbSetStatus('synced');
+      showFbToast('Manually refreshed from cloud');
+    } else {
+      fbSetStatus('idle');
+    }
+  } catch(e) {
+    fbSetStatus('error', e.message);
+  }
 }
 </script>
 
