@@ -650,18 +650,48 @@ function clearSession() {
 
 let currentUser = getSession();
 function isAdmin() { return currentUser && currentUser.role === 'admin'; }
+// Action name → canDoAction key mapping for common actions
+const ACTION_MAP = {
+  'approve sales orders':        'approve_so',
+  'dispatch sales orders':       'dispatch_so',
+  'mark sales orders delivered': 'deliver_so',
+  'delete sales orders':         'delete_so',
+  'approve purchase orders':     'approve_po',
+  'mark invoices as paid':       'mark_invoice_paid',
+  'delete invoices':             'delete_invoice',
+  'update purchase status':      'mark_purchase_paid',
+  'update expense status':       'mark_expense_paid',
+  'approve vouchers':            'approve_voucher',
+  'approve sales returns':       'approve_return',
+  'delete sales returns':        'delete_return',
+  'release payroll':             'release_payroll',
+  'delete journal entries':      'delete_journal',
+  'delete customers':            'delete_customers',
+  'delete transfers':            'transfer_inventory',
+  'delete consignment records':  'transfer_inventory',
+  'delete branches':             'transfer_inventory',
+  'restore backup data':         'edit_company',
+  'manage user accounts':        'edit_user',
+  'delete users':                'delete_user',
+  'manage roles':                'manage_roles',
+  'delete purchase orders':      'delete_po',
+};
+
 function requireAdmin(action) {
-  if (!isAdmin()) {
-    showModal(`<div class="modal-head"><h3>Permission Denied</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+  if(currentUser && currentUser.role === 'admin') return true;
+  // Check action-level permission for non-admin users
+  const actionKey = ACTION_MAP[action];
+  if(actionKey && canDoAction(actionKey)) return true;
+  if(!actionKey && isAdmin()) return true;
+  // Show permission denied
+  showModal(`<div class="modal-head"><h3>Permission Denied</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="text-align:center;padding:24px 0">
   <i class="ti ti-lock" style="font-size:40px;color:var(--red);display:block;margin-bottom:12px"></i>
-  <div style="font-size:14px;font-weight:500;margin-bottom:8px">Admin access required</div>
-  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">Only Admin users can \${action}.</div>
+  <div style="font-size:14px;font-weight:500;margin-bottom:8px">Permission Required</div>
+  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">You don't have permission to ${action}.<br>Contact your administrator to grant access.</div>
   <button class="btn" onclick="closeModal()">Close</button>
 </div>`);
-    return false;
-  }
-  return true;
+  return false;
 }
 
 function canAccess(page) {
@@ -771,10 +801,66 @@ const ALL_PAGES = [
   { id:'payroll',     label:'Payroll',               section:'HR & Payroll' },
 ];
 
+// ── ACTION PERMISSIONS ────────────────────────────────────────────────────────
+// All possible actions grouped by module
+const ALL_ACTIONS = {
+  'Invoices':        ['create_invoice','edit_invoice','delete_invoice','mark_invoice_paid','view_invoice'],
+  'Sales Orders':    ['create_so','edit_so','delete_so','approve_so','dispatch_so','deliver_so','view_so'],
+  'Purchase Orders': ['create_po','edit_po','delete_po','approve_po','receive_po','view_po'],
+  'Purchases':       ['create_purchase','delete_purchase','mark_purchase_paid','view_purchase'],
+  'Expenses':        ['create_expense','delete_expense','mark_expense_paid','view_expense'],
+  'Collections':     ['create_collection','delete_collection','view_collection'],
+  'Sales Returns':   ['create_return','approve_return','restock_return','delete_return','view_return'],
+  'Disbursements':   ['create_voucher','approve_voucher','delete_voucher','view_voucher'],
+  'Inventory':       ['create_item','edit_item','delete_item','adjust_stock','transfer_inventory','view_inventory'],
+  'Employees':       ['create_employee','edit_employee','delete_employee','view_employee'],
+  'Payroll':         ['create_payroll','release_payroll','delete_payroll','view_payroll'],
+  'Attendance':      ['create_attendance','edit_attendance','delete_attendance','view_attendance'],
+  'Journal':         ['create_journal','delete_journal','view_journal'],
+  'Reports':         ['view_reports'],
+  'Users':           ['create_user','edit_user','delete_user','manage_roles','view_users'],
+  'Company':         ['edit_company','view_company'],
+};
+
+// Default actions per role (empty = all actions allowed)
+const ROLE_ACTION_DEFAULTS = {
+  admin:       {}, // all
+  accountant:  { allow: ['view_invoice','create_invoice','mark_invoice_paid','view_purchase','create_purchase','mark_purchase_paid','view_expense','create_expense','mark_expense_paid','view_collection','create_collection','view_journal','create_journal','view_reports','view_payroll','create_payroll'] },
+  sales:       { allow: ['view_invoice','create_invoice','view_so','create_so','view_collection','create_collection','view_return','create_return'] },
+  warehouse:   { allow: ['view_inventory','create_item','edit_item','adjust_stock','transfer_inventory','view_po','receive_po','restock_return'] },
+  hr:          { allow: ['view_employee','create_employee','edit_employee','view_attendance','create_attendance','edit_attendance','view_payroll','create_payroll'] },
+  viewer:      { allow: ['view_invoice','view_so','view_po','view_purchase','view_expense','view_collection','view_inventory','view_reports','view_employee','view_payroll','view_journal'] },
+};
+
+function canDoAction(action) {
+  if(!currentUser) return false;
+  if(currentUser.role === 'admin') return true;
+  const users = getUsers();
+  const u = users.find(u=>u.id===currentUser.id);
+  if(!u) return false;
+  // Per-user custom actions override role defaults
+  if(u.customActions && u.customActions.length > 0) {
+    return u.customActions.includes(action);
+  }
+  // Fall back to role defaults
+  const roleDef = ROLE_ACTION_DEFAULTS[currentUser.role];
+  if(!roleDef) return true; // unknown role = allow all
+  if(roleDef.allow) return roleDef.allow.includes(action);
+  return true;
+}
+
 function getUserEffectivePages(u) {
   if(u.role==='admin') return ALL_PAGES.map(p=>p.id);
   if(u.customPages && u.customPages.length>0) return u.customPages;
-  return ROLE_ACCESS[u.role] || [];
+  return getRolePages(u.role);
+}
+
+function getUserEffectiveActions(u) {
+  if(u.role==='admin') return Object.values(ALL_ACTIONS).flat();
+  if(u.customActions && u.customActions.length>0) return u.customActions;
+  const roleDef = ROLE_ACTION_DEFAULTS[u.role];
+  if(!roleDef) return Object.values(ALL_ACTIONS).flat();
+  return roleDef.allow || Object.values(ALL_ACTIONS).flat();
 }
 
 function buildPageCheckboxes(selectedPages, prefix) {
@@ -819,9 +905,10 @@ function renderUsers(c, ta) {
   <tbody>
   ${users.map(u => {
     const hasCustom = u.customPages && u.customPages.length > 0 && u.role !== 'admin';
+    const hasCustomActions = u.customActions && u.customActions.length > 0 && u.role !== 'admin';
     const effectivePages = getUserEffectivePages(u);
-    const accessLabel = u.role==='admin' ? 'All pages' : hasCustom ? 'Custom' : 'Role default';
-    const accessColor = u.role==='admin' ? 'var(--green)' : hasCustom ? 'var(--amber)' : 'var(--text-secondary)';
+    const accessLabel = u.role==='admin' ? 'All pages' : (hasCustom||hasCustomActions) ? 'Custom' : 'Role default';
+    const accessColor = u.role==='admin' ? 'var(--green)' : (hasCustom||hasCustomActions) ? 'var(--amber)' : 'var(--text-secondary)';
     const pageList = u.role==='admin' ? 'All pages' : effectivePages.join(', ');
     const masked = '•'.repeat(Math.min(u.password?.length||8, 12));
     return `<tr>
@@ -834,7 +921,11 @@ function renderUsers(c, ta) {
         <button onclick="togglePwVisible('${u.id}')" id="pw-btn-${u.id}" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:12px;margin-left:4px;padding:0 2px" title="Show/hide password"><i class="ti ti-eye" id="pw-icon-${u.id}"></i></button>
       </td>
       <td><span class="badge" style="background:${(roleColors[u.role]||'var(--text-secondary)')}22;color:${roleColors[u.role]||'var(--text-secondary)'}">${u.role}</span></td>
-      <td><span style="font-size:12px;font-weight:500;color:${accessColor}">${accessLabel}</span>${hasCustom?` <button class="btn" style="padding:1px 6px;font-size:10px;margin-left:4px" onclick="resetToRoleDefault('${u.id}')">Reset</button>`:''}</td>
+      <td>
+        <span style="font-size:12px;font-weight:500;color:${accessColor}">${accessLabel}</span>
+        ${hasCustomActions?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${u.customActions.length} actions</div>`:''}
+        ${(hasCustom||hasCustomActions)?` <button class="btn" style="padding:1px 6px;font-size:10px;margin-left:4px" onclick="resetToRoleDefault('${u.id}')">Reset</button>`:''}
+      </td>
       <td style="font-size:11px;color:var(--text-secondary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${pageList}">${pageList}</td>
       <td><span class="badge ${u.active?'paid':'overdue'}">${u.active?'Active':'Inactive'}</span></td>
       <td><div class="action-btns">
@@ -878,69 +969,133 @@ function togglePwVisible(id) {
 }
 
 function resetToRoleDefault(id) {
-  if(!confirm('Reset this user to role default permissions?')) return;
+  if(!confirm('Reset this user to role default permissions? This clears both page and action customizations.')) return;
   const users = getUsers();
   const u = users.find(u=>u.id===id);
-  if(u) { delete u.customPages; saveUsers(users); render(); }
+  if(u) { delete u.customPages; delete u.customActions; saveUsers(users); closeModal(); render(); }
 }
 
 function showCustomizeAccess(id) {
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
-  const effectivePages = getUserEffectivePages(u);
+  const effectivePages   = getUserEffectivePages(u);
+  const effectiveActions = getUserEffectiveActions(u);
   const roleColors = { admin:'var(--accent)', accountant:'var(--green)', sales:'var(--amber)', hr:'#34c98a', warehouse:'#a78bfa', viewer:'var(--text-secondary)' };
-  const roleColor = roleColors[u.role] || 'var(--text-secondary)';
+  const roleColor = roleColors[u.role] || 'var(--accent)';
+
+  // Build action checkboxes grouped by module
+  const actionHtml = Object.entries(ALL_ACTIONS).map(([module, actions]) => `
+    <div style="margin-bottom:12px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center">
+        <span>${module}</span>
+        <div style="display:flex;gap:6px">
+          <span onclick="setModuleActions('${module}',true)" style="font-size:10px;color:var(--accent);cursor:pointer;text-transform:none;letter-spacing:0">All</span>
+          <span onclick="setModuleActions('${module}',false)" style="font-size:10px;color:var(--text-tertiary);cursor:pointer;text-transform:none;letter-spacing:0">None</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+        ${actions.map(a => {
+          const label = a.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+          const checked = effectiveActions.includes(a);
+          return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;padding:4px 7px;border-radius:var(--radius-md);background:var(--bg-primary);border:1px solid var(--border-light)" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='var(--bg-primary)'">
+            <input type="checkbox" class="cu-action" data-module="${module}" data-action="${a}" ${checked?'checked':''} style="width:13px;height:13px;accent-color:var(--accent);flex-shrink:0">
+            <span style="color:var(--text-secondary)">${label}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
 
   showModal(`
 <div class="modal-head">
   <div>
-    <h3>Customize Access — ${u.name}</h3>
-    <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">Role: <span style="color:${roleColor};font-weight:600">${u.role}</span> &nbsp;·&nbsp; Check pages this user can access</div>
+    <h3><i class="ti ti-key" style="margin-right:6px"></i>Customize Access — ${u.name}</h3>
+    <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">
+      Role: <span style="color:${roleColor};font-weight:600">${u.role}</span>
+      &nbsp;·&nbsp; Customize what pages and actions this user can access
+    </div>
   </div>
   <button class="close-btn" onclick="closeModal()">×</button>
 </div>
-<div style="padding:10px 12px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:16px;font-size:12px;color:var(--amber)">
-  <i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px;margin-right:5px"></i>
-  Custom access overrides the role's default pages. Dashboard is recommended for all users.
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-height:70vh;overflow:hidden">
+
+  <!-- LEFT: Page access -->
+  <div style="display:flex;flex-direction:column;overflow:hidden">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-primary);margin-bottom:8px;padding-bottom:6px;border-bottom:1.5px solid var(--border-mid);display:flex;justify-content:space-between;align-items:center">
+      <span><i class="ti ti-layout-sidebar" style="margin-right:5px"></i>Page Access</span>
+      <div style="display:flex;gap:8px">
+        <span onclick="setAllPagesAccess('cu',true)" style="font-size:11px;color:var(--accent);cursor:pointer;font-weight:400;text-transform:none">All</span>
+        <span onclick="setAllPagesAccess('cu',false)" style="font-size:11px;color:var(--text-tertiary);cursor:pointer;font-weight:400;text-transform:none">None</span>
+        <span onclick="setRoleDefaultAccess('cu','${u.role}')" style="font-size:11px;color:var(--amber);cursor:pointer;font-weight:400;text-transform:none">Role default</span>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding-right:4px">
+      ${buildPageCheckboxes(effectivePages, 'cu')}
+    </div>
+  </div>
+
+  <!-- RIGHT: Action permissions -->
+  <div style="display:flex;flex-direction:column;overflow:hidden">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-primary);margin-bottom:8px;padding-bottom:6px;border-bottom:1.5px solid var(--border-mid);display:flex;justify-content:space-between;align-items:center">
+      <span><i class="ti ti-shield-check" style="margin-right:5px"></i>Action Permissions</span>
+      <div style="display:flex;gap:8px">
+        <span onclick="setAllActions(true)" style="font-size:11px;color:var(--accent);cursor:pointer;font-weight:400;text-transform:none">All</span>
+        <span onclick="setAllActions(false)" style="font-size:11px;color:var(--text-tertiary);cursor:pointer;font-weight:400;text-transform:none">None</span>
+        <span onclick="setRoleDefaultActions('${u.role}')" style="font-size:11px;color:var(--amber);cursor:pointer;font-weight:400;text-transform:none">Role default</span>
+      </div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding-right:4px">
+      ${actionHtml}
+    </div>
+  </div>
+
 </div>
-<div style="margin-bottom:12px;display:flex;gap:8px">
-  <button class="btn" style="font-size:12px;padding:5px 12px" onclick="setAllPagesAccess('cu', true)"><i class="ti ti-check-all"></i>Check all</button>
-  <button class="btn" style="font-size:12px;padding:5px 12px" onclick="setAllPagesAccess('cu', false)"><i class="ti ti-square"></i>Uncheck all</button>
-  <button class="btn" style="font-size:12px;padding:5px 12px" onclick="setRoleDefaultAccess('cu','${u.role}')"><i class="ti ti-refresh"></i>Reset to role default</button>
-</div>
-<div style="max-height:380px;overflow-y:auto;padding-right:4px">
-  ${buildPageCheckboxes(effectivePages, 'cu')}
-</div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-light)">
-  <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" onclick="saveCustomAccess('${id}')"><i class="ti ti-check"></i>Save Access</button>
+
+<div style="display:flex;gap:8px;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-light)">
+  <button class="btn" onclick="resetToRoleDefault('${id}')"><i class="ti ti-refresh"></i>Reset all to role default</button>
+  <div style="display:flex;gap:8px">
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn primary" onclick="saveCustomAccess('${id}')"><i class="ti ti-check"></i>Save Permissions</button>
+  </div>
 </div>`);
 }
 
-function setAllPagesAccess(prefix, checked) {
-  ALL_PAGES.forEach(p => {
-    const el = document.getElementById(`${prefix}-${p.id}`);
-    if(el) el.checked = checked;
-  });
+function setAllActions(checked) {
+  document.querySelectorAll('.cu-action').forEach(el => el.checked = checked);
 }
 
-function setRoleDefaultAccess(prefix, role) {
-  const defaults = getRolePages(role);
-  ALL_PAGES.forEach(p => {
-    const el = document.getElementById(`${prefix}-${p.id}`);
-    if(el) el.checked = defaults.length === 0 || defaults.includes(p.id);
+function setModuleActions(module, checked) {
+  document.querySelectorAll(`.cu-action[data-module="${module}"]`).forEach(el => el.checked = checked);
+}
+
+function setRoleDefaultActions(role) {
+  const roleDef = ROLE_ACTION_DEFAULTS[role];
+  const allActions = Object.values(ALL_ACTIONS).flat();
+  document.querySelectorAll('.cu-action').forEach(el => {
+    const action = el.dataset.action;
+    if(!roleDef || !roleDef.allow) {
+      el.checked = true; // role allows all
+    } else {
+      el.checked = roleDef.allow.includes(action);
+    }
   });
 }
 
 function saveCustomAccess(id) {
   const pages = getCheckedPages('cu');
   if(pages.length === 0) { alert('Select at least one page.'); return; }
+  // Collect checked actions
+  const actions = [];
+  document.querySelectorAll('.cu-action:checked').forEach(el => actions.push(el.dataset.action));
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
-  u.customPages = pages;
-  saveUsers(users); closeModal(); render();
+  u.customPages   = pages;
+  u.customActions = actions;
+  saveUsers(users);
+  closeModal();
+  render();
 }
 
 function toggleUser(id) { if(!requireAdmin("manage user accounts")) return;
