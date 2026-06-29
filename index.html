@@ -1770,7 +1770,7 @@ function renderDashboard(c, ta) {
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
 function buildJournalRows(entries, label) {
-  const cashKeywords = ['cash','bank','petty'];
+  const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   const groups = {};
   entries.forEach(j => {
@@ -1828,7 +1828,7 @@ function buildJournalRows(entries, label) {
 
 function renderJournal(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddJournal()"><i class="ti ti-plus"></i>New Entry</button>`;
-  const cashKeywords = ['cash','bank','petty'];
+  const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   // General Journal = entries where NO credit line is a cash/bank account
   const generalEntries = state.journal.filter(j => {
@@ -1844,7 +1844,7 @@ function renderJournal(c, ta) {
 
 function renderDisbursementJournal(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddJournal('disbursement')"><i class="ti ti-plus"></i>New Entry</button>`;
-  const cashKeywords = ['cash','bank','petty'];
+  const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   // Disbursement Journal = entries where at least one credit line is a cash/bank account
   const disbEntries = state.journal.filter(j => {
@@ -1945,25 +1945,45 @@ function showAddJournal(type) {
   const isDisbursement = type === 'disbursement';
   jeLines = [{ debit:'', credit:'', amount:'' }];
   const opts = state.accounts.map(a => `<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
-  const hint = isDisbursement
-    ? `<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Use a <strong>Cash / Bank account</strong> on the <strong>credit side</strong> to record a cash outflow.</div>`
-    : '';
+
+  // Fund accounts: cash, bank, petty, drawing
+  const fundKeywords = ['cash','bank','petty','drawing'];
+  const fundAccs = state.accounts.filter(a =>
+    fundKeywords.some(k => a.name.toLowerCase().includes(k))
+  );
+  const fundOpts = `<option value="">— Select source fund —</option>` +
+    fundAccs.map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
+
+  const disbFields = isDisbursement ? `
+<div class="form-group">
+  <label>Drawn from (Credit Account)</label>
+  <select id="je-drawn-from" onchange="applyDrawnFrom()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    ${fundOpts}
+  </select>
+  <div style="font-size:11px;color:var(--accent);margin-top:4px"><i class="ti ti-info-circle" style="margin-right:4px"></i>This account will be auto-filled as the <strong>credit</strong> on all lines below.</div>
+</div>` : '';
+
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>${isDisbursement ? 'New Disbursement Entry' : 'New Journal Entry'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-${hint}
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${today()}"></div>
-  <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. INV-005"></div>
+  <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. DV-001"></div>
 </div>
 <div class="form-group"><label>Description / Memo</label><input type="text" id="je-desc" placeholder="Transaction description"></div>
+${disbFields}
 <div style="margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-    <span style="font-size:12px;color:var(--text-secondary)">Journal lines</span>
+    <span style="font-size:12px;color:var(--text-secondary)">${isDisbursement ? 'Expense / Debit lines' : 'Journal lines'}</span>
     <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addJeLine()"><i class="ti ti-plus"></i>Add line</button>
   </div>
   <table class="je-lines">
-    <thead><tr><th style="width:38%">Debit Account</th><th style="width:38%">Credit Account</th><th style="width:20%">Amount (₱)</th><th style="width:4%"></th></tr></thead>
+    <thead><tr>
+      <th style="width:38%">Debit Account</th>
+      <th style="width:38%">${isDisbursement ? 'Credit (auto from Drawn from)' : 'Credit Account'}</th>
+      <th style="width:20%">Amount (₱)</th>
+      <th style="width:4%"></th>
+    </tr></thead>
     <tbody id="je-lines-body"></tbody>
   </table>
   <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-secondary)">
@@ -1976,7 +1996,21 @@ ${hint}
   <button class="btn primary" onclick="saveJournal()">Post Entry</button>
 </div>`;
   window._jeOpts = opts;
+  window._jeIsDisbursement = isDisbursement;
   renderJeLines();
+}
+
+// When "Drawn from" changes, auto-fill credit side on all lines
+function applyDrawnFrom() {
+  const sel = document.getElementById('je-drawn-from');
+  if(!sel || !sel.value) return;
+  jeLines.forEach(l => { l.credit = sel.value; });
+  renderJeLines();
+  // Re-select the drawn-from value (renderJeLines rebuilds tbody, not this select)
+  setTimeout(() => {
+    const s = document.getElementById('je-drawn-from');
+    if(s) s.value = sel.value;
+  }, 10);
 }
 
 function renderJeLines() {
@@ -2025,7 +2059,7 @@ function saveJournal() {
   jeLines.forEach(l => { const a=parseFloat(l.amount)||0; if(l.debit) totalD+=a; if(l.credit) totalC+=a; });
   if(jeLines.every(l=>!l.debit&&!l.credit)) { alert('Add at least one journal line.'); return; }
   if(Math.abs(totalD-totalC)>0.01) { alert(`Entry is not balanced.\nDebits: ${fmt(totalD)}\nCredits: ${fmt(totalC)}`); return; }
-  const cashKeywords = ['cash','bank','petty'];
+  const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAccount(accId) {
     const acc = state.accounts.find(a=>a.id===accId);
     return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
@@ -3405,7 +3439,7 @@ function printVoucher(id) {
 function showAddVoucher() {
   const expOpts  = state.accounts.filter(a=>a.type==='Expense').map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
   // Cash accounts: filter by name containing cash, bank, or petty
-  const cashKeywords = ['cash','bank','petty'];
+  const cashKeywords = ['cash','bank','petty','drawing'];
   const cashAccs = state.accounts.filter(a =>
     cashKeywords.some(k => a.name.toLowerCase().includes(k))
   );
