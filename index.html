@@ -364,8 +364,9 @@ let _fbListening = false;
 try {
   firebase.initializeApp(firebaseConfig);
   db = firebase.firestore();
-  // Enable offline persistence so the app works without internet
-  db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+  // Note: enablePersistence removed — it causes "failed-precondition" errors
+  // when multiple tabs/devices share the same origin, breaking the connection.
+  // localStorage already serves as our offline cache.
 } catch(e) {
   console.warn('Firebase init failed:', e);
 }
@@ -509,9 +510,11 @@ function fbListen() {
     }
   }, err => {
     _fbListening = false;
-    fbSetStatus('error', err.message);
     console.error('Firebase listener error:', err);
-    setTimeout(fbListen, 5000);
+    // Show idle (not error) so clicking cloud badge still works
+    fbSetStatus('idle', 'Reconnecting…');
+    // Always retry — connection may have dropped temporarily
+    setTimeout(() => { _fbListening = false; fbListen(); }, 5000);
   });
 }
 
@@ -546,10 +549,11 @@ function showFbToast(msg) {
 
 // Manual force-refresh from Firestore (click the cloud badge in topbar)
 async function fbForceRefresh() {
-  if(!db) return;
+  if(!db) { fbSetStatus('error', 'Firebase not connected'); return; }
   fbSetStatus('loading');
   try {
-    const doc = await db.doc(FB_DOC).get();
+    // Force fetch from server, bypassing any cache
+    const doc = await db.doc(FB_DOC).get({ source: 'server' });
     if(doc.exists && doc.data() && doc.data().data) {
       const remote = JSON.parse(doc.data().data);
       const currentPage = window.state.page;
@@ -557,14 +561,23 @@ async function fbForceRefresh() {
       window.state.page = currentPage;
       recomputeBalances();
       try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
+      // Also refresh meta (users/roles)
+      await fbLoadMeta();
       render();
       fbSetStatus('synced');
-      showFbToast('Manually refreshed from cloud');
+      showFbToast('Refreshed from cloud ✓');
     } else {
       fbSetStatus('idle');
+      showFbToast('No cloud data found — using local data');
     }
   } catch(e) {
-    fbSetStatus('error', e.message);
+    console.error('Force refresh error:', e);
+    // Don't stay on error — fall back to local data gracefully
+    fbSetStatus('idle');
+    showFbToast('Could not reach cloud — showing local data');
+    // Re-establish listener in case it dropped
+    _fbListening = false;
+    fbListen();
   }
 }
 </script>
