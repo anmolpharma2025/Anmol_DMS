@@ -371,45 +371,57 @@ const firebaseConfig = {
   messagingSenderId: "838744686940",
   appId: "1:838744686940:web:28d9b95c27031abf794199"
 };
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const FB_DOC = 'companies/anmol';
 
-let _fbSyncTimer = null;
+let db = null;
 let _fbUnsubscribe = null;
-let _fbEnabled = true;
-let _fbLastSaved = null;
-let _fbInitialized = false;
+let _fbSyncTimer = null;
+let _fbLastWriteTime = 0;   // timestamp of our last successful write
+let _fbListening = false;
 
-// Debounced save — batches rapid changes into one Firestore write
-function fbSave(stateData) {
-  if(!_fbEnabled || !_fbInitialized) return;
-  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
-  _fbSyncTimer = setTimeout(async () => {
-    try {
-      fbSetStatus('saving');
-      const updatedBy = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : 'System';
-      await db.doc(FB_DOC).set({
-        data: JSON.stringify(stateData),
-        updatedAt: new Date().toISOString(),
-        updatedBy
-      });
-      _fbLastSaved = Date.now();
-      fbSetStatus('saved');
-    } catch(err) {
-      fbSetStatus('error', err.message);
-      console.error('Firebase save:', err);
-    }
-  }, 1500);
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  // Enable offline persistence so the app works without internet
+  db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+} catch(e) {
+  console.warn('Firebase init failed:', e);
 }
 
-// Load data from Firestore on login
+const FB_DOC = 'companies/anmol';
+
+// ── SAVE to Firestore (debounced 2s) ─────────────────────────────────────────
+function fbSave(stateData) {
+  if(!db) return;
+  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
+  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 2000);
+}
+
+async function _fbDoSave(stateData) {
+  if(!db) return;
+  try {
+    fbSetStatus('saving');
+    const by = (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System';
+    const writeTime = Date.now();
+    await db.doc(FB_DOC).set({
+      data: JSON.stringify(stateData),
+      updatedAt: writeTime,
+      updatedBy: by
+    });
+    _fbLastWriteTime = writeTime;
+    fbSetStatus('saved');
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase save error:', err);
+  }
+}
+
+// ── LOAD from Firestore once on login ────────────────────────────────────────
 async function fbLoad() {
-  if(!_fbEnabled) return null;
+  if(!db) return null;
   try {
     fbSetStatus('loading');
     const doc = await db.doc(FB_DOC).get();
-    if(doc.exists && doc.data().data) {
+    if(doc.exists && doc.data() && doc.data().data) {
       fbSetStatus('loaded');
       return JSON.parse(doc.data().data);
     }
@@ -417,44 +429,65 @@ async function fbLoad() {
     return null;
   } catch(err) {
     fbSetStatus('error', err.message);
-    console.error('Firebase load:', err);
+    console.error('Firebase load error:', err);
     return null;
   }
 }
 
-// Real-time listener — syncs changes from other devices instantly
+// ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
 function fbListen() {
-  if(!_fbEnabled) return;
+  if(!db || _fbListening) return;
+  _fbListening = true;
   if(_fbUnsubscribe) _fbUnsubscribe();
+
   _fbUnsubscribe = db.doc(FB_DOC).onSnapshot(doc => {
-    if(!doc.exists || !doc.data().data) return;
-    const remoteBy = doc.data().updatedBy;
-    const myName = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.name : null;
-    // Skip my own recent saves
-    if(remoteBy === myName && _fbLastSaved && (Date.now() - _fbLastSaved) < 4000) return;
+    if(!doc.exists || !doc.data() || !doc.data().data) return;
+
+    const remoteTime = doc.data().updatedAt || 0;
+    // Skip if this is our own recent write (within 5 seconds)
+    if(remoteTime <= _fbLastWriteTime + 100) return;
+    // Skip if update is very old (older than what we loaded on login)
+    if(remoteTime === 0) return;
+
     try {
       const remote = JSON.parse(doc.data().data);
-      Object.assign(state, remote);
-      recomputeBalances();
-      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
-      if(typeof render === 'function') render();
+      const by = doc.data().updatedBy || 'another device';
+
+      // Merge remote state
+      if(typeof window.state !== 'undefined') {
+        Object.assign(window.state, remote);
+        if(typeof recomputeBalances === 'function') recomputeBalances();
+        // Update localStorage cache
+        try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
+        if(typeof render === 'function') render();
+      }
+
       fbSetStatus('synced');
-      showFbToast(`Synced — updated by ${remoteBy||'another device'}`);
-    } catch(e) { console.error('Firebase sync:', e); }
-  }, err => fbSetStatus('error', err.message));
+      showFbToast(`Synced — updated by ${by}`);
+    } catch(e) {
+      console.error('Firebase real-time sync error:', e);
+    }
+  }, err => {
+    _fbListening = false;
+    fbSetStatus('error', err.message);
+    console.error('Firebase listener error:', err);
+    // Retry listener after 5s
+    setTimeout(fbListen, 5000);
+  });
 }
 
+// ── STATUS INDICATOR ─────────────────────────────────────────────────────────
 function fbSetStatus(status, msg) {
   const el = document.getElementById('fb-status');
   if(!el) return;
   const map = {
     saving:  ['ti-cloud-upload',   'var(--amber)',         'Saving…'],
-    saved:   ['ti-cloud-check',    'var(--green)',         'Saved to cloud'],
-    loaded:  ['ti-cloud-check',    'var(--green)',         'Cloud loaded'],
+    saved:   ['ti-cloud-check',    'var(--green)',         'Saved'],
+    loaded:  ['ti-cloud-check',    'var(--green)',         'Loaded'],
     loading: ['ti-cloud-download', 'var(--accent)',        'Loading…'],
     synced:  ['ti-refresh',        'var(--green)',         'Synced'],
     idle:    ['ti-cloud',          'var(--text-tertiary)', 'Cloud'],
-    error:   ['ti-cloud-off',      'var(--red)',           'Offline — using local'],
+    error:   ['ti-cloud-off',      'var(--red)',           'Offline'],
   };
   const [icon, color, text] = map[status] || map.idle;
   el.innerHTML = `<i class="ti ${icon}" style="font-size:13px;color:${color}"></i><span style="font-size:11px;color:${color};margin-left:3px">${text}</span>`;
@@ -606,7 +639,7 @@ function showAppScreen() {
   if(restoreBtn) restoreBtn.style.display = isAdmin() ? '' : 'none';
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
-  // Load from Firebase then start real-time listener
+  // Load latest data from Firebase then start real-time listener
   fbLoad().then(remoteState => {
     if(remoteState) {
       Object.assign(state, remoteState);
@@ -614,7 +647,7 @@ function showAppScreen() {
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       render();
     }
-    _fbInitialized = true;
+    // Start listening for real-time updates from other devices
     fbListen();
   });
   // Hide nav items user can't access
@@ -1136,7 +1169,7 @@ let state = {
 // Persist to localStorage
 function save() {
   try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
-  fbSave(state);  // also push to Firestore
+  fbSave(state);
 }
 function load() {
   try {
