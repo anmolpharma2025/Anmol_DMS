@@ -887,6 +887,21 @@ function getCheckedPages(prefix) {
   });
 }
 
+function setAllPagesAccess(prefix, checked) {
+  ALL_PAGES.forEach(p => {
+    const el = document.getElementById(`${prefix}-${p.id}`);
+    if(el) el.checked = checked;
+  });
+}
+
+function setRoleDefaultAccess(prefix, role) {
+  const defaults = getRolePages(role);
+  ALL_PAGES.forEach(p => {
+    const el = document.getElementById(`${prefix}-${p.id}`);
+    if(el) el.checked = defaults.length === 0 || defaults.includes(p.id);
+  });
+}
+
 function renderUsers(c, ta) {
   if (currentUser.role !== 'admin') { c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary)">Access restricted.</div>'; return; }
   ta.innerHTML = `
