@@ -479,14 +479,27 @@ function fbSaveMeta() {
   if(_fbMetaTimer) clearTimeout(_fbMetaTimer);
   _fbMetaTimer = setTimeout(async () => {
     try {
+      // Read current local state for each key
+      const localUsers   = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+      const localRoles   = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
+      const localCompany = JSON.parse(localStorage.getItem('anmolpharma_company') || '{}');
+      // Fetch remote first and merge so we never push a subset
+      let remoteRoles = {};
+      try {
+        const snap = await db.doc(FB_META_DOC).get();
+        if(snap.exists && snap.data()?.customRoles) remoteRoles = snap.data().customRoles;
+      } catch(e) {}
+      const mergedRoles = { ...remoteRoles, ...localRoles };
       const meta = {
-        users:        JSON.parse(localStorage.getItem('anmolpharma_users') || '[]'),
-        customRoles:  JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}'),
-        company:      JSON.parse(localStorage.getItem('anmolpharma_company') || '{}'),
+        users:        localUsers,
+        customRoles:  mergedRoles,
+        company:      localCompany,
         updatedAt:    Date.now(),
         deviceId:     FB_DEVICE_ID,
       };
       await db.doc(FB_META_DOC).set(meta);
+      // Update local with merged
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(mergedRoles)); } catch(e) {}
     } catch(e) { console.error('fbSaveMeta:', e); }
   }, 1500);
 }
@@ -498,10 +511,18 @@ async function fbLoadMeta() {
     const doc = await db.doc(FB_META_DOC).get();
     if(!doc.exists || !doc.data()) return;
     const meta = doc.data();
-    if(meta.users && meta.users.length > 0)
-      try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
-    if(meta.customRoles && Object.keys(meta.customRoles).length > 0)
-      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
+    // Users: only apply if remote has more or equal (don't overwrite with stale data)
+    if(meta.users && meta.users.length > 0) {
+      const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+      if(meta.users.length >= localUsers.length)
+        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+    }
+    // Custom roles: merge so no roles are lost
+    if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
+      const localRoles = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
+      const merged = { ...localRoles, ...meta.customRoles };
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
+    }
     if(meta.company && Object.keys(meta.company).length > 0)
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
   } catch(e) { console.error('fbLoadMeta:', e); }
@@ -515,17 +536,25 @@ function fbListenMeta() {
     const meta = doc.data();
     // Skip if this update came from this device
     if(meta.deviceId === FB_DEVICE_ID) return;
-    // Only apply users if remote has same or more users than local (prevent stale overwrite)
+
+    // Users: only apply if remote has same or more users (prevent stale overwrite)
     if(meta.users && meta.users.length > 0) {
       const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
       if(meta.users.length >= localUsers.length) {
         try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
       }
     }
-    if(meta.customRoles && Object.keys(meta.customRoles).length > 0)
-      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
+
+    // Custom roles: merge remote into local — never drop local roles
+    if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
+      const localRoles = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
+      const merged = { ...localRoles, ...meta.customRoles }; // remote wins on conflict
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
+    }
+
     if(meta.company && Object.keys(meta.company).length > 0)
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+
     if(typeof render === 'function') render();
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
