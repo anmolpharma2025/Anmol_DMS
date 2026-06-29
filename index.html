@@ -2053,7 +2053,7 @@ ${debitLines.map(l => {
   return `<tr>
   <td><select onchange="updateJeLine(${idx},'debit',this.value);renderJeLines()">${buildOpts(l.debit)}</select></td>
   <td style="font-size:11px;color:var(--text-tertiary);padding:4px 8px;background:var(--bg-secondary)">${drawnName}</td>
-  <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);renderJeLines()"></td>
+  <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);updateNetDrawn()"></td>
   <td><button class="je-line-btn" onclick="removeDisbLine(${idx})">×</button></td>
 </tr>`;}).join('')}
 
@@ -2075,7 +2075,7 @@ ${creditLines.length === 0
     return `<tr>
   <td style="font-size:11px;color:var(--text-tertiary);padding:4px 8px;background:var(--bg-secondary)">${drawnName} (net)</td>
   <td><select onchange="updateJeLine(${idx},'credit',this.value);renderJeLines()">${buildOpts(l.credit)}</select></td>
-  <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);renderJeLines()"></td>
+  <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);updateNetDrawn()"></td>
   <td><button class="je-line-btn" onclick="removeDisbLine(${idx})">×</button></td>
 </tr>`;}).join('')}
 
@@ -2083,7 +2083,7 @@ ${creditLines.length === 0
 <tr style="background:var(--accent-bg);border-top:1.5px solid var(--border-mid)">
   <td style="font-size:12px;font-weight:600;padding:8px 8px;color:var(--text-primary)">Net drawn from:</td>
   <td style="font-size:12px;font-weight:700;padding:8px 8px;color:var(--accent)">${drawnName} <span style="font-size:10px;font-weight:400;color:var(--text-tertiary)">(CR auto)</span></td>
-  <td style="font-size:15px;font-weight:700;color:var(--red);text-align:right;padding:8px 8px">${fmt(netDrawn)}</td>
+  <td style="font-size:15px;font-weight:700;color:var(--red);text-align:right;padding:8px 8px" id="je-net-drawn-amt">${fmt(netDrawn)}</td>
   <td></td>
 </tr>`;
 
@@ -2101,6 +2101,23 @@ ${creditLines.length === 0
 </tr>`).join('');
     updateJeTotals();
   }
+}
+
+function updateNetDrawn() {
+  // Only update totals display — don't re-render the table (avoids losing focus)
+  const drawnFrom = document.getElementById('je-drawn-from')?.value || '';
+  const debitLines  = jeLines.filter(l=>l.type==='debit');
+  const creditLines = jeLines.filter(l=>l.type==='credit');
+  const totalDebit  = debitLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const totalOtherC = creditLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const netDrawn    = Math.max(0, totalDebit - totalOtherC);
+  // Update net drawn cell in the last row
+  const netCell = document.getElementById('je-net-drawn-amt');
+  if(netCell) netCell.textContent = fmt(netDrawn);
+  // Update totals
+  const dEl=document.getElementById('je-total-debit'), cEl=document.getElementById('je-total-credit');
+  if(dEl) dEl.textContent=fmt(totalDebit);
+  if(cEl) { cEl.textContent=fmt(totalDebit); cEl.style.color='var(--green)'; }
 }
 
 function addDisbLine(type) {
