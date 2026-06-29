@@ -7461,9 +7461,10 @@ function makeSearchable(selectId, placeholder) {
   input.type = 'text';
   input.className = 'ss-input';
   input.placeholder = placeholder || 'Search or select…';
-  // Show current value
+  // Only show text if a real (non-empty) value is already selected
   const selectedOpt = sel.options[sel.selectedIndex];
   if(selectedOpt && selectedOpt.value) input.value = selectedOpt.text;
+  // else leave blank — placeholder shows
   wrap.insertBefore(input, sel);
 
   const dropdown = document.createElement('div');
@@ -7504,10 +7505,9 @@ function makeSearchable(selectId, placeholder) {
   input.addEventListener('blur', () => {
     setTimeout(() => {
       dropdown.classList.remove('open');
-      // If nothing selected or typed text doesn't match, restore selected
-      const currentOpt = Array.from(sel.options).find(o=>o.value===sel.value);
-      if(currentOpt) input.value = currentOpt.text;
-      else input.value = '';
+      // Restore selected text, or clear to show placeholder if nothing selected
+      const currentOpt = Array.from(sel.options).find(o=>o.value && o.value===sel.value);
+      input.value = currentOpt ? currentOpt.text : '';
     }, 150);
   });
 }
