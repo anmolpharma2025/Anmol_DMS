@@ -2112,7 +2112,7 @@ function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(con
 let invLines = [];
 
 function showAddInvoice() {
-  const custOpts = state.customers.map(cu => `<option value="${cu.name}">${cu.name}</option>`).join('');
+  const custOpts = '<option value="">— Select customer —</option>' + state.customers.map(cu => `<option value="${cu.name}">${cu.name}</option>`).join('');
   const due = new Date(); due.setDate(due.getDate() + 30);
   invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
   window._invVatType = 'exclusive';
@@ -3577,7 +3577,7 @@ function printOR(id) {
 }
 
 function showAddCollection() {
-  const custOpts = state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+  const custOpts = '<option value="">— Select customer —</option>' + state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
   const invOpts = state.invoices.filter(i=>i.status!=='paid').map(i=>`<option value="${i.id}">${i.id} — ${i.customer} (${fmt(i.amount)})</option>`).join('');
   showModal(`
 <div class="modal-head"><h3>Record Collection</h3><button class="close-btn" onclick="closeModal()">×</button></div>
@@ -3777,7 +3777,7 @@ function buildConsignedItems() {
 
 function showAddConsignment() {
   const items = state.inventory||[];
-  const custOpts = state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+  const custOpts = '<option value="">— Select customer —</option>' + state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
   const itemOpts = `<option value="">— select inventory item or type manually —</option>` +
     items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-price="${it.salePrice}" data-qty="${it.qty}">${it.name} (Stock: ${it.qty} ${it.unit})</option>`).join('');
   const due = new Date(); due.setDate(due.getDate()+30);
@@ -5789,7 +5789,7 @@ function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
 
 function showAddSO() {
-  const custOpts = state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+  const custOpts = '<option value="">— Select customer —</option>' + state.customers.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
   window._soLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
@@ -5996,7 +5996,7 @@ function receivePO(id) {
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO() {
-  const supOpts = (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+  const supOpts = '<option value="">— Select supplier —</option>' + (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
   window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
@@ -7454,6 +7454,7 @@ function makeSearchable(selectId, placeholder) {
 
   const wrap = document.createElement('div');
   wrap.className = 'ss-wrap';
+  wrap.style.position = 'relative';
   sel.parentNode.insertBefore(wrap, sel);
   wrap.appendChild(sel);
 
@@ -7461,11 +7462,27 @@ function makeSearchable(selectId, placeholder) {
   input.type = 'text';
   input.className = 'ss-input';
   input.placeholder = placeholder || 'Search or select…';
-  // Only show text if a real (non-empty) value is already selected
+  input.style.paddingRight = '28px'; // make room for X button
   const selectedOpt = sel.options[sel.selectedIndex];
   if(selectedOpt && selectedOpt.value) input.value = selectedOpt.text;
-  // else leave blank — placeholder shows
   wrap.insertBefore(input, sel);
+
+  // Clear (×) button
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.textContent = '×';
+  clearBtn.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-tertiary);font-size:16px;line-height:1;cursor:pointer;padding:0 2px;z-index:2';
+  clearBtn.title = 'Clear selection';
+  clearBtn.addEventListener('mousedown', e => {
+    e.preventDefault();
+    sel.value = '';
+    input.value = '';
+    input.focus();
+    dropdown.classList.add('open');
+    buildOptions('');
+    sel.dispatchEvent(new Event('change', { bubbles:true }));
+  });
+  wrap.appendChild(clearBtn);
 
   const dropdown = document.createElement('div');
   dropdown.className = 'ss-dropdown';
@@ -7475,7 +7492,7 @@ function makeSearchable(selectId, placeholder) {
     dropdown.innerHTML = '';
     let count = 0;
     Array.from(sel.options).forEach(opt => {
-      if(!opt.value) return; // skip blank option
+      if(!opt.value) return;
       if(filter && !opt.text.toLowerCase().includes(filter.toLowerCase())) return;
       const div = document.createElement('div');
       div.className = 'ss-option' + (opt.value === sel.value ? ' selected' : '');
@@ -7486,7 +7503,6 @@ function makeSearchable(selectId, placeholder) {
         sel.value = opt.value;
         input.value = opt.text;
         dropdown.classList.remove('open');
-        // Trigger change event so existing onchange handlers fire
         sel.dispatchEvent(new Event('change', { bubbles:true }));
       });
       dropdown.appendChild(div);
@@ -7505,8 +7521,7 @@ function makeSearchable(selectId, placeholder) {
   input.addEventListener('blur', () => {
     setTimeout(() => {
       dropdown.classList.remove('open');
-      // Restore selected text, or clear to show placeholder if nothing selected
-      const currentOpt = Array.from(sel.options).find(o=>o.value && o.value===sel.value);
+      const currentOpt = Array.from(sel.options).find(o => o.value && o.value === sel.value);
       input.value = currentOpt ? currentOpt.text : '';
     }, 150);
   });
