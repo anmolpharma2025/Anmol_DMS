@@ -342,8 +342,10 @@
 </div>
 
 <!-- Firebase SDK (CDN compat mode — works in plain HTML, no build tools) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"
+  onerror="console.warn('Firebase SDK failed to load — sync disabled. Check internet connection.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"
+  onerror="console.warn('Firestore SDK failed to load — sync disabled.')"></script>
 <script>
 // ── FIREBASE INIT ─────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -358,17 +360,22 @@ const firebaseConfig = {
 let db = null;
 let _fbUnsubscribe = null;
 let _fbSyncTimer = null;
-let _fbLastWriteTime = 0;   // timestamp of our last successful write
+let _fbLastWriteTime = 0;
 let _fbListening = false;
 
-try {
-  firebase.initializeApp(firebaseConfig);
-  db = firebase.firestore();
-  // Note: enablePersistence removed — it causes "failed-precondition" errors
-  // when multiple tabs/devices share the same origin, breaking the connection.
-  // localStorage already serves as our offline cache.
-} catch(e) {
-  console.warn('Firebase init failed:', e);
+// Only init if Firebase SDK loaded successfully
+if(typeof firebase !== 'undefined') {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+  } catch(e) {
+    // Already initialized (e.g. hot reload) — get existing instance
+    try { db = firebase.firestore(); } catch(e2) {}
+    if(!db) console.warn('Firebase init error:', e);
+  }
+} else {
+  // SDK didn't load — app works offline using localStorage only
+  console.info('Firebase SDK not available — running in offline mode (localStorage only).');
 }
 
 const FB_DOC      = 'companies/anmol';
@@ -5522,9 +5529,6 @@ function renderSalesOrders(c, ta) {
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewSO('${so.id}')"><i class="ti ti-eye"></i>View</button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printSO('${so.id}')"><i class="ti ti-printer"></i></button>
-        ${so.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="approveSO('${so.id}')">Approve</button>`:''}
-        ${so.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px;background:#a78bfa22;color:#a78bfa;border-color:#a78bfa" onclick="dispatchSO('${so.id}')"><i class="ti ti-truck"></i>Dispatch</button>`:''}
-        ${so.status==='dispatched'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="deliverSO('${so.id}')"><i class="ti ti-check"></i>Delivered</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteSO('${so.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -5753,6 +5757,15 @@ function addSOLine() { window._soLines.push({itemId:'',desc:'',qty:1,unitPrice:0
 function removeSOLine(i) { if(window._soLines.length>1){ window._soLines.splice(i,1); renderOrderLines('so'); } }
 function addPOLine() { window._poLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}); renderOrderLines('po'); }
 function removePOLine(i) { if(window._poLines.length>1){ window._poLines.splice(i,1); renderOrderLines('po'); } }
+function removeOrderLine(prefix, i) {
+  if(prefix==='so') removeSOLine(i);
+  else if(prefix==='po') removePOLine(i);
+  else if(prefix==='ret') removeReturnLine(i);
+  else {
+    const lines = prefix==='so'?window._soLines:window._poLines;
+    if(lines && lines.length>1){ lines.splice(i,1); renderOrderLines(prefix); }
+  }
+}
 
 function saveSO() {
   const customer=document.getElementById('so-cust').value;
