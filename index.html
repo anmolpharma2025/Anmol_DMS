@@ -6114,8 +6114,14 @@ function orderLineTableHtml(prefix) {
   </table>`;
 }
 
+function getOrderLines(prefix) {
+  if(prefix==='so') return window._soLines;
+  if(prefix==='ret') return window._retLines;
+  return window._poLines;
+}
+
 function renderOrderLines(prefix) {
-  const lines = prefix==='so' ? window._soLines : window._poLines;
+  const lines = getOrderLines(prefix);
   const isSOLine = prefix === 'so';
   const items = state.inventory||[];
   const itemOpts = `<option value="">— select item —</option>` +
@@ -6138,7 +6144,7 @@ function renderOrderLines(prefix) {
 }
 
 function selectOrderItem(prefix, i, sel) {
-  const lines = prefix==='so'?window._soLines:window._poLines;
+  const lines = getOrderLines(prefix);
   const opt = sel.options[sel.selectedIndex];
   if(!opt||!opt.value) { lines[i].itemId=''; renderOrderLines(prefix); return; }
   lines[i].itemId = opt.value;
@@ -6150,12 +6156,23 @@ function selectOrderItem(prefix, i, sel) {
 }
 
 function updateOrderLine(prefix, i, field, val) {
-  const lines = prefix==='so'?window._soLines:window._poLines;
+  const lines = getOrderLines(prefix);
   lines[i][field]=val;
   const qty=parseFloat(lines[i].qty)||0, price=parseFloat(lines[i].unitPrice)||0;
   lines[i].lineTotal=qty*price;
   const tb=document.getElementById(`${prefix}-lines-body`);
   if(tb){ const rows=tb.querySelectorAll('tr'); if(rows[i]){ const cells=rows[i].querySelectorAll('td'); if(cells[3]) cells[3].textContent=fmt(qty*price); } }
+}
+
+function loadInvoiceForReturn() {
+  const invId = document.getElementById('ret-inv')?.value;
+  if(!invId) { window._retLines = [{itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}]; renderOrderLines('ret'); return; }
+  const inv = state.invoices.find(i=>i.id===invId);
+  if(!inv) return;
+  const custSel = document.getElementById('ret-cust');
+  if(custSel && inv.customer) custSel.value = inv.customer;
+  window._retLines = (inv.lines||[]).map(l=>({...l, qty:1}));
+  renderOrderLines('ret');
 }
 
 function addSOLine() { window._soLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}); renderOrderLines('so'); }
@@ -6164,12 +6181,8 @@ function addPOLine() { window._poLines.push({itemId:'',desc:'',qty:1,unitPrice:0
 function removePOLine(i) { if(window._poLines.length>1){ window._poLines.splice(i,1); renderOrderLines('po'); } }
 function removeOrderLine(prefix, i) {
   if(prefix==='so') removeSOLine(i);
-  else if(prefix==='po') removePOLine(i);
-  else if(prefix==='ret') removeReturnLine(i);
-  else {
-    const lines = prefix==='so'?window._soLines:window._poLines;
-    if(lines && lines.length>1){ lines.splice(i,1); renderOrderLines(prefix); }
-  }
+  else if(prefix==='ret') { if(window._retLines.length>1){ window._retLines.splice(i,1); renderOrderLines('ret'); } }
+  else removePOLine(i);
 }
 
 function saveSO() {
@@ -7647,39 +7660,6 @@ function showAddReturn() {
 </div>`);
   renderOrderLines('ret');
   window._retPrefix='ret';
-}
-
-function addReturnLine() { window._retLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}); renderRetLines(); }
-function removeReturnLine(i) { if(window._retLines.length>1){window._retLines.splice(i,1);renderRetLines();} }
-function renderRetLines() {
-  window._poLines = window._retLines; // reuse same renderer
-  const prefix='ret';
-  const lines=window._retLines;
-  const items=state.inventory||[];
-  const itemOpts=`<option value="">— select item —</option>`+items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-price="${it.salePrice}" data-unit="${it.unit}">${it.name} (${it.unit})</option>`).join('');
-  const tbody=document.getElementById('ret-lines-body');
-  if(!tbody) return;
-  tbody.innerHTML=lines.map((l,i)=>`<tr>
-    <td>
-      <select onchange="selectOrderItem('ret',${i},this)" style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
-        ${itemOpts.replace(`value="${l.itemId||''}"`,`value="${l.itemId||''}" selected`)}
-      </select>
-      <input type="text" value="${l.desc||''}" placeholder="Description" oninput="updateOrderLine('ret',${i},'desc',this.value)" style="width:100%;padding:3px 6px;border:none;border-top:1px solid var(--border-light);background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
-    </td>
-    <td><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updateOrderLine('ret',${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
-    <td><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updateOrderLine('ret',${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
-    <td style="text-align:right;padding:4px 8px;font-weight:500">${fmt((parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0))}</td>
-    <td><button class="je-line-btn" onclick="removeReturnLine(${i})">×</button></td>
-  </tr>`).join('');
-}
-
-function loadReturnLinesFromInvoice() {
-  const invId = document.getElementById('ret-inv')?.value;
-  if(!invId) return;
-  const inv = state.invoices.find(i=>i.id===invId);
-  if(!inv) return;
-  window._retLines = (inv.lines||[]).map(l=>({...l}));
-  renderRetLines();
 }
 
 function saveReturn() {
