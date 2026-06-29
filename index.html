@@ -372,9 +372,100 @@ try {
 }
 
 const FB_DOC      = 'companies/anmol';
-const FB_META_DOC = 'companies/anmol_meta';  // users, roles, company profile
+const FB_META_DOC = 'companies/anmol_meta';
 
-// ── SAVE META (users / roles / company) ──────────────────────────────────────
+// Unique ID for THIS browser tab/device session — survives page reloads
+if(!sessionStorage.getItem('_fbDeviceId')) {
+  sessionStorage.setItem('_fbDeviceId', 'dev_' + Math.random().toString(36).slice(2) + '_' + Date.now());
+}
+const FB_DEVICE_ID = sessionStorage.getItem('_fbDeviceId');
+
+// ── SAVE to Firestore (debounced 500ms) ──────────────────────────────────────
+function fbSave(stateData) {
+  if(!db) return;
+  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
+  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 500);
+}
+
+async function _fbDoSave(stateData) {
+  if(!db) return;
+  try {
+    fbSetStatus('saving');
+    const writeTime = Date.now();
+    await db.doc(FB_DOC).set({
+      data:      JSON.stringify(stateData),
+      updatedAt: writeTime,
+      updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
+      deviceId:  FB_DEVICE_ID   // ← tag with THIS device's unique ID
+    });
+    _fbLastWriteTime = writeTime;
+    fbSetStatus('saved');
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase save error:', err);
+  }
+}
+
+// ── LOAD from Firestore once on login ────────────────────────────────────────
+async function fbLoad() {
+  if(!db) return null;
+  try {
+    fbSetStatus('loading');
+    const doc = await db.doc(FB_DOC).get();
+    if(doc.exists && doc.data() && doc.data().data) {
+      _fbLastWriteTime = doc.data().updatedAt || 0;
+      fbSetStatus('loaded');
+      return JSON.parse(doc.data().data);
+    }
+    fbSetStatus('idle');
+    return null;
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase load error:', err);
+    return null;
+  }
+}
+
+// ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
+function fbListen() {
+  if(!db || _fbListening) return;
+  _fbListening = true;
+  if(_fbUnsubscribe) _fbUnsubscribe();
+
+  _fbUnsubscribe = db.doc(FB_DOC).onSnapshot(doc => {
+    if(!doc.exists || !doc.data() || !doc.data().data) return;
+
+    const remoteDeviceId = doc.data().deviceId;
+    const remoteTime     = doc.data().updatedAt || 0;
+
+    // Skip ONLY if this update came from THIS exact device (same tab/session)
+    if(remoteDeviceId === FB_DEVICE_ID) return;
+
+    try {
+      const remote = JSON.parse(doc.data().data);
+      const by     = doc.data().updatedBy || 'another device';
+      const currentPage = window.state.page;
+
+      // Replace all state keys with remote values
+      Object.keys(remote).forEach(key => { window.state[key] = remote[key]; });
+      window.state.page = currentPage;
+
+      if(typeof recomputeBalances === 'function') recomputeBalances();
+      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
+      if(typeof render === 'function') render();
+
+      fbSetStatus('synced');
+      showFbToast(`Updated by ${by}`);
+    } catch(e) {
+      console.error('Firebase real-time sync error:', e);
+    }
+  }, err => {
+    _fbListening = false;
+    console.error('Firebase listener error:', err);
+    fbSetStatus('idle', 'Reconnecting…');
+    setTimeout(() => { _fbListening = false; fbListen(); }, 5000);
+  });
+}
 let _fbMetaTimer = null;
 function fbSaveMeta() {
   if(!db) return;
@@ -386,6 +477,7 @@ function fbSaveMeta() {
         customRoles:  JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}'),
         company:      JSON.parse(localStorage.getItem('anmolpharma_company') || '{}'),
         updatedAt:    Date.now(),
+        deviceId:     FB_DEVICE_ID,
       };
       await db.doc(FB_META_DOC).set(meta);
     } catch(e) { console.error('fbSaveMeta:', e); }
@@ -409,20 +501,17 @@ async function fbLoadMeta() {
 }
 
 // ── LISTEN for meta changes (users/roles added on another device) ─────────────
-let _fbMetaLastTime = 0;
 function fbListenMeta() {
   if(!db) return;
   db.doc(FB_META_DOC).onSnapshot(doc => {
     if(!doc.exists || !doc.data()) return;
     const meta = doc.data();
-    const remoteTime = meta.updatedAt || 0;
-    if(remoteTime <= _fbMetaLastTime + 100) return;
-    _fbMetaLastTime = remoteTime;
+    // Skip if this update came from this device
+    if(meta.deviceId === FB_DEVICE_ID) return;
     // Apply to localStorage
     if(meta.users)       try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
     if(meta.customRoles) try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
     if(meta.company)     try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
-    // Re-render current page to reflect new users/roles
     if(typeof render === 'function') render();
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
@@ -475,48 +564,6 @@ async function fbLoad() {
 }
 
 // ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
-function fbListen() {
-  if(!db || _fbListening) return;
-  _fbListening = true;
-  if(_fbUnsubscribe) _fbUnsubscribe();
-
-  _fbUnsubscribe = db.doc(FB_DOC).onSnapshot(doc => {
-    if(!doc.exists || !doc.data() || !doc.data().data) return;
-
-    const remoteTime = doc.data().updatedAt || 0;
-    // Skip our own writes — allow 3 second window to avoid echo
-    if(remoteTime > 0 && remoteTime <= _fbLastWriteTime + 3000) return;
-
-    try {
-      const remote = JSON.parse(doc.data().data);
-      const by = doc.data().updatedBy || 'another device';
-
-      // Deep replace state arrays (don't shallow merge — that misses nested changes)
-      if(typeof window.state !== 'undefined') {
-        const currentPage = window.state.page;
-        Object.keys(remote).forEach(key => {
-          window.state[key] = remote[key];
-        });
-        window.state.page = currentPage; // preserve navigation
-        if(typeof recomputeBalances === 'function') recomputeBalances();
-        try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
-        if(typeof render === 'function') render();
-      }
-
-      fbSetStatus('synced');
-      showFbToast(`Synced — updated by ${by}`);
-    } catch(e) {
-      console.error('Firebase real-time sync error:', e);
-    }
-  }, err => {
-    _fbListening = false;
-    console.error('Firebase listener error:', err);
-    // Show idle (not error) so clicking cloud badge still works
-    fbSetStatus('idle', 'Reconnecting…');
-    // Always retry — connection may have dropped temporarily
-    setTimeout(() => { _fbListening = false; fbListen(); }, 5000);
-  });
-}
 
 // ── STATUS INDICATOR ─────────────────────────────────────────────────────────
 function fbSetStatus(status, msg) {
