@@ -1769,23 +1769,20 @@ function renderDashboard(c, ta) {
 }
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
-function buildJournalRows(entries, label) {
-  const cashKeywords = ['cash','bank','petty','drawing'];
-  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+function buildGeneralJournalRows(entries) {
   const groups = {};
   entries.forEach(j => {
     const gid = j.group||j.id;
-    if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[], type:j.type };
+    if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[] };
     groups[gid].lines.push(j);
   });
-  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No ${label} entries yet.</div>`;
-
+  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No General Journal entries yet.</div>`;
   const rows = Object.values(groups).map(g => {
     return g.lines.map((l,idx) => {
       const da = state.accounts.find(a=>a.id===l.debit);
       const ca = state.accounts.find(a=>a.id===l.credit);
       const isFirst = idx===0;
-      const borderStyle = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
+      const border = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
       const meta = isFirst ? `
         <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}</td>
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
@@ -1794,74 +1791,197 @@ function buildJournalRows(entries, label) {
       const actions = isFirst ? `
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
           <div class="action-btns">
-            <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i>View</button>
+            <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
+            <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>
             <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
           </div>
         </td>` : '';
-      if(l.debit) return `<tr style="${borderStyle}">${meta}
+      if(l.debit) return `<tr style="${border}">${meta}
         <td style="padding-left:12px;color:var(--text-secondary)">${da?da.name:l.debit}</td>
-        <td></td>
-        <td style="text-align:right">${fmt(l.amount)}</td>
-        <td></td>
-        ${actions}
-      </tr>`;
-      return `<tr style="${borderStyle}">${meta}
+        <td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td>
+        ${actions}</tr>`;
+      return `<tr style="${border}">${meta}
         <td></td>
         <td style="padding-left:24px;color:var(--text-secondary);font-style:italic">${ca?ca.name:l.credit}</td>
-        <td></td>
-        <td style="text-align:right">${fmt(l.amount)}</td>
-        ${actions}
-      </tr>`;
+        <td></td><td style="text-align:right">${fmt(l.amount)}</td>
+        ${actions}</tr>`;
     }).join('');
   }).join('');
-
   return `<table>
     <thead><tr>
       <th>Entry #</th><th>Date</th><th>Reference</th><th>Description</th>
       <th>Debit Account</th><th>Credit Account</th>
       <th style="text-align:right">Debit</th><th style="text-align:right">Credit</th>
-      <th>Actions</th>
+      <th class="no-print">Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function buildDisbursementRows(entries) {
+  const cashKeywords = ['cash','bank','petty','drawing'];
+  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  const groups = {};
+  entries.forEach(j => {
+    const gid = j.group||j.id;
+    if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[] };
+    groups[gid].lines.push(j);
+  });
+  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-cash-banknote" style="font-size:36px;display:block;margin-bottom:12px"></i>No Disbursement Journal entries yet.</div>`;
+  const rows = Object.values(groups).map(g => {
+    const crLines = g.lines.filter(l=>l.credit && isCashAcc(l.credit));
+    const cashLine = crLines[0] || g.lines.find(l=>l.credit);
+    const cashAcc = cashLine ? state.accounts.find(a=>a.id===cashLine.credit) : null;
+    const totalDisb = crLines.reduce((s,l)=>s+(l.amount||0),0) || (cashLine?.amount||0);
+    return `<tr>
+      <td class="mono">${g.id}</td>
+      <td>${g.date}</td>
+      <td class="mono">${g.ref}</td>
+      <td>${g.desc}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
+      <td style="text-align:right;font-weight:600;color:var(--red)">${fmt(totalDisb)}</td>
+      <td class="no-print">
+        <div class="action-btns">
+          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
+          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>
+          <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  return `<table>
+    <thead><tr>
+      <th>Entry #</th><th>Date</th><th>Reference</th><th>Description</th>
+      <th>Drawn From</th>
+      <th style="text-align:right">Amount Disbursed</th>
+      <th class="no-print">Actions</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
 
 function renderJournal(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddJournal()"><i class="ti ti-plus"></i>New Entry</button>`;
+  ta.innerHTML = `
+    <button class="btn primary" onclick="showAddJournal()"><i class="ti ti-plus"></i>New Entry</button>
+    <button class="btn no-print" onclick="printAllJournal('general')"><i class="ti ti-printer"></i>Print All</button>`;
   const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
-  // General Journal = entries where NO credit line is a cash/bank account
   const generalEntries = state.journal.filter(j => {
     if(j.type==='disbursement') return false;
     if(j.type==='general') return true;
-    // Legacy entries: classify by accounts
     const gid=j.group||j.id;
     const groupLines=state.journal.filter(x=>(x.group||x.id)===gid);
     return !groupLines.some(l=>l.credit&&isCashAcc(l.credit));
   });
-  c.innerHTML = buildJournalRows(generalEntries, 'General Journal');
+  c.innerHTML = buildGeneralJournalRows(generalEntries);
 }
 
 function renderDisbursementJournal(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddJournal('disbursement')"><i class="ti ti-plus"></i>New Entry</button>`;
+  ta.innerHTML = `
+    <button class="btn primary" onclick="showAddJournal('disbursement')"><i class="ti ti-plus"></i>New Entry</button>
+    <button class="btn no-print" onclick="printAllJournal('disbursement')"><i class="ti ti-printer"></i>Print All</button>`;
   const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(ac=>ac.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
-  // Disbursement Journal = entries where at least one credit line is a cash/bank account
   const disbEntries = state.journal.filter(j => {
     if(j.type==='disbursement') return true;
     if(j.type==='general') return false;
-    // Legacy entries: classify by accounts
     const gid=j.group||j.id;
     const groupLines=state.journal.filter(x=>(x.group||x.id)===gid);
     return groupLines.some(l=>l.credit&&isCashAcc(l.credit));
   });
-  const totalDisbursed = disbEntries.filter(j=>j.credit).reduce((s,j)=>s+(j.amount||0),0);
+  const cashKeywords2 = ['cash','bank','petty','drawing'];
+  const totalDisbursed = disbEntries.filter(j=>j.credit&&state.accounts.find(a=>a.id===j.credit&&cashKeywords2.some(k=>a.name.toLowerCase().includes(k)))).reduce((s,j)=>s+(j.amount||0),0);
+  const totalEntries = [...new Set(disbEntries.map(j=>j.group||j.id))].length;
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:20px">
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash-banknote"></i>Total Entries</div><div class="kpi-value">${[...new Set(disbEntries.map(j=>j.group||j.id))].length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash-banknote"></i>Total Entries</div><div class="kpi-value">${totalEntries}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-trending-down"></i>Total Disbursed</div><div class="kpi-value neg">${fmt(totalDisbursed)}</div></div>
 </div>
-${buildJournalRows(disbEntries, 'Disbursement Journal')}`;
+${buildDisbursementRows(disbEntries)}`;
+}
+
+function printJournal(groupId, type) {
+  const groupLines = state.journal.filter(j=>(j.group||j.id)===groupId);
+  if(!groupLines.length) return;
+  const first = groupLines[0];
+  const cp = getCompanyProfile();
+  const totalDebit  = groupLines.reduce((s,l)=>s+(l.debit?l.amount:0),0);
+  const totalCredit = groupLines.reduce((s,l)=>s+(l.credit?l.amount:0),0);
+  const lineRows = groupLines.map(l => {
+    const da=state.accounts.find(a=>a.id===l.debit);
+    const ca=state.accounts.find(a=>a.id===l.credit);
+    if(l.debit) return `<tr><td style="padding-left:8px">${da?da.name:l.debit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td></tr>`;
+    return `<tr><td></td><td style="padding-left:20px;font-style:italic">${ca?ca.name:l.credit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td></tr>`;
+  }).join('');
+  const title = type==='disbursement' ? 'Disbursement Journal Entry' : 'General Journal Entry';
+  const w = window.open('','_blank','width=800,height=600');
+  w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
+<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111}
+h2{margin:0 0 4px}h3{margin:0 0 12px;color:#555}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{border:1px solid #ccc;padding:6px 10px}th{background:#f5f5f5;font-weight:600}
+.total td{font-weight:700;background:#f9f9f9;border-top:2px solid #333}
+.footer{margin-top:28px;display:flex;justify-content:space-between;font-size:11px;color:#555;border-top:1px solid #ccc;padding-top:12px}
+@media print{button{display:none}}</style></head><body>
+<h2>${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</h2>
+<h3>${title}</h3>
+<table style="width:auto;margin-bottom:12px;border:none">
+  <tr><td style="border:none;padding:2px 8px 2px 0"><strong>Entry #:</strong> ${first.group||first.id}</td>
+  <td style="border:none;padding:2px 8px"><strong>Date:</strong> ${first.date}</td>
+  <td style="border:none;padding:2px 8px"><strong>Ref:</strong> ${first.ref}</td></tr>
+  <tr><td colspan="3" style="border:none;padding:4px 0"><strong>Description:</strong> ${first.desc}</td></tr>
+</table>
+<table>
+  <thead><tr><th>Debit Account</th><th>Credit Account</th><th style="text-align:right">Debit (₱)</th><th style="text-align:right">Credit (₱)</th></tr></thead>
+  <tbody>${lineRows}</tbody>
+  <tfoot><tr class="total"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totalDebit)}</td><td style="text-align:right">${fmt(totalCredit)}</td></tr></tfoot>
+</table>
+<div class="footer">
+  <span>Prepared by: _________________________</span>
+  <span>Approved by: _________________________</span>
+  <span>Received by: _________________________</span>
+</div>
+<script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  w.document.close();
+}
+
+function printAllJournal(type) {
+  const cashKeywords = ['cash','bank','petty','drawing'];
+  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  const entries = state.journal.filter(j => {
+    if(type==='disbursement') {
+      if(j.type==='disbursement') return true; if(j.type==='general') return false;
+      const gl=state.journal.filter(x=>(x.group||x.id)===(j.group||j.id));
+      return gl.some(l=>l.credit&&isCashAcc(l.credit));
+    } else {
+      if(j.type==='disbursement') return false; if(j.type==='general') return true;
+      const gl=state.journal.filter(x=>(x.group||x.id)===(j.group||j.id));
+      return !gl.some(l=>l.credit&&isCashAcc(l.credit));
+    }
+  });
+  const groups = {};
+  entries.forEach(j=>{ const gid=j.group||j.id; if(!groups[gid]) groups[gid]={id:gid,date:j.date,ref:j.ref,desc:j.desc,lines:[]}; groups[gid].lines.push(j); });
+  const cp = getCompanyProfile();
+  const title = type==='disbursement' ? 'Disbursement Journal' : 'General Journal';
+  const tableRows = Object.values(groups).map(g => g.lines.map((l,idx)=>{
+    const da=state.accounts.find(a=>a.id===l.debit), ca=state.accounts.find(a=>a.id===l.credit);
+    const meta=idx===0?`<td rowspan="${g.lines.length}">${g.id}</td><td rowspan="${g.lines.length}">${g.date}</td><td rowspan="${g.lines.length}">${g.ref}</td><td rowspan="${g.lines.length}">${g.desc}</td>`:'';
+    if(l.debit) return `<tr>${meta}<td style="padding-left:8px">${da?da.name:l.debit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td></tr>`;
+    return `<tr>${meta}<td></td><td style="padding-left:20px;font-style:italic">${ca?ca.name:l.credit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td></tr>`;
+  }).join('')).join('');
+  const w = window.open('','_blank','width=900,height=700');
+  w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
+<style>body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#111}
+h2{margin:0 0 2px}h3{margin:0 0 14px;color:#555}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;vertical-align:top}
+th{background:#f5f5f5;font-weight:600}
+@media print{button{display:none}}</style></head><body>
+<h2>${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</h2>
+<h3>${title}</h3>
+<table><thead><tr><th>Entry #</th><th>Date</th><th>Ref</th><th>Description</th><th>Debit Account</th><th>Credit Account</th><th style="text-align:right">Debit (₱)</th><th style="text-align:right">Credit (₱)</th></tr></thead>
+<tbody>${tableRows}</tbody></table>
+<script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  w.document.close();
 }
 
 function viewJournal(groupId) {
