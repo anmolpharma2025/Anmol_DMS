@@ -1991,7 +1991,6 @@ function renderInvoices(c, ta) {
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
-        ${inv.status === 'pending' || inv.status === 'overdue' ? `<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markPaid('${inv.id}')">Mark paid</button>` : ''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -2335,7 +2334,6 @@ ${(state.collections||[]).filter(r=>r.invoice===inv.id).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print</button>
-  ${inv.status!=='paid'?`<button class="btn primary" onclick="closeModal();markPaid('${inv.id}')"><i class="ti ti-check"></i>Mark Paid</button>`:''}
 </div>`);
 }
 
