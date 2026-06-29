@@ -387,7 +387,62 @@ try {
   console.warn('Firebase init failed:', e);
 }
 
-const FB_DOC = 'companies/anmol';
+const FB_DOC      = 'companies/anmol';
+const FB_META_DOC = 'companies/anmol_meta';  // users, roles, company profile
+
+// ── SAVE META (users / roles / company) ──────────────────────────────────────
+let _fbMetaTimer = null;
+function fbSaveMeta() {
+  if(!db) return;
+  if(_fbMetaTimer) clearTimeout(_fbMetaTimer);
+  _fbMetaTimer = setTimeout(async () => {
+    try {
+      const meta = {
+        users:        JSON.parse(localStorage.getItem('anmolpharma_users') || '[]'),
+        customRoles:  JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}'),
+        company:      JSON.parse(localStorage.getItem('anmolpharma_company') || '{}'),
+        updatedAt:    Date.now(),
+      };
+      await db.doc(FB_META_DOC).set(meta);
+    } catch(e) { console.error('fbSaveMeta:', e); }
+  }, 1500);
+}
+
+// ── LOAD META from Firestore ─────────────────────────────────────────────────
+async function fbLoadMeta() {
+  if(!db) return;
+  try {
+    const doc = await db.doc(FB_META_DOC).get();
+    if(!doc.exists || !doc.data()) return;
+    const meta = doc.data();
+    if(meta.users && meta.users.length > 0)
+      try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+    if(meta.customRoles && Object.keys(meta.customRoles).length > 0)
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
+    if(meta.company && Object.keys(meta.company).length > 0)
+      try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+  } catch(e) { console.error('fbLoadMeta:', e); }
+}
+
+// ── LISTEN for meta changes (users/roles added on another device) ─────────────
+let _fbMetaLastTime = 0;
+function fbListenMeta() {
+  if(!db) return;
+  db.doc(FB_META_DOC).onSnapshot(doc => {
+    if(!doc.exists || !doc.data()) return;
+    const meta = doc.data();
+    const remoteTime = meta.updatedAt || 0;
+    if(remoteTime <= _fbMetaLastTime + 100) return;
+    _fbMetaLastTime = remoteTime;
+    // Apply to localStorage
+    if(meta.users)       try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+    if(meta.customRoles) try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(meta.customRoles)); } catch(e) {}
+    if(meta.company)     try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+    // Re-render current page to reflect new users/roles
+    if(typeof render === 'function') render();
+    showFbToast('Settings synced from another device');
+  }, e => console.error('fbListenMeta:', e));
+}
 
 // ── SAVE to Firestore (debounced 2s) ─────────────────────────────────────────
 function fbSave(stateData) {
@@ -520,7 +575,10 @@ function getCompanyProfile() {
   try { const d=localStorage.getItem(COMPANY_KEY); if(d) return JSON.parse(d); } catch(e) {}
   return { name:'ANMOL PHARMACEUTICALS US CORP.', tin:'000-000-000-000', address:'123 Business Ave, Quezon City, Metro Manila', phone:'+63 2 8000 0000', email:'info@anmolpharma.ph', website:'www.anmolpharma.ph', vatReg:'VAT Registered', rdo:'RDO 40 — Quezon City' };
 }
-function saveCompanyProfile(p) { try { localStorage.setItem(COMPANY_KEY, JSON.stringify(p)); } catch(e) {} }
+function saveCompanyProfile(p) {
+  try { localStorage.setItem(COMPANY_KEY, JSON.stringify(p)); } catch(e) {}
+  fbSaveMeta();
+}
 function getCompanyName() { return getCompanyProfile().name; }
 
 // Role → allowed pages (empty = all)
@@ -538,7 +596,8 @@ function getCustomRoles() {
   try { return JSON.parse(localStorage.getItem('anmolpharma_custom_roles')||'{}'); } catch(e) { return {}; }
 }
 function saveCustomRoles(roles) {
-  try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(roles)); } catch(e) {} 
+  try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(roles)); } catch(e) {}
+  fbSaveMeta();
 }
 function getAllRoles() {
   return { ...ROLE_ACCESS, ...getCustomRoles() };
@@ -559,6 +618,7 @@ function getUsers() {
 
 function saveUsers(users) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch(e) {}
+  fbSaveMeta();
 }
 
 function getSession() {
@@ -640,7 +700,7 @@ function showAppScreen() {
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
   // Load latest data from Firebase then start real-time listener
-  fbLoad().then(remoteState => {
+  Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
     if(remoteState) {
       Object.assign(state, remoteState);
       recomputeBalances();
@@ -649,6 +709,7 @@ function showAppScreen() {
     }
     // Start listening for real-time updates from other devices
     fbListen();
+    fbListenMeta();
   });
   // Hide nav items user can't access
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
