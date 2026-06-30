@@ -4015,7 +4015,6 @@ function saveCollection() {
 
 // ── INVENTORY TRACKER ────────────────────────────────────────────────────────
 function renderInventory(c, ta) {
-  const ta = document.getElementById('page-topbar-actions');
   if(ta) ta.innerHTML = `
     <button class="btn" onclick="showReceiveFromPO()"><i class="ti ti-package-import"></i>Receive from PO</button>
     <button class="btn" onclick="showTransferInventory()"><i class="ti ti-arrows-transfer-up"></i>Transfer</button>
