@@ -347,6 +347,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"
   onerror="console.warn('Firestore SDK failed to load — sync disabled.')"></script>
 <script>
+
 // ── FIREBASE INIT ─────────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyCtApiphcSMdEo-hmIkefIeQGvmusG2B6M",
@@ -412,7 +413,10 @@ async function _fbDoSave(stateData) {
     console.error('Firebase save error:', err);
   }
 }
+</script>
 
+<script>
+// ── FIREBASE FUNCTIONS ───────────────────────────────────────────────────────
 // ── LOAD from Firestore once on login ────────────────────────────────────────
 async function fbLoad() {
   if(!db) return null;
@@ -536,37 +540,6 @@ function fbListenMeta() {
   db.doc(FB_META_DOC).onSnapshot(doc => {
     if(!doc.exists || !doc.data()) return;
     const meta = doc.data();
-    // Skip if this update came from this device
-    if(meta.deviceId === FB_DEVICE_ID) return;
-
-    // Users: only apply if remote has same or more users (prevent stale overwrite)
-    if(meta.users && meta.users.length > 0) {
-      const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
-      if(meta.users.length >= localUsers.length) {
-        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
-      }
-    }
-
-    // Custom roles: merge remote into local — never drop local roles
-    if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
-      const localRoles = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
-      const merged = { ...localRoles, ...meta.customRoles }; // remote wins on conflict
-      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
-    }
-
-    if(meta.company && Object.keys(meta.company).length > 0)
-      try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
-    if(meta.branches && meta.branches.length > 0)
-      try { localStorage.setItem('anmolpharma_branches', JSON.stringify(meta.branches)); } catch(e) {}
-  } catch(e) { console.error('fbLoadMeta:', e); }
-}
-
-// ── LISTEN for meta changes (users/roles added on another device) ─────────────
-function fbListenMeta() {
-  if(!db) return;
-  db.doc(FB_META_DOC).onSnapshot(doc => {
-    if(!doc.exists || !doc.data()) return;
-    const meta = doc.data();
     if(meta.deviceId === FB_DEVICE_ID) return;
     if(meta.users && meta.users.length > 0) {
       const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
@@ -586,54 +559,6 @@ function fbListenMeta() {
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
 }
-
-// ── SAVE to Firestore (debounced 500ms) ─────────────────────────────────────
-function fbSave(stateData) {
-  if(!db) return;
-  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
-  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 500);
-}
-
-async function _fbDoSave(stateData) {
-  if(!db) return;
-  try {
-    fbSetStatus('saving');
-    const by = (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System';
-    const writeTime = Date.now();
-    await db.doc(FB_DOC).set({
-      data: JSON.stringify(stateData),
-      updatedAt: writeTime,
-      updatedBy: by
-    });
-    _fbLastWriteTime = writeTime;
-    fbSetStatus('saved');
-  } catch(err) {
-    fbSetStatus('error', err.message);
-    console.error('Firebase save error:', err);
-  }
-}
-
-// ── LOAD from Firestore once on login ────────────────────────────────────────
-async function fbLoad() {
-  if(!db) return null;
-  try {
-    fbSetStatus('loading');
-    const doc = await db.doc(FB_DOC).get();
-    if(doc.exists && doc.data() && doc.data().data) {
-      _fbLastWriteTime = doc.data().updatedAt || 0;
-      fbSetStatus('loaded');
-      return JSON.parse(doc.data().data);
-    }
-    fbSetStatus('idle');
-    return null;
-  } catch(err) {
-    fbSetStatus('error', err.message);
-    console.error('Firebase load error:', err);
-    return null;
-  }
-}
-
-// ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
 
 // ── STATUS INDICATOR ─────────────────────────────────────────────────────────
 function fbSetStatus(status, msg) {
@@ -697,9 +622,7 @@ async function fbForceRefresh() {
     fbListen();
   }
 }
-</script>
 
-<script>
 const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtS = n => (n < 0 ? '-' : '') + fmt(n);
 const today = () => new Date().toISOString().split('T')[0];
