@@ -4235,26 +4235,11 @@ function deleteConsignment(id) {
 
 function buildConsolidatedInventory() {
   const branches   = getBranches();
-  const transfers  = state.inventoryTransfers||[];
   const items      = state.inventory||[];
 
-  // Build per-branch stock: start from main inventory then apply transfers
-  // Main warehouse = BR-001 (first branch), others start at 0 and receive via transfers
+  // Use the shared helper so this view always matches the Transfer form and Manage Branches
   const branchStock = {}; // { branchId: { itemId: qty } }
-  branches.forEach(b => { branchStock[b.id] = {}; });
-  // Main warehouse starts with current inventory quantities
-  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  if(mainId) {
-    items.forEach(it => { branchStock[mainId][it.id] = it.qty; });
-  }
-  // Apply completed (received) transfers to destination branch stocks
-  transfers.filter(t=>t.status==='received').forEach(t => {
-    t.lines.forEach(l => {
-      if(!l.itemId) return;
-      if(!branchStock[t.toBranch]) branchStock[t.toBranch] = {};
-      branchStock[t.toBranch][l.itemId] = (branchStock[t.toBranch][l.itemId]||0) + (l.qty||0);
-    });
-  });
+  branches.forEach(b => { branchStock[b.id] = getBranchStock(b.id); });
 
   // Compute totals per item across all branches
   const totalsByItem = {};
@@ -4406,6 +4391,31 @@ ${transfers.length===0 ? `<div style="text-align:center;padding:48px;color:var(-
 </div>`;
 }
 
+// Compute current stock for every item at a given branch
+function getBranchStock(branchId) {
+  const branches = getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const stock = {};
+  const items = state.inventory||[];
+  items.forEach(it => { stock[it.id] = (branchId === mainId) ? it.qty : 0; });
+
+  (state.inventoryTransfers||[]).forEach(t => {
+    t.lines.forEach(l => {
+      if(!l.itemId) return;
+      const qty = l.qty||0;
+      // Outgoing from this branch reduces its stock — applies the moment the transfer is created (pending or received)
+      if(t.fromBranch === branchId && t.fromBranch !== mainId) {
+        stock[l.itemId] = (stock[l.itemId]||0) - qty;
+      }
+      // Incoming to this branch only adds once RECEIVED (confirmed arrival)
+      if(t.toBranch === branchId && t.status === 'received') {
+        stock[l.itemId] = (stock[l.itemId]||0) + qty;
+      }
+    });
+  });
+  return stock;
+}
+
 function showTransferInventory() {
   const branches=getBranches();
   if(branches.length<2){ alert('You need at least 2 branches/warehouses to make a transfer.\nGo to Inventory → Transfers → Manage Branches to add them.'); return; }
@@ -4415,11 +4425,11 @@ function showTransferInventory() {
 <div class="modal-head"><h3><i class="ti ti-arrows-transfer-up" style="margin-right:6px"></i>Transfer Inventory</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:10px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--accent)">
   <i class="ti ti-info-circle" style="margin-right:5px"></i>
-  Transferring stock <strong>deducts</strong> from the source inventory immediately. Click <strong>Received</strong> when the destination confirms arrival.
+  Transferring stock <strong>deducts</strong> from the source branch's inventory immediately. Click <strong>Received</strong> when the destination confirms arrival.
 </div>
 <div class="form-row">
   <div class="form-group"><label>From (Source)</label>
-    <select id="tx-from" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${brOpts}</select>
+    <select id="tx-from" onchange="window._txLines=[{itemId:'',desc:'',qty:1,unit:''}];renderTxLines()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${brOpts}</select>
   </div>
   <div class="form-group"><label>To (Destination)</label>
     <select id="tx-to" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${brOpts}</select>
@@ -4432,7 +4442,7 @@ function showTransferInventory() {
 <div class="form-group"><label>Notes / Purpose</label><input type="text" id="tx-notes" placeholder="e.g. Monthly branch replenishment"></div>
 <div style="margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <span style="font-size:12px;color:var(--text-secondary)">Items to transfer</span>
+    <span style="font-size:12px;color:var(--text-secondary)">Items to transfer <span id="tx-source-label" style="color:var(--accent)"></span></span>
     <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addTxLine()"><i class="ti ti-plus"></i>Add item</button>
   </div>
   <table class="je-lines">
@@ -4448,20 +4458,30 @@ function showTransferInventory() {
 }
 
 function renderTxLines() {
-  const items=state.inventory||[];
+  const fromId = document.getElementById('tx-from')?.value;
+  const branches = getBranches();
+  const fromBranch = branches.find(b=>b.id===fromId);
+  const branchStock = fromId ? getBranchStock(fromId) : {};
+  const items=(state.inventory||[]).filter(it=>fromId ? (branchStock[it.id]||0) > 0 : true);
+
+  const labelEl = document.getElementById('tx-source-label');
+  if(labelEl) labelEl.textContent = fromBranch ? `— showing stock at ${fromBranch.name}` : '';
+
   const tbody=document.getElementById('tx-lines-body');
   if(!tbody) return;
   tbody.innerHTML=(window._txLines||[]).map((l,i)=>{
-    const item=items.find(it=>it.id===l.itemId);
-    const itemOpts=items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-unit="${it.unit}" data-qty="${it.qty}">${it.name} (${it.qty} ${it.unit})</option>`).join('');
-    const over = item && (l.qty||0) > item.qty;
+    const item=(state.inventory||[]).find(it=>it.id===l.itemId);
+    const availQty = item ? (branchStock[item.id]||0) : 0;
+    const itemOpts=items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-unit="${it.unit}" data-qty="${branchStock[it.id]||0}">${it.name} (${branchStock[it.id]||0} ${it.unit})</option>`).join('');
+    const over = item && (l.qty||0) > availQty;
     return `<tr>
       <td><select onchange="selectTxItem(${i},this)" style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
         <option value="">— select —</option>${itemOpts.replace(`value="${l.itemId||''}"`,`value="${l.itemId||''}" selected`)}
       </select></td>
       <td style="text-align:center;font-size:12px;color:${over?'var(--red)':'var(--text-secondary)'}">
-        ${item?item.qty+' '+item.unit:'—'}
+        ${item?availQty+' '+item.unit:'—'}
         ${over?`<div style="font-size:10px;color:var(--red)">Exceeds!</div>`:''}
+        ${!fromId&&item?`<div style="font-size:9px;color:var(--text-tertiary)">Select source first</div>`:''}
       </td>
       <td>
         <input type="number" min="1" step="1" value="${l.qty||1}"
@@ -4493,18 +4513,44 @@ function saveTransfer() {
   if(fromId===toId){ alert('Source and destination cannot be the same.'); return; }
   const lines=(window._txLines||[]).filter(l=>l.itemId&&l.qty>0);
   if(!lines.length){ alert('Add at least one item to transfer.'); return; }
-  for(const l of lines){ const it=(state.inventory||[]).find(i=>i.id===l.itemId); if(it&&l.qty>it.qty){ alert('Not enough stock for "'+l.desc+'". Available: '+it.qty+' '+it.unit); return; } }
+
   const branches=getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const fromStock = getBranchStock(fromId);
+
+  // Validate against the SOURCE branch's actual stock (not main's)
+  for(const l of lines){
+    const it=(state.inventory||[]).find(i=>i.id===l.itemId);
+    const avail = fromStock[l.itemId]||0;
+    if(l.qty>avail){ alert('Not enough stock for "'+(it?it.name:l.desc)+'" at the source branch. Available: '+avail+' '+(it?it.unit:'')); return; }
+  }
+
   const toB=branches.find(b=>b.id===toId)||{name:toId};
-  lines.forEach(l=>{
-    const it=(state.inventory||[]).find(i=>i.id===l.itemId); if(!it) return;
-    it.qty=Math.max(0,it.qty-l.qty);
-    const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
-    if(!state.inventoryMovements) state.inventoryMovements=[];
-    const txNum=String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
-    state.inventoryMovements.push({id:movId,date,item:l.itemId,type:'out',qty:l.qty,ref:'TX-'+txNum,note:'Transfer to '+toB.name});
-  });
-  const id='TX-'+String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
+  const fromB=branches.find(b=>b.id===fromId)||{name:fromId};
+  const txNum=String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
+
+  // Only deduct from state.inventory (main warehouse) when the source IS main.
+  // For branch-to-branch transfers, the source branch's effective stock is
+  // computed dynamically by getBranchStock() from the transfer history itself —
+  // no separate deduction needed, it's automatically reflected once this transfer is saved.
+  if(fromId === mainId) {
+    lines.forEach(l=>{
+      const it=(state.inventory||[]).find(i=>i.id===l.itemId); if(!it) return;
+      it.qty=Math.max(0,it.qty-l.qty);
+      const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+      if(!state.inventoryMovements) state.inventoryMovements=[];
+      state.inventoryMovements.push({id:movId,date,item:l.itemId,type:'out',qty:l.qty,ref:'TX-'+txNum,note:'Transfer to '+toB.name});
+    });
+  } else {
+    // Branch-to-branch: log a movement note for traceability, but don't touch state.inventory
+    lines.forEach(l=>{
+      const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+      if(!state.inventoryMovements) state.inventoryMovements=[];
+      state.inventoryMovements.push({id:movId,date,item:l.itemId,type:'out',qty:l.qty,ref:'TX-'+txNum,note:'Transfer from '+fromB.name+' to '+toB.name});
+    });
+  }
+
+  const id='TX-'+txNum;
   if(!state.inventoryTransfers) state.inventoryTransfers=[];
   state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending'});
   save(); closeModal(); render();
@@ -4572,9 +4618,17 @@ function receiveTransfer(id) {
   t.receivedDate=today();
   t.receivedBy=currentUser.name;  // ← auto-stamp
   const branches=getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
   const fromB=branches.find(b=>b.id===t.fromBranch)||{name:t.fromBranch};
   const toB=branches.find(b=>b.id===t.toBranch)||{name:t.toBranch};
   t.lines.forEach(l=>{
+    // If receiving back into Main Warehouse, add the qty into state.inventory
+    // (branch stock is computed dynamically from transfer history, but main's
+    // stock is the literal state.inventory.qty value, so it needs the add-back)
+    if(t.toBranch === mainId) {
+      const it=(state.inventory||[]).find(i=>i.id===l.itemId);
+      if(it) it.qty = (it.qty||0) + (l.qty||0);
+    }
     const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
     if(!state.inventoryMovements) state.inventoryMovements=[];
     state.inventoryMovements.push({id:movId,date:t.receivedDate,item:l.itemId,type:'transfer',qty:l.qty,ref:id,
@@ -4594,20 +4648,10 @@ function deleteTransfer(id) {
 function showManageBranches() {
   const branches = getBranches();
   const items = state.inventory||[];
-  const transfers = state.inventoryTransfers||[];
 
-  // Compute per-branch stock
+  // Compute per-branch stock using the shared helper
   const branchStock = {};
-  branches.forEach(b => { branchStock[b.id] = {}; });
-  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  if(mainId) items.forEach(it => { branchStock[mainId][it.id] = it.qty; });
-  transfers.filter(t=>t.status==='received').forEach(t => {
-    t.lines.forEach(l => {
-      if(!l.itemId) return;
-      if(!branchStock[t.toBranch]) branchStock[t.toBranch] = {};
-      branchStock[t.toBranch][l.itemId] = (branchStock[t.toBranch][l.itemId]||0) + (l.qty||0);
-    });
-  });
+  branches.forEach(b => { branchStock[b.id] = getBranchStock(b.id); });
 
   const branchCards = branches.map(b => {
     const isMain = b.type==='main'||b.type==='warehouse';
