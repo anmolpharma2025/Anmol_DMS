@@ -3993,6 +3993,7 @@ ${lowStock.length ? `<div style="padding:10px 14px;background:var(--amber-bg);bo
   <div class="tab" onclick="invTab('transfers',this)">Transfers</div>
   <div class="tab" onclick="invTab('consolidated',this)">All Branches</div>
   <div class="tab" onclick="invTab('consigned',this)">Consigned Items</div>
+  <div class="tab" onclick="invTab('report',this)"><i class="ti ti-report" style="margin-right:4px"></i>Consolidated Report</div>
 </div>
 <div id="inv-body">${buildInventoryItems()}</div>`;
 }
@@ -4008,6 +4009,153 @@ function invTab(type, el) {
   else if(type==='transfers') body.innerHTML = buildInventoryTransfers();
   else if(type==='consolidated') body.innerHTML = buildConsolidatedInventory();
   else if(type==='consigned') body.innerHTML = buildConsignedItems();
+  else if(type==='report') body.innerHTML = buildConsolidatedReport();
+}
+
+// ── CONSOLIDATED REPORT (branches + consigned) ─────────────────────────────────
+function buildConsolidatedReport() {
+  const items = state.inventory||[];
+  const branches = getBranches();
+  const consigned = state.consignedItems||[];
+
+  // Per-branch stock for every item
+  const branchStock = {};
+  branches.forEach(b => { branchStock[b.id] = getBranchStock(b.id); });
+
+  // Active consigned qty per item (still out with consignee, not yet sold/returned)
+  const consignedByItem = {};
+  consigned.filter(c=>c.status==='active').forEach(c => {
+    if(!c.itemId) return;
+    consignedByItem[c.itemId] = (consignedByItem[c.itemId]||0) + (c.qty||0);
+  });
+
+  const rows = items.map(it => {
+    const branchTotal = branches.reduce((s,b)=>s+(branchStock[b.id]?.[it.id]||0),0);
+    const consignedQty = consignedByItem[it.id]||0;
+    const grandTotal = branchTotal + consignedQty;
+    const grandValue = grandTotal * (it.costPrice||0);
+    const isLow = grandTotal>0 && grandTotal<=it.reorderLevel;
+    const isOut = grandTotal===0;
+    return { it, branchTotal, consignedQty, grandTotal, grandValue, isLow, isOut };
+  });
+
+  const grandTotalUnits = rows.reduce((s,r)=>s+r.grandTotal,0);
+  const grandTotalValue = rows.reduce((s,r)=>s+r.grandValue,0);
+  const grandConsignedUnits = rows.reduce((s,r)=>s+r.consignedQty,0);
+  const grandConsignedValue = rows.reduce((s,r)=>s+r.consignedQty*(r.it.costPrice||0),0);
+  const grandBranchUnits = rows.reduce((s,r)=>s+r.branchTotal,0);
+  const outOfStockCount = rows.filter(r=>r.isOut && r.consignedQty===0).length;
+  const lowStockCount = rows.filter(r=>r.isLow).length;
+
+  const branchCols = branches.map(b=>`<th style="text-align:right;font-size:10px;color:var(--text-secondary)">${b.name}</th>`).join('');
+
+  return `
+<div style="padding:10px 16px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:16px;font-size:13px;color:var(--accent)">
+  <i class="ti ti-report" style="margin-right:6px"></i>
+  Full inventory picture — combines stock across <strong>${branches.length}</strong> branches/warehouses <strong>and</strong> items currently out on consignment.
+</div>
+
+<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-packages"></i>Total SKUs</div><div class="kpi-value">${items.length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-building-store"></i>In Branches</div><div class="kpi-value">${grandBranchUnits.toLocaleString()}</div><div class="kpi-sub">units on hand</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-truck-delivery"></i>On Consignment</div><div class="kpi-value" style="color:var(--accent)">${grandConsignedUnits.toLocaleString()}</div><div class="kpi-sub">${fmt(grandConsignedValue)} at cost</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-stack-2"></i>Grand Total Units</div><div class="kpi-value">${grandTotalUnits.toLocaleString()}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-coin"></i>Grand Total Value</div><div class="kpi-value">${fmt(grandTotalValue)}</div><div class="kpi-sub">at cost price</div></div>
+</div>
+
+${(outOfStockCount>0||lowStockCount>0)?`<div style="display:flex;gap:10px;margin-bottom:16px">
+  ${outOfStockCount>0?`<div style="flex:1;padding:8px 12px;background:var(--red-bg,rgba(239,68,68,0.08));border:1px solid var(--red);border-radius:var(--radius-md);font-size:12px;color:var(--red)"><i class="ti ti-alert-circle" style="margin-right:5px"></i><strong>${outOfStockCount}</strong> item(s) fully out of stock (excluding consigned)</div>`:''}
+  ${lowStockCount>0?`<div style="flex:1;padding:8px 12px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-alert-triangle" style="margin-right:5px"></i><strong>${lowStockCount}</strong> item(s) at or below reorder level</div>`:''}
+</div>`:''}
+
+<div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2" style="vertical-align:bottom">Item ID</th>
+      <th rowspan="2" style="vertical-align:bottom">Name</th>
+      <th rowspan="2" style="vertical-align:bottom">Unit</th>
+      <th colspan="${branches.length}" style="text-align:center;background:var(--bg-secondary);font-size:10px;color:var(--text-secondary)">Branch Stock</th>
+      <th rowspan="2" style="text-align:right;vertical-align:bottom;color:var(--accent)">Consigned</th>
+      <th rowspan="2" style="text-align:right;vertical-align:bottom;font-weight:700">Grand Total</th>
+      <th rowspan="2" style="text-align:right;vertical-align:bottom">Total Value</th>
+      <th rowspan="2" style="vertical-align:bottom">Status</th>
+    </tr>
+    <tr>${branchCols}</tr>
+  </thead>
+  <tbody>
+  ${rows.length===0?`<tr><td colspan="${5+branches.length}" style="text-align:center;padding:48px;color:var(--text-tertiary)">No inventory items yet.</td></tr>`:
+  rows.map(r=>`<tr>
+    <td class="mono">${r.it.id}</td>
+    <td style="font-weight:500">${r.it.name}</td>
+    <td style="color:var(--text-secondary)">${r.it.unit}</td>
+    ${branches.map(b=>`<td style="text-align:right;color:var(--text-secondary)">${branchStock[b.id]?.[r.it.id]||0}</td>`).join('')}
+    <td style="text-align:right;color:${r.consignedQty>0?'var(--accent)':'var(--text-tertiary)'};font-weight:${r.consignedQty>0?'600':'400'}">${r.consignedQty||'—'}</td>
+    <td style="text-align:right;font-weight:700;color:${r.isOut?'var(--red)':r.isLow?'var(--amber)':'var(--text-primary)'}">${r.grandTotal}</td>
+    <td style="text-align:right;font-weight:500">${fmt(r.grandValue)}</td>
+    <td>${r.isOut&&r.consignedQty===0?`<span class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">Out of Stock</span>`:r.isLow?`<span class="badge" style="background:var(--amber-bg);color:var(--amber)">Low</span>`:`<span class="badge" style="background:var(--green-bg,rgba(34,197,94,0.1));color:var(--green)">OK</span>`}</td>
+  </tr>`).join('')}
+  </tbody>
+  <tfoot>
+    <tr style="background:var(--bg-card);font-weight:700">
+      <td colspan="${3+branches.length}">TOTAL</td>
+      <td style="text-align:right;color:var(--accent)">${grandConsignedUnits.toLocaleString()}</td>
+      <td style="text-align:right">${grandTotalUnits.toLocaleString()}</td>
+      <td style="text-align:right">${fmt(grandTotalValue)}</td>
+      <td></td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+<div style="display:flex;justify-content:flex-end;margin-top:12px">
+  <button class="btn" onclick="printConsolidatedReport()"><i class="ti ti-printer"></i>Print Report</button>
+</div>`;
+}
+
+function printConsolidatedReport() {
+  const cp = getCompanyProfile();
+  const items = state.inventory||[];
+  const branches = getBranches();
+  const consigned = state.consignedItems||[];
+  const branchStock = {};
+  branches.forEach(b => { branchStock[b.id] = getBranchStock(b.id); });
+  const consignedByItem = {};
+  consigned.filter(c=>c.status==='active').forEach(c => { if(c.itemId) consignedByItem[c.itemId]=(consignedByItem[c.itemId]||0)+(c.qty||0); });
+
+  const rows = items.map(it => {
+    const branchTotal = branches.reduce((s,b)=>s+(branchStock[b.id]?.[it.id]||0),0);
+    const consignedQty = consignedByItem[it.id]||0;
+    return { it, branchTotal, consignedQty, grandTotal: branchTotal+consignedQty };
+  });
+  const grandUnits = rows.reduce((s,r)=>s+r.grandTotal,0);
+  const grandValue = rows.reduce((s,r)=>s+r.grandTotal*(r.it.costPrice||0),0);
+
+  const tableRows = rows.map(r=>`<tr>
+    <td>${r.it.id}</td><td>${r.it.name}</td><td>${r.it.unit}</td>
+    ${branches.map(b=>`<td style="text-align:right">${branchStock[b.id]?.[r.it.id]||0}</td>`).join('')}
+    <td style="text-align:right">${r.consignedQty||0}</td>
+    <td style="text-align:right;font-weight:700">${r.grandTotal}</td>
+    <td style="text-align:right">${fmt(r.grandTotal*(r.it.costPrice||0))}</td>
+  </tr>`).join('');
+
+  const w = window.open('','_blank','width=1000,height=700');
+  w.document.write(`<!DOCTYPE html><html><head><title>Consolidated Inventory Report</title>
+<style>body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#111}
+h2{margin:0 0 2px}h3{margin:0 0 4px;color:#555}
+.meta{font-size:11px;color:#777;margin-bottom:14px}
+table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px}
+th{background:#f5f5f5;font-weight:600}tfoot td{font-weight:700;background:#f9f9f9;border-top:2px solid #333}
+@media print{button{display:none}}</style></head><body>
+<h2>${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</h2>
+<h3>Consolidated Inventory Report</h3>
+<div class="meta">Generated: ${new Date().toLocaleString()} · Branches: ${branches.length} · SKUs: ${items.length}</div>
+<table>
+<thead><tr><th>Item ID</th><th>Name</th><th>Unit</th>${branches.map(b=>`<th style="text-align:right">${b.name}</th>`).join('')}<th style="text-align:right">Consigned</th><th style="text-align:right">Grand Total</th><th style="text-align:right">Value</th></tr></thead>
+<tbody>${tableRows}</tbody>
+<tfoot><tr><td colspan="${3+branches.length}">TOTAL</td><td style="text-align:right">${rows.reduce((s,r)=>s+r.consignedQty,0)}</td><td style="text-align:right">${grandUnits}</td><td style="text-align:right">${fmt(grandValue)}</td></tr></tfoot>
+</table>
+<script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  w.document.close();
 }
 
 // ── CONSIGNED ITEMS ───────────────────────────────────────────────────────────
