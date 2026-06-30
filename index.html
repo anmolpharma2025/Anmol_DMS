@@ -483,7 +483,8 @@ function fbSaveMeta() {
       const localUsers   = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
       const localRoles   = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
       const localCompany = JSON.parse(localStorage.getItem('anmolpharma_company') || '{}');
-      // Fetch remote first and merge so we never push a subset
+      const localBranches= JSON.parse(localStorage.getItem('anmolpharma_branches') || '[]');
+      // Fetch remote first and merge roles so we never push a subset
       let remoteRoles = {};
       try {
         const snap = await db.doc(FB_META_DOC).get();
@@ -494,6 +495,7 @@ function fbSaveMeta() {
         users:        localUsers,
         customRoles:  mergedRoles,
         company:      localCompany,
+        branches:     localBranches,
         updatedAt:    Date.now(),
         deviceId:     FB_DEVICE_ID,
       };
@@ -554,7 +556,32 @@ function fbListenMeta() {
 
     if(meta.company && Object.keys(meta.company).length > 0)
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+    if(meta.branches && meta.branches.length > 0)
+      try { localStorage.setItem('anmolpharma_branches', JSON.stringify(meta.branches)); } catch(e) {}
+  } catch(e) { console.error('fbLoadMeta:', e); }
+}
 
+// ── LISTEN for meta changes (users/roles added on another device) ─────────────
+function fbListenMeta() {
+  if(!db) return;
+  db.doc(FB_META_DOC).onSnapshot(doc => {
+    if(!doc.exists || !doc.data()) return;
+    const meta = doc.data();
+    if(meta.deviceId === FB_DEVICE_ID) return;
+    if(meta.users && meta.users.length > 0) {
+      const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+      if(meta.users.length >= localUsers.length)
+        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+    }
+    if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
+      const localRoles = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
+      const merged = { ...localRoles, ...meta.customRoles };
+      try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
+    }
+    if(meta.company && Object.keys(meta.company).length > 0)
+      try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+    if(meta.branches && meta.branches.length > 0)
+      try { localStorage.setItem('anmolpharma_branches', JSON.stringify(meta.branches)); } catch(e) {}
     if(typeof render === 'function') render();
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
@@ -2362,6 +2389,7 @@ function renderInvoices(c, ta) {
       ${lastUpdatedCell(inv)}
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
@@ -2705,8 +2733,53 @@ ${(state.collections||[]).filter(r=>r.invoice===inv.id).length>0?`
 
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
+  <button class="btn" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i>Edit #</button>
   <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print</button>
 </div>`);
+}
+
+function showEditInvoiceNumber(id) {
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px"></i>Edit Invoice Number</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 14px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:16px;font-size:12px;color:var(--amber)">
+  <i class="ti ti-alert-triangle" style="margin-right:5px"></i>
+  Changing the invoice number will also update all linked collections, sales returns, and references.
+</div>
+<div class="form-group">
+  <label>Current Invoice Number</label>
+  <div style="font-size:16px;font-weight:700;color:var(--text-primary);padding:8px 0;font-family:monospace">${inv.id}</div>
+</div>
+<div class="form-group">
+  <label>New Invoice Number</label>
+  <input type="text" id="edit-inv-num" value="${inv.id}" style="font-family:monospace;font-size:14px;font-weight:600" placeholder="e.g. INV-001">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveInvoiceNumber('${inv.id}')"><i class="ti ti-check"></i>Save</button>
+</div>`);
+  setTimeout(()=>{ const el=document.getElementById('edit-inv-num'); if(el){ el.focus(); el.select(); } },100);
+}
+
+function saveInvoiceNumber(oldId) {
+  const newId = (document.getElementById('edit-inv-num')?.value||'').trim();
+  if(!newId) { alert('Invoice number cannot be empty.'); return; }
+  if(newId === oldId) { closeModal(); return; }
+  // Check for duplicate
+  if(state.invoices.find(i=>i.id===newId)) { alert(`Invoice number "${newId}" already exists.`); return; }
+  // Update invoice
+  const inv = state.invoices.find(i=>i.id===oldId);
+  if(!inv) return;
+  inv.id = newId;
+  // Update linked collections
+  (state.collections||[]).forEach(c=>{ if(c.invoice===oldId) c.invoice=newId; });
+  // Update linked sales returns
+  (state.salesReturns||[]).forEach(r=>{ if(r.invoiceRef===oldId) r.invoiceRef=newId; });
+  // Update SO ref
+  (state.invoices||[]).forEach(i=>{ if(i.soRef===oldId) i.soRef=newId; });
+  stampUpdate(inv);
+  save(); closeModal(); render();
 }
 
 function printInvoice(id) {
@@ -3942,10 +4015,12 @@ function saveCollection() {
 
 // ── INVENTORY TRACKER ────────────────────────────────────────────────────────
 function renderInventory(c, ta) {
-  ta.innerHTML = `
+  const ta = document.getElementById('page-topbar-actions');
+  if(ta) ta.innerHTML = `
     <button class="btn" onclick="showReceiveFromPO()"><i class="ti ti-package-import"></i>Receive from PO</button>
     <button class="btn" onclick="showTransferInventory()"><i class="ti ti-arrows-transfer-up"></i>Transfer</button>
     <button class="btn" onclick="showAddMovement()"><i class="ti ti-arrow-right-left"></i>Stock Movement</button>
+    <button class="btn" onclick="showManageBranches()"><i class="ti ti-building-store"></i>Manage Branches</button>
     <button class="btn primary" onclick="showAddItem()"><i class="ti ti-plus"></i>Add Item</button>`;
   const totalValue = state.inventory.reduce((s,it)=>s+(it.qty*it.costPrice),0);
   const lowStock = state.inventory.filter(it=>it.qty<=it.reorderLevel);
@@ -4219,7 +4294,7 @@ function buildConsolidatedInventory() {
   const branchStock = {}; // { branchId: { itemId: qty } }
   branches.forEach(b => { branchStock[b.id] = {}; });
   // Main warehouse starts with current inventory quantities
-  const mainId = branches[0]?.id;
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
   if(mainId) {
     items.forEach(it => { branchStock[mainId][it.id] = it.qty; });
   }
@@ -4315,7 +4390,10 @@ function getBranches() {
     { id:'BR-003', name:'Branch 2 — Cebu', location:'Cebu City, Cebu', type:'branch' },
   ];
 }
-function saveBranches(b) { try { localStorage.setItem('anmolpharma_branches', JSON.stringify(b)); } catch(e) {} }
+function saveBranches(b) {
+  try { localStorage.setItem('anmolpharma_branches', JSON.stringify(b)); } catch(e) {}
+  fbSaveMeta();
+}
 
 function buildInventoryTransfers() {
   const transfers = (state.inventoryTransfers||[]);
@@ -4565,34 +4643,130 @@ function deleteTransfer(id) {
 }
 
 function showManageBranches() {
-  const branches=getBranches();
+  const branches = getBranches();
+  const items = state.inventory||[];
+  const transfers = state.inventoryTransfers||[];
+
+  // Compute per-branch stock
+  const branchStock = {};
+  branches.forEach(b => { branchStock[b.id] = {}; });
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  if(mainId) items.forEach(it => { branchStock[mainId][it.id] = it.qty; });
+  transfers.filter(t=>t.status==='received').forEach(t => {
+    t.lines.forEach(l => {
+      if(!l.itemId) return;
+      if(!branchStock[t.toBranch]) branchStock[t.toBranch] = {};
+      branchStock[t.toBranch][l.itemId] = (branchStock[t.toBranch][l.itemId]||0) + (l.qty||0);
+    });
+  });
+
+  const branchCards = branches.map(b => {
+    const isMain = b.type==='main'||b.type==='warehouse';
+    const totalQty = items.reduce((s,it)=>s+(branchStock[b.id]?.[it.id]||0),0);
+    const totalVal = items.reduce((s,it)=>s+(branchStock[b.id]?.[it.id]||0)*(it.costPrice||0),0);
+    return `<div style="background:var(--bg-primary);border:1.5px solid ${isMain?'var(--accent)':'var(--border-light)'};border-radius:var(--radius-md);padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px;flex:1">
+          <i class="ti ti-${isMain?'building-warehouse':'building-store'}" style="font-size:22px;color:${isMain?'var(--accent)':'var(--text-secondary)'}"></i>
+          <div>
+            <div style="font-weight:600;font-size:14px">${b.name} ${isMain?`<span style="font-size:10px;background:var(--accent);color:#fff;padding:1px 7px;border-radius:10px;margin-left:4px">MAIN</span>`:''}</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:2px"><i class="ti ti-map-pin" style="font-size:11px"></i> ${b.location||'No location set'}</div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">
+              <span style="margin-right:12px"><strong>${totalQty.toLocaleString()}</strong> units</span>
+              <span><strong>${fmt(totalVal)}</strong> value at cost</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditBranch('${b.id}')"><i class="ti ti-edit"></i>Edit</button>
+          ${!isMain?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--accent);border-color:var(--accent)" onclick="setMainBranch('${b.id}')"><i class="ti ti-star"></i>Set Main</button>`:''}
+          <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteBranch('${b.id}')"><i class="ti ti-trash"></i></button>
+        </div>
+      </div>
+      ${items.length>0?`
+      <div style="margin-top:10px;border-top:1px solid var(--border-light);padding-top:8px">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);margin-bottom:6px">Stock at this branch</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+          ${items.slice(0,6).map(it=>{
+            const qty = branchStock[b.id]?.[it.id]||0;
+            const isLow = qty>0 && qty<=it.reorderLevel;
+            const isOut = qty===0;
+            return `<div style="font-size:11px;padding:3px 6px;border-radius:4px;background:var(--bg-secondary);display:flex;justify-content:space-between">
+              <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%">${it.name}</span>
+              <span style="font-weight:600;color:${isOut?'var(--text-tertiary)':isLow?'var(--amber)':'var(--green)'}">${qty}</span>
+            </div>`;
+          }).join('')}
+          ${items.length>6?`<div style="font-size:11px;color:var(--text-tertiary);padding:3px 6px">+${items.length-6} more items…</div>`:''}
+        </div>
+      </div>`:''}
+    </div>`;
+  }).join('');
+
   showModal(`
 <div class="modal-head"><h3><i class="ti ti-building-store" style="margin-right:6px"></i>Manage Branches & Warehouses</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div id="branch-list" style="margin-bottom:14px">
-  ${branches.map(b=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light);margin-bottom:8px">
-    <i class="ti ti-${b.type==='warehouse'?'building-warehouse':'building-store'}" style="color:var(--accent);font-size:18px;flex-shrink:0"></i>
-    <div style="flex:1">
-      <div style="font-weight:500;font-size:13px">${b.name}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">${b.location} · <span style="text-transform:capitalize">${b.type}</span></div>
+<div style="max-height:60vh;overflow-y:auto;margin-bottom:14px">
+  ${branches.length===0?`<div style="text-align:center;padding:24px;color:var(--text-tertiary)">No branches yet. Add one below.</div>`:branchCards}
+</div>
+<div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:14px;border:1px solid var(--border-light)">
+  <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:10px"><i class="ti ti-plus" style="margin-right:5px"></i>Add New Branch / Warehouse</div>
+  <div class="form-row">
+    <div class="form-group"><label>Name</label><input type="text" id="br-name" placeholder="e.g. Branch 3 — Davao"></div>
+    <div class="form-group"><label>Type</label>
+      <select id="br-type">
+        <option value="branch">Branch</option>
+        <option value="warehouse">Warehouse</option>
+        <option value="main">Main Warehouse</option>
+      </select>
     </div>
-    <span class="mono" style="font-size:11px;color:var(--text-tertiary)">${b.id}</span>
-    <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteBranch('${b.id}')"><i class="ti ti-trash"></i></button>
-  </div>`).join('')}
-</div>
-<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">Add New Location</div>
-<div class="form-row">
-  <div class="form-group"><label>Name</label><input type="text" id="br-name" placeholder="e.g. Branch 3 — Davao"></div>
-  <div class="form-group"><label>Type</label>
-    <select id="br-type" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-      <option value="branch">Branch</option><option value="warehouse">Warehouse</option>
-    </select>
   </div>
-</div>
-<div class="form-group"><label>Location / Address</label><input type="text" id="br-loc" placeholder="City, Province"></div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-  <button class="btn" onclick="closeModal()">Close</button>
-  <button class="btn primary" onclick="addBranch()"><i class="ti ti-plus"></i>Add Location</button>
+  <div class="form-group"><label>Location / Address</label><input type="text" id="br-loc" placeholder="City, Province"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn primary" onclick="addBranch()"><i class="ti ti-plus"></i>Add Branch</button>
+  </div>
 </div>`);
+}
+
+function showEditBranch(id) {
+  const branches = getBranches();
+  const b = branches.find(b=>b.id===id);
+  if(!b) return;
+  showModal(`
+<div class="modal-head"><h3>Edit Branch — ${b.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-group"><label>Name</label><input type="text" id="ebr-name" value="${b.name}"></div>
+<div class="form-group"><label>Type</label>
+  <select id="ebr-type">
+    <option value="branch" ${b.type==='branch'?'selected':''}>Branch</option>
+    <option value="warehouse" ${b.type==='warehouse'?'selected':''}>Warehouse</option>
+    <option value="main" ${b.type==='main'?'selected':''}>Main Warehouse</option>
+  </select>
+</div>
+<div class="form-group"><label>Location / Address</label><input type="text" id="ebr-loc" value="${b.location||''}"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+  <button class="btn" onclick="showManageBranches()">Cancel</button>
+  <button class="btn primary" onclick="saveEditBranch('${id}')"><i class="ti ti-check"></i>Save</button>
+</div>`);
+}
+
+function saveEditBranch(id) {
+  const branches = getBranches();
+  const b = branches.find(b=>b.id===id);
+  if(!b) return;
+  b.name     = document.getElementById('ebr-name').value.trim() || b.name;
+  b.type     = document.getElementById('ebr-type').value;
+  b.location = document.getElementById('ebr-loc').value.trim();
+  saveBranches(branches);
+  showManageBranches();
+}
+
+function setMainBranch(id) {
+  const branches = getBranches();
+  // Demote current main to warehouse, promote selected to main
+  branches.forEach(b => { if(b.type==='main') b.type='warehouse'; });
+  const b = branches.find(b=>b.id===id);
+  if(b) b.type='main';
+  saveBranches(branches);
+  showManageBranches();
 }
 
 function addBranch() {
