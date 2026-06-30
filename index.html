@@ -734,6 +734,8 @@ const ACTION_MAP = {
   'delete users':                'delete_user',
   'manage roles':                'manage_roles',
   'delete purchase orders':      'delete_po',
+  'initiate inventory transfers':'transfer_inventory',
+  'confirm transfer receipt':    'transfer_inventory',
 };
 
 function requireAdmin(action) {
@@ -985,7 +987,7 @@ function renderUsers(c, ta) {
   Only <strong>Admin</strong> users can manage accounts. Click <strong>Customize Access</strong> to set per-user page permissions that override the role defaults.
 </div>
 <table>
-  <thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>Access Mode</th><th>Pages Accessible</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>Branch</th><th>Access Mode</th><th>Pages Accessible</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
   <tbody>
   ${users.map(u => {
     const hasCustom = u.customPages && u.customPages.length > 0 && u.role !== 'admin';
@@ -995,6 +997,7 @@ function renderUsers(c, ta) {
     const accessColor = u.role==='admin' ? 'var(--green)' : (hasCustom||hasCustomActions) ? 'var(--amber)' : 'var(--text-secondary)';
     const pageList = u.role==='admin' ? 'All pages' : effectivePages.join(', ');
     const masked = '•'.repeat(Math.min(u.password?.length||8, 12));
+    const userBranch = u.branchId ? getBranches().find(b=>b.id===u.branchId) : null;
     return `<tr>
       <td class="mono">${u.id}</td>
       <td style="font-weight:500">${u.name}</td>
@@ -1005,6 +1008,7 @@ function renderUsers(c, ta) {
         <button onclick="togglePwVisible('${u.id}')" id="pw-btn-${u.id}" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:12px;margin-left:4px;padding:0 2px" title="Show/hide password"><i class="ti ti-eye" id="pw-icon-${u.id}"></i></button>
       </td>
       <td><span class="badge" style="background:${(roleColors[u.role]||'var(--text-secondary)')}22;color:${roleColors[u.role]||'var(--text-secondary)'}">${u.role}</span></td>
+      <td>${userBranch?`<span style="font-size:11px;color:var(--accent)"><i class="ti ti-building-store" style="font-size:11px;margin-right:2px"></i>${userBranch.name}</span>`:`<span style="font-size:11px;color:var(--text-tertiary)">All branches</span>`}</td>
       <td>
         <span style="font-size:12px;font-weight:500;color:${accessColor}">${accessLabel}</span>
         ${hasCustomActions?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${u.customActions.length} actions</div>`:''}
@@ -1260,6 +1264,8 @@ function showAddUser() {
   const allRoles = getAllRoles();
   const roleOpts = Object.keys(allRoles).filter(r=>r!=='admin').map(r=>`<option value="${r}">${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('') + '<option value="admin">Admin — Full access</option>';
   const defaultPages = getRolePages('accountant');
+  const branches = getBranches();
+  const branchOpts = `<option value="">— All branches (no restriction) —</option>` + branches.map(b=>`<option value="${b.id}">${b.name}${b.type==='main'||b.type==='warehouse'?' (Main)':''}</option>`).join('');
   showModal(`
 <div class="modal-head"><h3>Add User Account</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
@@ -1270,10 +1276,16 @@ function showAddUser() {
   <div class="form-group"><label>Password</label><input type="password" id="nu-pass" placeholder="Min. 6 characters"></div>
   <div class="form-group"><label>Confirm Password</label><input type="password" id="nu-pass2" placeholder="Re-enter password"></div>
 </div>
-<div class="form-group"><label>Role</label>
-  <select id="nu-role" onchange="setRoleDefaultAccess('nu', this.value)">
-    ${roleOpts}
-  </select>
+<div class="form-row">
+  <div class="form-group"><label>Role</label>
+    <select id="nu-role" onchange="setRoleDefaultAccess('nu', this.value)">
+      ${roleOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Assigned Branch <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>
+    <select id="nu-branch">${branchOpts}</select>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">Restricts inventory transfers to/from this branch only</div>
+  </div>
 </div>
 <div id="nu-pages-section">
 <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin:12px 0 6px">Page Access</div>
@@ -1297,6 +1309,7 @@ function saveNewUser() {
   const pass     = document.getElementById('nu-pass').value;
   const pass2    = document.getElementById('nu-pass2').value;
   const role     = document.getElementById('nu-role').value;
+  const branchId = document.getElementById('nu-branch')?.value || '';
   if(!name||!username) { alert('Name and username are required.'); return; }
   if(pass.length < 6)  { alert('Password must be at least 6 characters.'); return; }
   if(pass !== pass2)   { alert('Passwords do not match.'); return; }
@@ -1308,6 +1321,7 @@ function saveNewUser() {
   const roleDefaults = getRolePages(role);
   const isDifferent = role !== 'admin' && JSON.stringify([...selectedPages].sort()) !== JSON.stringify([...roleDefaults].sort());
   const userObj = { id, username, password:pass, name, role, active:true };
+  if(branchId) userObj.branchId = branchId;
   if(isDifferent && selectedPages.length > 0) userObj.customPages = selectedPages;
   users.push(userObj);
   saveUsers(users); closeModal(); render();
@@ -1317,18 +1331,25 @@ function showEditUser(id) {
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
+  const branches = getBranches();
+  const branchOpts = `<option value="">— All branches (no restriction) —</option>` + branches.map(b=>`<option value="${b.id}" ${u.branchId===b.id?'selected':''}>${b.name}${b.type==='main'||b.type==='warehouse'?' (Main)':''}</option>`).join('');
   showModal(`
 <div class="modal-head"><h3>Edit User: ${u.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-group"><label>Full Name</label><input type="text" id="eu-name" value="${u.name}"></div>
 <div class="form-group"><label>New Password <span style="color:var(--text-tertiary);font-weight:400">(leave blank to keep current)</span></label>
   <input type="password" id="eu-pass" placeholder="New password">
 </div>
-<div class="form-group"><label>Role</label>
-  <select id="eu-role">
-    ${Object.keys(getAllRoles()).filter(r=>r!=='admin').map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
-    <option value="admin" ${u.role==='admin'?'selected':''}>Admin — Full access</option>
-  </select>
-</div>
+<div class="form-row">
+  <div class="form-group"><label>Role</label>
+    <select id="eu-role">
+      ${Object.keys(getAllRoles()).filter(r=>r!=='admin').map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
+      <option value="admin" ${u.role==='admin'?'selected':''}>Admin — Full access</option>
+    </select>
+  </div>
+  <div class="form-group"><label>Assigned Branch <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>
+    <select id="eu-branch">${branchOpts}</select>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">Restricts inventory transfers to/from this branch only</div>
+  </div>
 </div>
 <div style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
   <i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px;margin-right:4px"></i>
@@ -1348,6 +1369,8 @@ function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const newPass = document.getElementById('eu-pass').value;
   if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password=newPass; }
   u.role = document.getElementById('eu-role').value;
+  const branchId = document.getElementById('eu-branch')?.value || '';
+  if(branchId) u.branchId = branchId; else delete u.branchId;
   saveUsers(users); closeModal(); render();
 }
 
@@ -4565,19 +4588,29 @@ function getBranchStock(branchId) {
 }
 
 function showTransferInventory() {
+  if(!requireAdmin('initiate inventory transfers')) return;
   const branches=getBranches();
   if(branches.length<2){ alert('You need at least 2 branches/warehouses to make a transfer.\nGo to Inventory → Transfers → Manage Branches to add them.'); return; }
+
+  // If the current user is assigned to a specific branch (non-admin), lock the
+  // "From" dropdown to that branch only — they can't initiate transfers from elsewhere.
+  const myBranchId = (currentUser && currentUser.role!=='admin') ? currentUser.branchId : null;
+  const fromBranches = myBranchId ? branches.filter(b=>b.id===myBranchId) : branches;
+  if(myBranchId && fromBranches.length===0) { alert('Your assigned branch could not be found. Contact your administrator.'); return; }
+
   const brOpts=branches.map(b=>`<option value="${b.id}">${b.name} — ${b.location}</option>`).join('');
+  const fromOpts=fromBranches.map(b=>`<option value="${b.id}">${b.name} — ${b.location}</option>`).join('');
   window._txLines=[{itemId:'',desc:'',qty:1,unit:''}];
   showModal(`
 <div class="modal-head"><h3><i class="ti ti-arrows-transfer-up" style="margin-right:6px"></i>Transfer Inventory</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:10px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--accent)">
   <i class="ti ti-info-circle" style="margin-right:5px"></i>
   Transferring stock <strong>deducts</strong> from the source branch's inventory immediately. Click <strong>Received</strong> when the destination confirms arrival.
+  ${myBranchId?`<br><i class="ti ti-lock" style="margin-right:5px"></i>You can only initiate transfers from your assigned branch.`:''}
 </div>
 <div class="form-row">
-  <div class="form-group"><label>From (Source)</label>
-    <select id="tx-from" onchange="window._txLines=[{itemId:'',desc:'',qty:1,unit:''}];renderTxLines()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${brOpts}</select>
+  <div class="form-group"><label>From (Source)${myBranchId?' <span style="color:var(--text-tertiary);font-weight:400">(your branch)</span>':''}</label>
+    <select id="tx-from" ${myBranchId?'disabled':''} onchange="window._txLines=[{itemId:'',desc:'',qty:1,unit:''}];renderTxLines()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${fromOpts}</select>
   </div>
   <div class="form-group"><label>To (Destination)</label>
     <select id="tx-to" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${brOpts}</select>
@@ -4756,10 +4789,16 @@ ${t.notes?`<div style="padding:8px 12px;background:var(--bg-primary);border-radi
 }
 
 function receiveTransfer(id) {
-  const canReceive=currentUser&&(currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(!canReceive){ alert('Only Admin or Warehouse staff can confirm receipt.'); return; }
+  if(!requireAdmin('confirm transfer receipt')) return;
   const t=(state.inventoryTransfers||[]).find(t=>t.id===id);
   if(!t||t.status==='received') return;
+  // If the user is assigned to a specific branch, they can only confirm
+  // receipt for transfers arriving AT their own branch.
+  const myBranchId = (currentUser && currentUser.role!=='admin') ? currentUser.branchId : null;
+  if(myBranchId && t.toBranch !== myBranchId) {
+    alert('You can only confirm receipt for transfers arriving at your assigned branch.');
+    return;
+  }
   const totalQty=t.lines.reduce((s,l)=>s+(l.qty||0),0);
   if(!confirm('Confirm receipt of '+totalQty+' units at destination?\n\nThis will be stamped under your name: '+currentUser.name)) return;
   t.status='received';
