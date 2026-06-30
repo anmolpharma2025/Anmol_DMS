@@ -478,25 +478,37 @@ function fbListen() {
   });
 }
 let _fbMetaTimer = null;
+let _fbMetaLoadedOnce = false; // becomes true after the first fbLoadMeta() completes
+
 function fbSaveMeta() {
   if(!db) return;
   if(_fbMetaTimer) clearTimeout(_fbMetaTimer);
   _fbMetaTimer = setTimeout(async () => {
+    // Don't push to Firestore until we've successfully loaded the latest data first.
+    // This prevents a freshly-opened device (with only the default admin user)
+    // from overwriting the real user list before it has a chance to sync down.
+    if(!_fbMetaLoadedOnce) return;
     try {
-      // Read current local state for each key
       const localUsers   = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
       const localRoles   = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
       const localCompany = JSON.parse(localStorage.getItem('anmolpharma_company') || '{}');
       const localBranches= JSON.parse(localStorage.getItem('anmolpharma_branches') || '[]');
-      // Fetch remote first and merge roles so we never push a subset
+      // Fetch remote first and merge roles + users so we never push a subset
       let remoteRoles = {};
+      let remoteUsers = [];
       try {
         const snap = await db.doc(FB_META_DOC).get();
-        if(snap.exists && snap.data()?.customRoles) remoteRoles = snap.data().customRoles;
+        if(snap.exists) {
+          const d = snap.data();
+          if(d?.customRoles) remoteRoles = d.customRoles;
+          if(d?.users) remoteUsers = d.users;
+        }
       } catch(e) {}
       const mergedRoles = { ...remoteRoles, ...localRoles };
+      // Users: use whichever list has more entries (never shrink the user base)
+      const finalUsers = (remoteUsers.length > localUsers.length) ? remoteUsers : localUsers;
       const meta = {
-        users:        localUsers,
+        users:        finalUsers,
         customRoles:  mergedRoles,
         company:      localCompany,
         branches:     localBranches,
@@ -504,8 +516,9 @@ function fbSaveMeta() {
         deviceId:     FB_DEVICE_ID,
       };
       await db.doc(FB_META_DOC).set(meta);
-      // Update local with merged
+      // Update local with merged/final values
       try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(mergedRoles)); } catch(e) {}
+      try { localStorage.setItem('anmolpharma_users', JSON.stringify(finalUsers)); } catch(e) {}
     } catch(e) { console.error('fbSaveMeta:', e); }
   }, 1500);
 }
@@ -800,10 +813,18 @@ function showAppScreen() {
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       render();
     }
+    // Now safe to push local meta changes (users/roles) to Firestore
+    _fbMetaLoadedOnce = true;
     // Start listening for real-time updates from other devices
     fbListen();
     fbListenMeta();
+  }).catch(() => {
+    // Even if the load fails (offline, etc.), allow saves after a timeout
+    // so the app doesn't get permanently stuck unable to sync.
+    _fbMetaLoadedOnce = true;
   });
+  // Absolute fallback: if Firestore load hangs for any reason, unblock saves after 8s
+  setTimeout(() => { _fbMetaLoadedOnce = true; }, 8000);
   // Hide nav items user can't access
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     const page = el.dataset.page;
@@ -8090,10 +8111,14 @@ function runRestore() {
 }
 
 // ── BOOT ─────────────────────────────────────────────────────────────────────
-// Ensure default admin exists in storage
+// Ensure default admin exists in storage (write directly — do NOT call saveUsers,
+// which would push this default-only list to Firestore before fbLoadMeta() has
+// a chance to fetch the real, complete user list from the cloud).
 (function() {
-  const users = getUsers();
-  if (!localStorage.getItem(USERS_KEY)) saveUsers(users);
+  if (!localStorage.getItem(USERS_KEY)) {
+    const defaultUsers = [{ id:'U001', username:'admin', password:'admin123', name:'System Administrator', role:'admin', active:true }];
+    try { localStorage.setItem(USERS_KEY, JSON.stringify(defaultUsers)); } catch(e) {}
+  }
   loadLogo();
   // Update version badge
   const vb = document.getElementById('app-ver-badge');
