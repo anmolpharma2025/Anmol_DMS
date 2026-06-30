@@ -4818,6 +4818,12 @@ function buildInventoryItems() {
       return `<tr>
         <td class="mono">${it.id}</td>
         <td style="font-weight:500">${it.name}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">
+          ${it.batchNo?`<div>Batch: <span class="mono">${it.batchNo}</span></div>`:''}
+          ${it.lotNo?`<div>Lot: <span class="mono">${it.lotNo}</span></div>`:''}
+          ${!it.batchNo&&!it.lotNo?'—':''}
+          ${it.expiryDate?`<div style="color:${new Date(it.expiryDate)<new Date()?'var(--red)':'var(--text-tertiary)'}">Exp: ${it.expiryDate}</div>`:''}
+        </td>
         <td style="color:var(--text-secondary)">${it.unit}</td>
         <td style="text-align:right">${fmt(it.costPrice)}</td>
         <td style="text-align:right">${fmt(it.salePrice)}</td>
@@ -4826,7 +4832,8 @@ function buildInventoryItems() {
         <td style="text-align:right;font-weight:500">${fmt(it.qty*it.costPrice)}</td>
         <td>${statusBadge}</td>
         <td><div class="action-btns">
-          <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showAdjustQty('${it.id}')"><i class="ti ti-edit"></i></button>
+          <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditItem('${it.id}')" title="Edit item details"><i class="ti ti-pencil"></i></button>
+          <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showAdjustQty('${it.id}')" title="Adjust stock"><i class="ti ti-arrow-right-left"></i></button>
           <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteItem('${it.id}')"><i class="ti ti-trash"></i></button>
         </div></td>
       </tr>`;
@@ -4836,7 +4843,7 @@ function buildInventoryItems() {
 
   return `<table>
     <thead><tr>
-      <th>Item ID</th><th>Name</th><th>Unit</th>
+      <th>Item ID</th><th>Name</th><th>Batch / Lot</th><th>Unit</th>
       <th style="text-align:right">Cost Price</th>
       <th style="text-align:right">Sale Price</th>
       <th style="text-align:right">Qty on Hand</th>
@@ -4872,6 +4879,50 @@ function buildInventoryMovements() {
 
 function deleteItem(id) { if(!requireAdmin("delete inventory items")) return;
   if(confirm('Remove this item?')) { state.inventory=state.inventory.filter(i=>i.id!==id); save(); render(); }
+}
+
+function showEditItem(id) {
+  const it = state.inventory.find(i=>i.id===id);
+  if(!it) return;
+  showModal(`
+<div class="modal-head"><h3>Edit Item — ${it.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Item Code</label><input type="text" value="${it.id}" disabled style="opacity:0.6"></div>
+  <div class="form-group"><label>Category</label><input type="text" id="eitm-cat" value="${it.category||''}"></div>
+</div>
+<div class="form-group"><label>Item Name</label><input type="text" id="eitm-name" value="${it.name||''}"></div>
+<div class="form-row">
+  <div class="form-group"><label>Batch Number</label><input type="text" id="eitm-batch" value="${it.batchNo||''}" placeholder="e.g. B-2026-001"></div>
+  <div class="form-group"><label>Lot Number</label><input type="text" id="eitm-lot" value="${it.lotNo||''}" placeholder="e.g. LOT-4521"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Unit</label><input type="text" id="eitm-unit" value="${it.unit||''}"></div>
+  <div class="form-group"><label>Expiry Date</label><input type="date" id="eitm-expiry" value="${it.expiryDate||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Cost Price (₱)</label><input type="number" id="eitm-cost" value="${it.costPrice||0}" min="0" step="0.01"></div>
+  <div class="form-group"><label>Sale Price (₱)</label><input type="number" id="eitm-sale" value="${it.salePrice||0}" min="0" step="0.01"></div>
+</div>
+<div class="form-group"><label>Reorder Level</label><input type="number" id="eitm-reorder" value="${it.reorderLevel||5}" min="0" step="1"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditItem('${id}')"><i class="ti ti-check"></i>Save Changes</button>
+</div>`);
+}
+
+function saveEditItem(id) {
+  const it = state.inventory.find(i=>i.id===id);
+  if(!it) return;
+  it.name = document.getElementById('eitm-name').value.trim() || it.name;
+  it.category = document.getElementById('eitm-cat').value.trim() || it.category;
+  it.batchNo = document.getElementById('eitm-batch').value.trim();
+  it.lotNo = document.getElementById('eitm-lot').value.trim();
+  it.expiryDate = document.getElementById('eitm-expiry').value;
+  it.unit = document.getElementById('eitm-unit').value.trim() || it.unit;
+  it.costPrice = parseFloat(document.getElementById('eitm-cost').value)||0;
+  it.salePrice = parseFloat(document.getElementById('eitm-sale').value)||0;
+  it.reorderLevel = parseInt(document.getElementById('eitm-reorder').value)||5;
+  save(); closeModal(); render();
 }
 
 function showAdjustQty(id) {
@@ -5036,6 +5087,10 @@ function showAddItem() {
 </div>
 <div class="form-group"><label>Item Name</label><input type="text" id="itm-name" placeholder="Full item name"></div>
 <div class="form-row">
+  <div class="form-group"><label>Batch Number</label><input type="text" id="itm-batch" placeholder="e.g. B-2026-001"></div>
+  <div class="form-group"><label>Lot Number</label><input type="text" id="itm-lot" placeholder="e.g. LOT-4521"></div>
+</div>
+<div class="form-row">
   <div class="form-group"><label>Unit</label><input type="text" id="itm-unit" placeholder="pc / box / ream…"></div>
   <div class="form-group"><label>Opening Qty</label><input type="number" id="itm-qty" placeholder="0" min="0" step="1" value="0"></div>
 </div>
@@ -5043,7 +5098,10 @@ function showAddItem() {
   <div class="form-group"><label>Cost Price (₱)</label><input type="number" id="itm-cost" placeholder="0.00" min="0" step="0.01"></div>
   <div class="form-group"><label>Sale Price (₱)</label><input type="number" id="itm-sale" placeholder="0.00" min="0" step="0.01"></div>
 </div>
-<div class="form-group"><label>Reorder Level</label><input type="number" id="itm-reorder" placeholder="e.g. 5" min="0" step="1" value="5"></div>
+<div class="form-row">
+  <div class="form-group"><label>Reorder Level</label><input type="number" id="itm-reorder" placeholder="e.g. 5" min="0" step="1" value="5"></div>
+  <div class="form-group"><label>Expiry Date <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label><input type="date" id="itm-expiry"></div>
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveItem()">Add Item</button>
@@ -5074,6 +5132,9 @@ function handleBarcodeInput(value) {
       const co=document.getElementById('itm-cost'); if(co) co.value=existing.costPrice||'';
       const sa=document.getElementById('itm-sale'); if(sa) sa.value=existing.salePrice||'';
       const re=document.getElementById('itm-reorder'); if(re) re.value=existing.reorderLevel||5;
+      const ba=document.getElementById('itm-batch'); if(ba) ba.value=existing.batchNo||'';
+      const lo=document.getElementById('itm-lot'); if(lo) lo.value=existing.lotNo||'';
+      const ex=document.getElementById('itm-expiry'); if(ex) ex.value=existing.expiryDate||'';
       statusEl.innerHTML += ` <span style="color:var(--amber)">(This item already exists — saving will update it)</span>`;
     } else if(value.length>2) {
       statusEl.innerHTML = `<span style="color:var(--accent)">New item code: <strong>${value}</strong> — fill in details below</span>`;
@@ -5113,6 +5174,9 @@ function saveItem() {
   const id = document.getElementById('itm-id').value.trim();
   const name = document.getElementById('itm-name').value.trim();
   const category = document.getElementById('itm-cat').value.trim()||'General';
+  const batchNo = document.getElementById('itm-batch')?.value.trim()||'';
+  const lotNo = document.getElementById('itm-lot')?.value.trim()||'';
+  const expiryDate = document.getElementById('itm-expiry')?.value||'';
   const unit = document.getElementById('itm-unit').value.trim()||'pc';
   const qty = parseInt(document.getElementById('itm-qty').value)||0;
   const costPrice = parseFloat(document.getElementById('itm-cost').value)||0;
@@ -5120,8 +5184,8 @@ function saveItem() {
   const reorderLevel = parseInt(document.getElementById('itm-reorder').value)||5;
   if(!id||!name) { alert('Item code and name are required.'); return; }
   if(state.inventory.find(i=>i.id===id)) { alert('Item code already exists.'); return; }
-  state.inventory.push({ id, name, category, unit, costPrice, salePrice, qty, reorderLevel });
-  if(qty>0) state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock' });
+  state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
+  if(qty>0) state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
   save(); closeModal(); render();
 }
 
