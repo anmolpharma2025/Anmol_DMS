@@ -2366,12 +2366,16 @@ function showAddInvoice() {
   <select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${soOpts}</select>
 </div>
 <div class="form-row">
+  <div class="form-group"><label>Invoice Number</label><input type="text" id="inv-number" value="${'INV-' + String(state.invoices.length + 1).padStart(3,'0')}" style="font-family:monospace;font-weight:600"></div>
   <div class="form-group"><label>Customer</label><select id="inv-cust">${custOpts}</select></div>
-  <div class="form-group"><label>Status</label><select id="inv-status"><option value="draft">Draft</option><option value="pending">Pending</option></select></div>
 </div>
 <div class="form-row">
+  <div class="form-group"><label>Status</label><select id="inv-status"><option value="draft">Draft</option><option value="pending">Pending</option></select></div>
   <div class="form-group"><label>Invoice Date</label><input type="date" id="inv-date" value="${today()}"></div>
+</div>
+<div class="form-row">
   <div class="form-group"><label>Due Date</label><input type="date" id="inv-due" value="${due.toISOString().split('T')[0]}"></div>
+  <div class="form-group"></div>
 </div>
 <div class="form-group"><label>VAT Treatment</label>
   <select id="inv-vat-type" onchange="window._invVatType=this.value; calcInvLines()">
@@ -2547,13 +2551,15 @@ function saveInvoice() {
   const due      = document.getElementById('inv-due').value;
   const vatType  = document.getElementById('inv-vat-type').value;
   const status   = document.getElementById('inv-status').value;
+  const id       = (document.getElementById('inv-number')?.value || '').trim();
+  if(!id) { alert('Invoice number is required.'); return; }
+  if(state.invoices.find(i=>i.id===id)) { alert(`Invoice number "${id}" already exists. Please use a different number.`); return; }
   const subtotal = invLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
   if(!subtotal) { alert('Add at least one line item with a price.'); return; }
   let vatBase, vat, amount;
   if(vatType==='exclusive')      { const r=computeVAT(subtotal); vatBase=r.vatBase; vat=r.vat; amount=r.amount; }
   else if(vatType==='inclusive') { const r=vatFromGross(subtotal); vatBase=r.vatBase; vat=r.vat; amount=r.amount; }
   else                           { vatBase=subtotal; vat=0; amount=subtotal; }
-  const id = 'INV-' + String(state.invoices.length + 1).padStart(3, '0');
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
   const soRef = window._invLinkedSO || '';
   state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef });
