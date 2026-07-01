@@ -7446,11 +7446,12 @@ async function aiAsk(question) {
     'anthropic-dangerous-direct-browser-access': 'true'
   };
 
-  // Try direct first (works if Anthropic enables CORS for this key), then proxy fallbacks
+  // Use Cloudflare Worker proxy to bypass CORS restrictions
+  const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
+
   const endpoints = [
-    'https://api.anthropic.com/v1/messages',
+    WORKER_URL,
     'https://corsproxy.io/?url=https://api.anthropic.com/v1/messages',
-    'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api.anthropic.com/v1/messages'),
   ];
 
   let lastError = null;
@@ -7459,7 +7460,7 @@ async function aiAsk(question) {
   for(const endpoint of endpoints) {
     try {
       response = await fetch(endpoint, { method:'POST', headers, body });
-      if(response.ok || response.status === 401 || response.status === 400) break; // stop trying on auth/bad request errors
+      if(response.ok || response.status === 401 || response.status === 400) break;
     } catch(e) {
       lastError = e;
       response = null;
