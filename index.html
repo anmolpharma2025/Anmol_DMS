@@ -789,6 +789,25 @@ function showLoginScreen() {
   document.getElementById('login-error').textContent = '';
   document.getElementById('login-user').value = '';
   document.getElementById('login-pass').value = '';
+  // Pre-load user list from Firebase so non-admin users can log in on any device
+  // without requiring admin to log in first (which would trigger fbLoadMeta)
+  if(db) {
+    db.doc(FB_META_DOC).get().then(doc => {
+      if(doc.exists && doc.data()?.users && doc.data().users.length > 0) {
+        const remoteUsers = doc.data().users;
+        const localUsers  = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+        // Only apply if remote has more users — protects against stale remote data
+        if(remoteUsers.length >= localUsers.length) {
+          try { localStorage.setItem('anmolpharma_users', JSON.stringify(remoteUsers)); } catch(e) {}
+        }
+        if(doc.data().customRoles) {
+          const localRoles  = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
+          const merged = { ...localRoles, ...doc.data().customRoles };
+          try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
+        }
+      }
+    }).catch(() => {}); // silent fail — use local users if offline
+  }
 }
 
 function showAppScreen() {
