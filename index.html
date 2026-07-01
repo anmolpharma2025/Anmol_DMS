@@ -6304,6 +6304,7 @@ function showImportExcel() {
     <option value="Inventory">Inventory</option>
     <option value="Customers">Customers</option>
     <option value="Suppliers">Suppliers</option>
+    <option value="Chart of Accounts">Chart of Accounts</option>
   </select>
 </div>
 <div id="import-preview" style="font-size:12px;color:var(--text-secondary);min-height:30px;margin-bottom:8px"></div>
@@ -6356,6 +6357,7 @@ function runImport() {
   else if(sheetName==='Customers') { merge(state.customers, _importData, 'Customer ID', r=>({ id:r['Customer ID'], name:r['Name']||'', email:r['Email']||'', phone:r['Phone']||'', balance:+r['Balance']||0 })); }
   else if(sheetName==='Suppliers') { if(!state.suppliers) state.suppliers=[]; merge(state.suppliers, _importData, 'Supplier ID', r=>({ id:r['Supplier ID'], name:r['Name']||'', tin:r['TIN']||'', contactPerson:r['Contact Person']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', category:r['Category']||'', terms:r['Payment Terms']||'', status:r['Status']||'active', notes:r['Notes']||'' })); }
   else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' })); }
+  else if(sheetName==='Chart of Accounts') { if(!state.accounts) state.accounts=[]; merge(state.accounts, _importData, 'Account Code', r=>({ id:r['Account Code']||r['Account ID']||r['ID']||'', name:r['Account Name']||r['Name']||'', type:r['Type']||'Asset', balance:+r['Balance']||0, notes:r['Notes']||'' })); }
   save();
   _importData = null;
   closeModal();
