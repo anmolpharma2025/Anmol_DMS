@@ -362,6 +362,7 @@
         <div style="font-size:11px;color:var(--text-tertiary)">Powered by Anthropic</div>
       </div>
     </div>
+    <button onclick="localStorage.removeItem('anmolpharma_ai_key');aiMessages=[];showAIKeySetup()" title="Change API key" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:14px;padding:4px"><i class="ti ti-key"></i></button>
     <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:20px;padding:4px;line-height:1">×</button>
   </div>
   <!-- Quick prompts -->
@@ -7249,12 +7250,251 @@ const LOGO_KEY = 'anmolpharma_logo';
 // ── CLAUDE AI ASSISTANT ───────────────────────────────────────────────────────
 let aiMessages = []; // conversation history
 
+function getAIKey() {
+  return localStorage.getItem('anmolpharma_ai_key') || '';
+}
+
 function toggleAIPanel() {
   const panel = document.getElementById('ai-panel');
   const isOpen = panel.style.display === 'flex';
   panel.style.display = isOpen ? 'none' : 'flex';
   if(!isOpen) {
-    setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
+    if(!getAIKey()) {
+      showAIKeySetup();
+    } else {
+      // Show quick prompts, hide setup
+      const quick = document.getElementById('ai-quick');
+      if(quick) quick.style.display = '';
+      setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
+    }
+  }
+}
+
+function showAIKeySetup() {
+  const quick = document.getElementById('ai-quick');
+  if(quick) quick.style.display = 'none';
+  const msgs = document.getElementById('ai-messages');
+  if(!msgs) return;
+  const existing = getAIKey();
+  msgs.innerHTML = `
+<div style="padding:16px">
+  <div style="text-align:center;margin-bottom:16px">
+    <i class="ti ti-key" style="font-size:32px;color:#8b5cf6;display:block;margin-bottom:8px"></i>
+    <div style="font-weight:600;font-size:14px;margin-bottom:6px">${existing?'Update API Key':'API Key Required'}</div>
+    <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
+      Get a free key at <a href="https://console.anthropic.com" target="_blank" style="color:#8b5cf6;font-weight:500">console.anthropic.com</a><br>
+      Sign up → API Keys → Create Key → Copy &amp; paste below
+    </div>
+  </div>
+  <div style="margin-bottom:10px">
+    <label style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;display:block">Anthropic API Key</label>
+    <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..." value="${existing||''}"
+      style="width:100%;padding:9px 12px;border:1px solid #8b5cf6;border-radius:8px;background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:monospace;box-sizing:border-box;outline:none">
+  </div>
+  <button onclick="saveAIKey()" style="width:100%;padding:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--font);margin-bottom:8px">
+    ${existing?'Update Key':'Save &amp; Start Chatting'}
+  </button>
+  ${existing?`<button onclick="cancelAIKeySetup()" style="width:100%;padding:8px;background:transparent;color:var(--text-secondary);border:1px solid var(--border-mid);border-radius:8px;cursor:pointer;font-size:13px;font-family:var(--font)">Cancel</button>`:''}
+  <div style="font-size:10px;color:var(--text-tertiary);margin-top:8px;text-align:center">🔒 Key stored on this device only</div>
+</div>`;
+  setTimeout(()=>{ const el=document.getElementById('ai-key-input'); if(el){el.focus();if(existing)el.select();} },100);
+}
+
+function cancelAIKeySetup() {
+  const quick = document.getElementById('ai-quick');
+  if(quick) quick.style.display = '';
+  const msgs = document.getElementById('ai-messages');
+  if(msgs && aiMessages.length===0) msgs.innerHTML = `
+<div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
+  <i class="ti ti-sparkles" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
+  <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">Hi! I'm Claude, your AI accounting assistant.</div>
+  <div style="font-size:12px;line-height:1.5">Ask me anything about your invoices, expenses, inventory, payroll, or accounting.</div>
+</div>`;
+  document.getElementById('ai-input')?.focus();
+}
+
+function saveAIKey() {
+  const key = document.getElementById('ai-key-input')?.value.trim();
+  if(!key || !key.startsWith('sk-')) { alert('Please enter a valid Anthropic API key (starts with sk-)'); return; }
+  localStorage.setItem('anmolpharma_ai_key', key);
+  const quick = document.getElementById('ai-quick');
+  if(quick) quick.style.display = '';
+  const msgs = document.getElementById('ai-messages');
+  if(msgs) msgs.innerHTML = `
+<div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
+  <i class="ti ti-circle-check" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
+  <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">API key saved! Ready to help.</div>
+  <div style="font-size:12px;line-height:1.5">Try one of the quick questions above, or type your own below.</div>
+</div>`;
+  aiMessages = [];
+  document.getElementById('ai-input')?.focus();
+}
+
+function buildAIContext() {
+  const cp = getCompanyProfile();
+  const inv = state.invoices || [];
+  const exp = state.expenses || [];
+  const pur = state.purchases || [];
+  const col = state.collections || [];
+  const pay = state.payrolls || [];
+  const items = state.inventory || [];
+  const so = state.salesOrders || [];
+  const po = state.purchaseOrders || [];
+  const today_str = today();
+  const thisMonth = today_str.slice(0, 7);
+
+  const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+  const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
+  const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
+  const totalPurchases = pur.reduce((s,p)=>s+(p.amount||0),0);
+  const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
+  const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
+  const lowStock = items.filter(it=>it.qty<=it.reorderLevel);
+  const outOfStock = items.filter(it=>it.qty===0);
+  const monthRevenue = inv.filter(i=>i.date?.startsWith(thisMonth)).reduce((s,i)=>s+(i.amount||0),0);
+  const monthExp = exp.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
+
+  return `You are an AI accounting assistant embedded in ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}'s accounting system. You have access to their live financial data. Be concise, helpful, and specific with numbers. Use Philippine Peso (₱) for amounts.
+
+COMPANY: ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}
+DATE TODAY: ${today_str}
+
+FINANCIAL SNAPSHOT:
+- Total Revenue (all time): ₱${totalRevenue.toLocaleString()}
+- Total Collected: ₱${totalCollected.toLocaleString()}
+- Accounts Receivable (pending): ₱${pendingAR.toLocaleString()} across ${pendingInvoices.length} invoices
+- Total Expenses: ₱${totalExpenses.toLocaleString()}
+- Total Purchases (COS): ₱${totalPurchases.toLocaleString()}
+- This month revenue: ₱${monthRevenue.toLocaleString()}
+- This month expenses: ₱${monthExp.toLocaleString()}
+- Net this month: ₱${(monthRevenue-monthExp).toLocaleString()}
+
+INVOICES: ${inv.length} total — ${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue
+TOP PENDING: ${pendingInvoices.slice(0,5).map(i=>`${i.id} (${i.customer}): ₱${(i.amount||0).toLocaleString()}`).join(', ')||'None'}
+
+SALES ORDERS: ${so.length} total — ${so.filter(s=>s.status==='pending').length} pending, ${so.filter(s=>s.status==='approved').length} approved, ${so.filter(s=>s.status==='dispatched').length} dispatched
+PURCHASE ORDERS: ${po.length} total — ${po.filter(p=>p.status==='pending').length} pending, ${po.filter(p=>p.status==='approved').length} approved
+
+INVENTORY: ${items.length} SKUs
+- Low stock (${lowStock.length}): ${lowStock.slice(0,5).map(i=>`${i.name} (${i.qty} ${i.unit})`).join(', ')||'None'}
+- Out of stock (${outOfStock.length}): ${outOfStock.slice(0,5).map(i=>i.name).join(', ')||'None'}
+
+PAYROLL: ${pay.length} runs — ${pay.filter(p=>p.status==='released').length} released
+EMPLOYEES: ${(state.employees||[]).filter(e=>e.status==='active').length} active
+
+Answer questions about this data helpfully and concisely.`;
+}
+
+function aiAddMessage(role, content) {
+  const container = document.getElementById('ai-messages');
+  if(!container) return;
+  if(aiMessages.length === 1 && role === 'user') container.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
+  div.innerHTML = content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function aiShowThinking() {
+  const container = document.getElementById('ai-messages');
+  if(!container) return;
+  const div = document.createElement('div');
+  div.className = 'ai-thinking'; div.id = 'ai-thinking';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function aiHideThinking() { document.getElementById('ai-thinking')?.remove(); }
+
+async function aiSend() {
+  const input = document.getElementById('ai-input');
+  const msg = input?.value.trim();
+  if(!msg) return;
+  input.value = '';
+  await aiAsk(msg);
+}
+
+async function aiAsk(question) {
+  const panel = document.getElementById('ai-panel');
+  if(panel.style.display !== 'flex') panel.style.display = 'flex';
+
+  const apiKey = getAIKey();
+  if(!apiKey) { showAIKeySetup(); return; }
+
+  aiAddMessage('user', question);
+  aiMessages.push({ role: 'user', content: question });
+  aiShowThinking();
+
+  const sendBtn = document.getElementById('ai-send-btn');
+  if(sendBtn) sendBtn.disabled = true;
+
+  const body = JSON.stringify({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 1000,
+    system: buildAIContext(),
+    messages: aiMessages.slice(-10)
+  });
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true'
+  };
+
+  // Try direct first (works if Anthropic enables CORS for this key), then proxy fallbacks
+  const endpoints = [
+    'https://api.anthropic.com/v1/messages',
+    'https://corsproxy.io/?url=https://api.anthropic.com/v1/messages',
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://api.anthropic.com/v1/messages'),
+  ];
+
+  let lastError = null;
+  let response = null;
+
+  for(const endpoint of endpoints) {
+    try {
+      response = await fetch(endpoint, { method:'POST', headers, body });
+      if(response.ok || response.status === 401 || response.status === 400) break; // stop trying on auth/bad request errors
+    } catch(e) {
+      lastError = e;
+      response = null;
+    }
+  }
+
+  if(!response) throw lastError || new Error('All endpoints failed');
+
+  if(!response.ok) {
+    const err = await response.json().catch(()=>({error:{message:response.statusText}}));
+    const errMsg = err.error?.message || `Error ${response.status}`;
+    if(response.status === 401) throw new Error('Invalid API key — click the 🔑 icon to update it.');
+    throw new Error(errMsg);
+  }
+
+  try {
+    const data = await response.json();
+    const reply = data.content?.[0]?.text || 'No response received.';
+    aiHideThinking();
+    aiMessages.push({ role: 'assistant', content: reply });
+    aiAddMessage('assistant', reply);
+
+  } catch(err) {
+    aiHideThinking();
+    const errMsg = err.message?.includes('Invalid API') ? err.message :
+      'Could not reach Claude AI.\n\n' +
+      '• Check your internet connection\n' +
+      '• Verify your API key is correct (click 🔑)\n' +
+      '• Try again in a moment';
+    aiMessages.push({ role: 'assistant', content: errMsg });
+    aiAddMessage('assistant', errMsg);
+    console.error('Claude AI error:', err);
+  } finally {
+    if(sendBtn) sendBtn.disabled = false;
+    document.getElementById('ai-input')?.focus();
   }
 }
 
@@ -7374,7 +7614,7 @@ async function aiAsk(question) {
         model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         system: systemPrompt,
-        messages: aiMessages.slice(-10) // keep last 10 messages for context
+        messages: aiMessages.slice(-10)
       })
     });
 
