@@ -397,7 +397,7 @@
         <i class="ti ti-send"></i>
       </button>
     </div>
-    <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;text-align:center">Claude AI · Your data stays private</div>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;text-align:center">Claude AI · <span onclick="testAIConnection()" style="cursor:pointer;color:#8b5cf6;text-decoration:underline">Test connection</span></div>
   </div>
 </div>
 
@@ -7331,58 +7331,48 @@ function saveAIKey() {
 }
 
 function buildAIContext() {
-  const cp = getCompanyProfile();
-  const inv = state.invoices || [];
-  const exp = state.expenses || [];
-  const pur = state.purchases || [];
-  const col = state.collections || [];
-  const pay = state.payrolls || [];
-  const items = state.inventory || [];
-  const so = state.salesOrders || [];
-  const po = state.purchaseOrders || [];
-  const today_str = today();
-  const thisMonth = today_str.slice(0, 7);
+  try {
+    const cp = getCompanyProfile();
+    const inv = state.invoices || [];
+    const exp = state.expenses || [];
+    const pur = state.purchases || [];
+    const col = state.collections || [];
+    const pay = state.payrolls || [];
+    const items = state.inventory || [];
+    const so = state.salesOrders || [];
+    const po = state.purchaseOrders || [];
+    const today_str = today();
+    const thisMonth = today_str.slice(0, 7);
 
-  const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
-  const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
-  const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
-  const totalPurchases = pur.reduce((s,p)=>s+(p.amount||0),0);
-  const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
-  const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
-  const lowStock = items.filter(it=>it.qty<=it.reorderLevel);
-  const outOfStock = items.filter(it=>it.qty===0);
-  const monthRevenue = inv.filter(i=>i.date?.startsWith(thisMonth)).reduce((s,i)=>s+(i.amount||0),0);
-  const monthExp = exp.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
+    const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+    const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
+    const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
+    const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
+    const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
+    const lowStock = items.filter(it=>(it.qty||0)<=(it.reorderLevel||5));
+    const monthRevenue = inv.filter(i=>(i.date||'').startsWith(thisMonth)).reduce((s,i)=>s+(i.amount||0),0);
+    const monthExp = exp.filter(e=>(e.date||'').startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
 
-  return `You are an AI accounting assistant embedded in ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}'s accounting system. You have access to their live financial data. Be concise, helpful, and specific with numbers. Use Philippine Peso (₱) for amounts.
+    return `You are an AI accounting assistant for ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}. Answer questions about their financial data concisely. Use Philippine Peso (₱).
 
 COMPANY: ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}
-DATE TODAY: ${today_str}
-
-FINANCIAL SNAPSHOT:
-- Total Revenue (all time): ₱${totalRevenue.toLocaleString()}
-- Total Collected: ₱${totalCollected.toLocaleString()}
-- Accounts Receivable (pending): ₱${pendingAR.toLocaleString()} across ${pendingInvoices.length} invoices
-- Total Expenses: ₱${totalExpenses.toLocaleString()}
-- Total Purchases (COS): ₱${totalPurchases.toLocaleString()}
-- This month revenue: ₱${monthRevenue.toLocaleString()}
-- This month expenses: ₱${monthExp.toLocaleString()}
-- Net this month: ₱${(monthRevenue-monthExp).toLocaleString()}
-
-INVOICES: ${inv.length} total — ${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue
-TOP PENDING: ${pendingInvoices.slice(0,5).map(i=>`${i.id} (${i.customer}): ₱${(i.amount||0).toLocaleString()}`).join(', ')||'None'}
-
-SALES ORDERS: ${so.length} total — ${so.filter(s=>s.status==='pending').length} pending, ${so.filter(s=>s.status==='approved').length} approved, ${so.filter(s=>s.status==='dispatched').length} dispatched
-PURCHASE ORDERS: ${po.length} total — ${po.filter(p=>p.status==='pending').length} pending, ${po.filter(p=>p.status==='approved').length} approved
-
-INVENTORY: ${items.length} SKUs
-- Low stock (${lowStock.length}): ${lowStock.slice(0,5).map(i=>`${i.name} (${i.qty} ${i.unit})`).join(', ')||'None'}
-- Out of stock (${outOfStock.length}): ${outOfStock.slice(0,5).map(i=>i.name).join(', ')||'None'}
-
-PAYROLL: ${pay.length} runs — ${pay.filter(p=>p.status==='released').length} released
-EMPLOYEES: ${(state.employees||[]).filter(e=>e.status==='active').length} active
-
-Answer questions about this data helpfully and concisely.`;
+TODAY: ${today_str}
+Total Revenue: ₱${totalRevenue.toLocaleString()}
+Total Collected: ₱${totalCollected.toLocaleString()}
+Accounts Receivable: ₱${pendingAR.toLocaleString()} (${pendingInvoices.length} invoices)
+Total Expenses: ₱${totalExpenses.toLocaleString()}
+This month revenue: ₱${monthRevenue.toLocaleString()}
+This month expenses: ₱${monthExp.toLocaleString()}
+Net this month: ₱${(monthRevenue-monthExp).toLocaleString()}
+Invoices: ${inv.length} total (${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue)
+Sales Orders: ${so.length} total
+Purchase Orders: ${po.length} total
+Inventory: ${items.length} SKUs, ${lowStock.length} low stock
+Payroll runs: ${pay.length}
+Employees: ${(state.employees||[]).filter(e=>e.status==='active').length} active`;
+  } catch(e) {
+    return `You are an AI accounting assistant for ANMOL PHARMACEUTICALS US CORP. Answer accounting questions helpfully. Use Philippine Peso (₱).`;
+  }
 }
 
 function aiAddMessage(role, content) {
@@ -7616,6 +7606,22 @@ async function aiAsk(question) {
     document.getElementById('ai-input')?.focus();
   }
 }
+async function testAIConnection() {
+  const apiKey = getAIKey();
+  if(!apiKey) { alert('No API key saved. Click 🔑 to add one.'); return; }
+  try {
+    const r = await fetch('https://lucky-wood-fa33.anmolpharma2025.workers.dev/', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'x-api-key': apiKey, 'anthropic-version':'2023-06-01' },
+      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:50, messages:[{role:'user',content:'Say OK'}] })
+    });
+    const text = await r.text();
+    alert(`Status: ${r.status}\nResponse: ${text.slice(0,300)}`);
+  } catch(e) {
+    alert(`Connection failed: ${e.message}`);
+  }
+}
+
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const icon    = document.getElementById('sidebar-toggle-icon');
