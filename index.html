@@ -151,7 +151,16 @@
   .je-lines th { font-size: 11px; color: var(--text-secondary); font-weight: 500; padding: 5px 8px; background: var(--bg-primary); border: 1px solid var(--border-light); text-transform: uppercase; letter-spacing: 0.04em; }
   .je-lines td { padding: 4px 6px; border: 1px solid var(--border-light); }
   .je-lines td select, .je-lines td input { width: 100%; padding: 5px 7px; border: none; background: transparent; color: var(--text-primary); font-size: 13px; font-family: var(--font); outline: none; }
-  /* Remove number input spinner arrows globally */
+  /* Claude AI Panel */
+  .ai-chip { padding:5px 10px;border:1px solid var(--border-mid);border-radius:20px;background:var(--bg-primary);color:var(--text-secondary);font-size:11px;cursor:pointer;font-family:var(--font);transition:all 0.12s; }
+  .ai-chip:hover { border-color:#8b5cf6;color:#8b5cf6;background:rgba(139,92,246,0.08); }
+  .ai-msg-user { align-self:flex-end;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:13px;max-width:85%;line-height:1.5;word-wrap:break-word; }
+  .ai-msg-ai { align-self:flex-start;background:var(--bg-card);border:1px solid var(--border-light);color:var(--text-primary);padding:10px 14px;border-radius:14px 14px 14px 4px;font-size:13px;max-width:92%;line-height:1.6;word-wrap:break-word; }
+  .ai-msg-ai strong { color:var(--accent); }
+  .ai-thinking { align-self:flex-start;padding:10px 14px;color:var(--text-tertiary);font-size:13px;display:flex;align-items:center;gap:8px; }
+  .ai-thinking span { width:6px;height:6px;border-radius:50%;background:#8b5cf6;animation:aiPulse 1.2s infinite; }
+  .ai-thinking span:nth-child(2){animation-delay:0.2s} .ai-thinking span:nth-child(3){animation-delay:0.4s}
+  @keyframes aiPulse { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
   input[type=number] { -moz-appearance:textfield; appearance:textfield; }
@@ -329,6 +338,9 @@
           <button class="btn no-print" id="import-btn" style="font-size:12px;padding:6px 12px;display:none" onclick="showImportExcel()" title="Import from Excel"><i class="ti ti-file-import"></i>Import</button>
           <button class="btn no-print" style="font-size:12px;padding:6px 12px;background:var(--green-bg);border-color:var(--green-border);color:var(--green)" onclick="saveBackup()" title="Save full backup as JSON file"><i class="ti ti-database-export"></i>Backup</button>
           <button class="btn no-print" id="restore-btn" style="font-size:12px;padding:6px 12px;display:none" onclick="showRestoreBackup()" title="Restore from backup JSON"><i class="ti ti-database-import"></i>Restore</button>
+          <button class="btn no-print" onclick="toggleAIPanel()" title="Ask Claude AI" style="font-size:12px;padding:6px 12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-color:#6366f1;gap:6px">
+            <i class="ti ti-sparkles"></i>Ask AI
+          </button>
           <span id="user-badge" style="font-size:12px;color:var(--text-secondary);align-self:center;background:var(--bg-card);padding:5px 14px;border-radius:20px;border:1px solid var(--border-light)"></span>
         </div>
       </div>
@@ -337,8 +349,55 @@
   </div>
 </div>
 
-<div class="overlay" id="modal" style="display:none" onclick="overlayClick(event)">
-  <div class="modal" id="modal-inner"></div>
+<!-- Claude AI Panel -->
+<div id="ai-panel" style="position:fixed;top:0;right:0;width:380px;height:100vh;background:var(--bg-secondary);border-left:1px solid var(--border-mid);display:none;flex-direction:column;z-index:500;box-shadow:-8px 0 32px rgba(0,0,0,0.3)">
+  <!-- Header -->
+  <div style="padding:14px 16px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.1))">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:32px;height:32px;background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;display:flex;align-items:center;justify-content:center">
+        <i class="ti ti-sparkles" style="color:#fff;font-size:16px"></i>
+      </div>
+      <div>
+        <div style="font-weight:600;font-size:14px">Claude AI Assistant</div>
+        <div style="font-size:11px;color:var(--text-tertiary)">Powered by Anthropic</div>
+      </div>
+    </div>
+    <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:20px;padding:4px;line-height:1">×</button>
+  </div>
+  <!-- Quick prompts -->
+  <div id="ai-quick" style="padding:12px 14px;border-bottom:1px solid var(--border-light)">
+    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:8px">Quick questions</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <button class="ai-chip" onclick="aiAsk('Summarize this month\\'s financial performance')">📊 Monthly summary</button>
+      <button class="ai-chip" onclick="aiAsk('Which customers have outstanding balances?')">💰 Outstanding balances</button>
+      <button class="ai-chip" onclick="aiAsk('What are the top expenses this month?')">📋 Top expenses</button>
+      <button class="ai-chip" onclick="aiAsk('Are there any low stock items that need reordering?')">📦 Low stock alert</button>
+      <button class="ai-chip" onclick="aiAsk('Show me a summary of pending invoices')">🧾 Pending invoices</button>
+      <button class="ai-chip" onclick="aiAsk('What is the total sales revenue vs expenses?')">📈 P&L overview</button>
+    </div>
+  </div>
+  <!-- Messages -->
+  <div id="ai-messages" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px">
+    <div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
+      <i class="ti ti-sparkles" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">Hi! I'm Claude, your AI accounting assistant.</div>
+      <div style="font-size:12px;line-height:1.5">I have access to your company's financial data. Ask me anything about your invoices, expenses, inventory, payroll, or accounting.</div>
+    </div>
+  </div>
+  <!-- Input -->
+  <div style="padding:12px 14px;border-top:1px solid var(--border-light);background:var(--bg-card)">
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <textarea id="ai-input" placeholder="Ask about your finances, inventory, payroll…" rows="2"
+        style="flex:1;padding:9px 12px;border:1px solid var(--border-mid);border-radius:10px;background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:none;outline:none;line-height:1.4"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();aiSend()}"
+        onfocus="this.style.borderColor='#8b5cf6'" onblur="this.style.borderColor='var(--border-mid)'"></textarea>
+      <button onclick="aiSend()" id="ai-send-btn"
+        style="padding:9px 14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:13px;flex-shrink:0;display:flex;align-items:center;gap:5px;font-family:var(--font)">
+        <i class="ti ti-send"></i>
+      </button>
+    </div>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;text-align:center">Claude AI · Your data stays private</div>
+  </div>
 </div>
 
 <!-- Firebase SDK (CDN compat mode — works in plain HTML, no build tools) -->
@@ -7187,7 +7246,156 @@ function saveUpdateSettings() {
 }
 const LOGO_KEY = 'anmolpharma_logo';
 
-// ── SIDEBAR COLLAPSE ──────────────────────────────────────────────────────────
+// ── CLAUDE AI ASSISTANT ───────────────────────────────────────────────────────
+let aiMessages = []; // conversation history
+
+function toggleAIPanel() {
+  const panel = document.getElementById('ai-panel');
+  const isOpen = panel.style.display === 'flex';
+  panel.style.display = isOpen ? 'none' : 'flex';
+  if(!isOpen) {
+    setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
+  }
+}
+
+function buildAIContext() {
+  // Build a concise financial snapshot to send as context
+  const cp = getCompanyProfile();
+  const inv = state.invoices || [];
+  const exp = state.expenses || [];
+  const pur = state.purchases || [];
+  const col = state.collections || [];
+  const pay = state.payrolls || [];
+  const items = state.inventory || [];
+  const so = state.salesOrders || [];
+  const po = state.purchaseOrders || [];
+  const today_str = today();
+  const thisMonth = today_str.slice(0, 7);
+
+  const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+  const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
+  const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
+  const totalPurchases = pur.reduce((s,p)=>s+(p.amount||0),0);
+  const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
+  const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
+  const lowStock = items.filter(it=>it.qty<=it.reorderLevel);
+  const outOfStock = items.filter(it=>it.qty===0);
+  const monthInvoices = inv.filter(i=>i.date?.startsWith(thisMonth));
+  const monthRevenue = monthInvoices.reduce((s,i)=>s+(i.amount||0),0);
+  const monthExp = exp.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
+
+  return `You are an AI accounting assistant embedded in ${cp.name || 'ANMOL PHARMACEUTICALS US CORP.'}'s accounting system. You have access to their live financial data. Be concise, helpful, and specific with numbers. Use Philippine Peso (₱) for amounts.
+
+COMPANY: ${cp.name || 'ANMOL PHARMACEUTICALS US CORP.'}
+DATE TODAY: ${today_str}
+
+FINANCIAL SNAPSHOT:
+- Total Revenue (all time): ₱${totalRevenue.toLocaleString()}
+- Total Collected: ₱${totalCollected.toLocaleString()}
+- Accounts Receivable (pending): ₱${pendingAR.toLocaleString()} across ${pendingInvoices.length} invoices
+- Total Expenses: ₱${totalExpenses.toLocaleString()}
+- Total Purchases (COS): ₱${totalPurchases.toLocaleString()}
+- This month revenue: ₱${monthRevenue.toLocaleString()}
+- This month expenses: ₱${monthExp.toLocaleString()}
+- Net this month: ₱${(monthRevenue - monthExp).toLocaleString()}
+
+INVOICES: ${inv.length} total — ${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue
+TOP PENDING INVOICES: ${pendingInvoices.slice(0,5).map(i=>`${i.id} (${i.customer}): ₱${(i.amount||0).toLocaleString()}`).join(', ')||'None'}
+
+SALES ORDERS: ${so.length} total — ${so.filter(s=>s.status==='pending').length} pending, ${so.filter(s=>s.status==='approved').length} approved, ${so.filter(s=>s.status==='dispatched').length} dispatched
+PURCHASE ORDERS: ${po.length} total — ${po.filter(p=>p.status==='pending').length} pending, ${po.filter(p=>p.status==='approved').length} approved
+
+INVENTORY: ${items.length} SKUs
+- Low stock items (${lowStock.length}): ${lowStock.slice(0,5).map(i=>`${i.name} (${i.qty} ${i.unit})`).join(', ')||'None'}
+- Out of stock (${outOfStock.length}): ${outOfStock.slice(0,5).map(i=>i.name).join(', ')||'None'}
+
+PAYROLL: ${pay.length} payroll runs — ${pay.filter(p=>p.status==='released').length} released, ${pay.filter(p=>p.status==='pending').length} pending
+EMPLOYEES: ${(state.employees||[]).filter(e=>e.status==='active').length} active
+
+Answer questions about this data helpfully and concisely.`;
+}
+
+function aiAddMessage(role, content) {
+  const container = document.getElementById('ai-messages');
+  if(!container) return;
+  // Remove welcome message on first real message
+  if(aiMessages.length === 0) container.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
+  // Format markdown-ish: bold, line breaks
+  div.innerHTML = content
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function aiShowThinking() {
+  const container = document.getElementById('ai-messages');
+  if(!container) return;
+  const div = document.createElement('div');
+  div.className = 'ai-thinking';
+  div.id = 'ai-thinking';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function aiHideThinking() {
+  document.getElementById('ai-thinking')?.remove();
+}
+
+async function aiSend() {
+  const input = document.getElementById('ai-input');
+  const msg = input?.value.trim();
+  if(!msg) return;
+  input.value = '';
+  await aiAsk(msg);
+}
+
+async function aiAsk(question) {
+  // Ensure panel is open
+  const panel = document.getElementById('ai-panel');
+  if(panel.style.display !== 'flex') panel.style.display = 'flex';
+
+  aiAddMessage('user', question);
+  aiMessages.push({ role: 'user', content: question });
+  aiShowThinking();
+
+  const sendBtn = document.getElementById('ai-send-btn');
+  if(sendBtn) sendBtn.disabled = true;
+
+  try {
+    const systemPrompt = buildAIContext();
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: aiMessages.slice(-10) // keep last 10 messages for context
+      })
+    });
+
+    const data = await response.json();
+    const reply = data.content?.[0]?.text || 'Sorry, I could not get a response. Please try again.';
+
+    aiHideThinking();
+    aiMessages.push({ role: 'assistant', content: reply });
+    aiAddMessage('assistant', reply);
+
+  } catch(err) {
+    aiHideThinking();
+    const errMsg = 'Sorry, I could not connect to Claude AI. Please check your internet connection and try again.';
+    aiMessages.push({ role: 'assistant', content: errMsg });
+    aiAddMessage('assistant', errMsg);
+    console.error('Claude AI error:', err);
+  } finally {
+    if(sendBtn) sendBtn.disabled = false;
+    document.getElementById('ai-input')?.focus();
+  }
+}
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const icon    = document.getElementById('sidebar-toggle-icon');
