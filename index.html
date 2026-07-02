@@ -2308,6 +2308,30 @@ function renderJeLines() {
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
 
+  function buildAccSearch(fieldId, selectedId, onchangeFn) {
+    const selectedAcc = state.accounts.find(a=>a.id===selectedId);
+    const selectedText = selectedAcc ? `${selectedAcc.id} – ${selectedAcc.name}` : '';
+    const opts = state.accounts.map(a=>
+      `<option value="${a.id} – ${a.name}" data-id="${a.id}">`
+    ).join('');
+    return `
+<div style="position:relative">
+  <input type="text" id="${fieldId}-input" value="${selectedText}" placeholder="Search account…"
+    autocomplete="off"
+    style="width:100%;padding:5px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none;box-sizing:border-box"
+    oninput="filterJeAccounts('${fieldId}',this.value,'${onchangeFn}')"
+    onfocus="showJeDropdown('${fieldId}')"
+    onblur="setTimeout(()=>hideJeDropdown('${fieldId}'),200)">
+  <div id="${fieldId}-drop" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border-mid);border-top:none;border-radius:0 0 var(--radius-md) var(--radius-md);z-index:999;box-shadow:0 4px 12px rgba(0,0,0,0.3)">
+    ${state.accounts.map(a=>`<div class="je-acc-opt" data-id="${a.id}" data-text="${a.id} – ${a.name}"
+      onmousedown="pickJeAccount('${fieldId}','${a.id}','${a.id} – ${a.name}','${onchangeFn}')"
+      style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border-light)"
+      onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''"
+      >${a.id} – ${a.name}</div>`).join('')}
+  </div>
+</div>`;
+  }
+
   function buildOpts(selectedId) {
     return `<option value="">— none —</option>` +
       state.accounts.map(a =>
@@ -2340,7 +2364,7 @@ function renderJeLines() {
 ${debitLines.map(l => {
   const idx = jeLines.indexOf(l);
   return `<tr>
-  <td><select id="jeline-debit-${idx}" onchange="updateJeLine(${idx},'debit',this.value);renderJeLines()">${buildOpts(l.debit)}</select></td>
+  <td>${buildAccSearch('jeline-debit-'+idx, l.debit, 'debit|'+idx)}</td>
   <td style="font-size:11px;color:var(--text-tertiary);padding:4px 8px;background:var(--bg-secondary)">${drawnName}</td>
   <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);updateNetDrawn()"></td>
   <td><button class="je-line-btn" onclick="removeDisbLine(${idx})">×</button></td>
@@ -2363,7 +2387,7 @@ ${creditLines.length === 0
     const idx = jeLines.indexOf(l);
     return `<tr>
   <td style="font-size:11px;color:var(--text-tertiary);padding:4px 8px;background:var(--bg-secondary)">${drawnName} (net)</td>
-  <td><select id="jeline-credit-${idx}" onchange="updateJeLine(${idx},'credit',this.value);renderJeLines()">${buildOpts(l.credit)}</select></td>
+  <td>${buildAccSearch('jeline-credit-'+idx, l.credit, 'credit|'+idx)}</td>
   <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${idx},'amount',this.value);updateNetDrawn()"></td>
   <td><button class="je-line-btn" onclick="removeDisbLine(${idx})">×</button></td>
 </tr>`;}).join('')}
@@ -2383,20 +2407,50 @@ ${creditLines.length === 0
   } else {
     tbody.innerHTML = jeLines.map((l, i) => `
 <tr>
-  <td><select id="jeline-dr-${i}" onchange="updateJeLine(${i},'debit',this.value)">${buildOpts(l.debit)}</select></td>
-  <td><select id="jeline-cr-${i}" onchange="updateJeLine(${i},'credit',this.value)">${buildOpts(l.credit)}</select></td>
+  <td>${buildAccSearch('jeline-dr-'+i, l.debit, 'debit|'+i)}</td>
+  <td>${buildAccSearch('jeline-cr-'+i, l.credit, 'credit|'+i)}</td>
   <td><input type="number" min="0" step="0.01" placeholder="0.00" value="${l.amount||''}" oninput="updateJeLine(${i},'amount',this.value)"></td>
   <td><button class="je-line-btn" onclick="removeJeLine(${i})" title="Remove">×</button></td>
 </tr>`).join('');
     updateJeTotals();
   }
+}
 
-  // Re-apply searchable dropdowns to newly built selects
-  setTimeout(() => {
-    tbody.querySelectorAll('select[id]').forEach(sel => {
-      if(!sel.dataset.searchable) makeSearchable(sel.id);
-    });
-  }, 20);
+function showJeDropdown(fieldId) {
+  const drop = document.getElementById(fieldId+'-drop');
+  const input = document.getElementById(fieldId+'-input');
+  if(!drop||!input) return;
+  filterJeAccounts(fieldId, input.value, null);
+  drop.style.display = 'block';
+}
+
+function hideJeDropdown(fieldId) {
+  const drop = document.getElementById(fieldId+'-drop');
+  if(drop) drop.style.display = 'none';
+}
+
+function filterJeAccounts(fieldId, query, onchangeFn) {
+  const drop = document.getElementById(fieldId+'-drop');
+  if(!drop) return;
+  drop.style.display = 'block';
+  const q = (query||'').toLowerCase();
+  Array.from(drop.children).forEach(div => {
+    const text = (div.dataset.text||'').toLowerCase();
+    div.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+}
+
+function pickJeAccount(fieldId, accountId, accountText, onchangeFn) {
+  const input = document.getElementById(fieldId+'-input');
+  if(input) input.value = accountText;
+  hideJeDropdown(fieldId);
+  // Parse the onchangeFn string "field|idx"
+  if(onchangeFn) {
+    const [field, idx] = onchangeFn.split('|');
+    updateJeLine(parseInt(idx), field, accountId);
+    updateJeTotals();
+    updateNetDrawn();
+  }
 }
 
 function updateNetDrawn() {
