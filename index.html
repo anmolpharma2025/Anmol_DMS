@@ -3332,13 +3332,19 @@ function renderReports(c, ta) {
     reportPeriodTo   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().split('T')[0];
   }
   c.innerHTML = `
-<div class="tabs no-print" id="report-tabs">
+<div class="tabs no-print" id="report-tabs" style="flex-wrap:wrap">
   <div class="tab ${currentReport==='pnl'?'active':''}" onclick="switchReport('pnl',this)">Income Statement</div>
   <div class="tab ${currentReport==='bs'?'active':''}" onclick="switchReport('bs',this)">Balance Sheet</div>
   <div class="tab ${currentReport==='cf'?'active':''}" onclick="switchReport('cf',this)">Cash Flow</div>
   <div class="tab ${currentReport==='vat'?'active':''}" onclick="switchReport('vat',this)">VAT Summary</div>
   <div class="tab ${currentReport==='ar'?'active':''}" onclick="switchReport('ar',this)">A/R Aging</div>
   <div class="tab ${currentReport==='payroll'?'active':''}" onclick="switchReport('payroll',this)">Payroll Summary</div>
+  <div class="tab ${currentReport==='bir_sales'?'active':''}" onclick="switchReport('bir_sales',this)" style="color:var(--accent)"><i class="ti ti-receipt" style="font-size:11px;margin-right:3px"></i>BIR Sales Book</div>
+  <div class="tab ${currentReport==='bir_purchases'?'active':''}" onclick="switchReport('bir_purchases',this)" style="color:var(--accent)"><i class="ti ti-receipt" style="font-size:11px;margin-right:3px"></i>BIR Purchases Book</div>
+  <div class="tab ${currentReport==='bir_receipts'?'active':''}" onclick="switchReport('bir_receipts',this)" style="color:var(--accent)"><i class="ti ti-cash" style="font-size:11px;margin-right:3px"></i>Cash Receipts Book</div>
+  <div class="tab ${currentReport==='bir_disbursements'?'active':''}" onclick="switchReport('bir_disbursements',this)" style="color:var(--accent)"><i class="ti ti-cash-banknote" style="font-size:11px;margin-right:3px"></i>Cash Disbursements Book</div>
+  <div class="tab ${currentReport==='bir_gl'?'active':''}" onclick="switchReport('bir_gl',this)" style="color:var(--accent)"><i class="ti ti-book" style="font-size:11px;margin-right:3px"></i>General Ledger</div>
+  <div class="tab ${currentReport==='bir_slsp'?'active':''}" onclick="switchReport('bir_slsp',this)" style="color:var(--accent)"><i class="ti ti-file-text" style="font-size:11px;margin-right:3px"></i>SLSP</div>
 </div>
 <div class="no-print" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 14px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light)">
   <i class="ti ti-calendar" style="color:var(--accent);font-size:16px"></i>
@@ -3749,7 +3755,328 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   </table>
 </div>`;
   }
+
+  // ── BIR BOOKS OF ACCOUNTS ──────────────────────────────────────────────────
+  else if(type === 'bir_sales') {
+    const cp = getCompanyProfile();
+    const rows = invInPeriod.sort((a,b)=>a.date.localeCompare(b.date)).map(inv => {
+      const cust = state.customers.find(c=>c.id===inv.customer||c.name===inv.customer);
+      const vatBase = inv.vatBase ?? inv.amount;
+      const vat = inv.vat ?? 0;
+      const exempt = 0;
+      return `<tr>
+        <td>${inv.date}</td>
+        <td class="mono">${inv.id}</td>
+        <td>${cust?.name||inv.customer||'—'}</td>
+        <td class="mono" style="font-size:11px">${cust?.tin||'—'}</td>
+        <td style="text-align:right">${fmt(inv.amount)}</td>
+        <td style="text-align:right">${fmt(vatBase)}</td>
+        <td style="text-align:right">${fmt(vat)}</td>
+        <td style="text-align:right">${fmt(exempt)}</td>
+      </tr>`;
+    }).join('');
+    const totAmt = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
+    const totBase = invInPeriod.reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
+    const totVAT = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
+    rb.innerHTML = `
+<div class="report-section" style="max-width:900px">
+  <div style="text-align:center;margin-bottom:12px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">SALES BOOK (BIR)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr>
+      <th>Date</th><th>OR / Invoice No.</th><th>Customer Name</th><th>TIN</th>
+      <th style="text-align:right">Gross Amount</th>
+      <th style="text-align:right">VAT Sales</th>
+      <th style="text-align:right">Output VAT</th>
+      <th style="text-align:right">Exempt Sales</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="4">TOTAL</td>
+      <td style="text-align:right">${fmt(totAmt)}</td>
+      <td style="text-align:right">${fmt(totBase)}</td>
+      <td style="text-align:right">${fmt(totVAT)}</td>
+      <td style="text-align:right">—</td>
+    </tr></tfoot>
+  </table>
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
+
+  else if(type === 'bir_purchases') {
+    const cp = getCompanyProfile();
+    const allPur = [...purInPeriod, ...expInPeriod].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    const rows = allPur.map(p => {
+      const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
+      const vatBase = p.vatBase ?? p.amount;
+      const vat = p.vat ?? 0;
+      return `<tr>
+        <td>${p.date||'—'}</td>
+        <td class="mono">${p.id}</td>
+        <td>${sup?.name||p.vendor||'—'}</td>
+        <td class="mono" style="font-size:11px">${sup?.tin||p.tin||'—'}</td>
+        <td style="text-align:right">${fmt(p.amount||0)}</td>
+        <td style="text-align:right">${fmt(vatBase)}</td>
+        <td style="text-align:right">${fmt(vat)}</td>
+        <td>${p.category||'—'}</td>
+      </tr>`;
+    }).join('');
+    const totAmt = allPur.reduce((s,p)=>s+(p.amount||0),0);
+    const totBase = allPur.reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
+    const totVAT = allPur.reduce((s,p)=>s+(p.vat||0),0);
+    rb.innerHTML = `
+<div class="report-section" style="max-width:900px">
+  <div style="text-align:center;margin-bottom:12px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">PURCHASES BOOK (BIR)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr>
+      <th>Date</th><th>Invoice No.</th><th>Supplier Name</th><th>TIN</th>
+      <th style="text-align:right">Gross Amount</th>
+      <th style="text-align:right">VAT Purchases</th>
+      <th style="text-align:right">Input VAT</th>
+      <th>Category</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="4">TOTAL</td>
+      <td style="text-align:right">${fmt(totAmt)}</td>
+      <td style="text-align:right">${fmt(totBase)}</td>
+      <td style="text-align:right">${fmt(totVAT)}</td>
+      <td></td>
+    </tr></tfoot>
+  </table>
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
+
+  else if(type === 'bir_receipts') {
+    const cp = getCompanyProfile();
+    const rows = colInPeriod.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(c => {
+      const cust = state.customers.find(cu=>cu.id===c.customer||cu.name===c.customer);
+      return `<tr>
+        <td>${c.date||'—'}</td>
+        <td class="mono">${c.id}</td>
+        <td class="mono">${c.invoice||'—'}</td>
+        <td>${cust?.name||c.customer||'—'}</td>
+        <td>${c.mode||'—'}</td>
+        <td class="mono" style="font-size:11px">${c.reference||'—'}</td>
+        <td style="text-align:right;font-weight:500;color:var(--green)">${fmt(c.amount||0)}</td>
+        <td>${c.receivedBy||'—'}</td>
+      </tr>`;
+    }).join('');
+    const total = colInPeriod.reduce((s,c)=>s+(c.amount||0),0);
+    rb.innerHTML = `
+<div class="report-section" style="max-width:900px">
+  <div style="text-align:center;margin-bottom:12px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">CASH RECEIPTS BOOK (BIR)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr>
+      <th>Date</th><th>OR No.</th><th>Invoice Ref.</th><th>Received From</th>
+      <th>Mode</th><th>Reference</th>
+      <th style="text-align:right">Amount Received</th>
+      <th>Received By</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No collections in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="6">TOTAL</td>
+      <td style="text-align:right;color:var(--green)">${fmt(total)}</td>
+      <td></td>
+    </tr></tfoot>
+  </table>
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
+
+  else if(type === 'bir_disbursements') {
+    const cp = getCompanyProfile();
+    const cashKeywords = ['cash','bank','petty','drawing'];
+    function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+    // Get all disbursement journal entries grouped
+    const disbJournal = state.journal.filter(j => {
+      if(j.type==='disbursement') return true;
+      if(j.type==='general') return false;
+      const gid=j.group||j.id;
+      return state.journal.filter(x=>(x.group||x.id)===gid).some(l=>l.credit&&isCashAcc(l.credit));
+    });
+    const groups = {};
+    disbJournal.forEach(j => {
+      const gid=j.group||j.id;
+      if(!groups[gid]) groups[gid]={id:gid,date:j.date,ref:j.ref,desc:j.desc,lines:[]};
+      groups[gid].lines.push(j);
+    });
+    const filtered = Object.values(groups).filter(g=>inPeriod(g.date)).sort((a,b)=>a.date.localeCompare(b.date));
+    const rows = filtered.map(g => {
+      const crLine = g.lines.find(l=>l.credit&&isCashAcc(l.credit));
+      const cashAcc = crLine ? state.accounts.find(a=>a.id===crLine.credit) : null;
+      const totalPaid = g.lines.filter(l=>l.credit&&isCashAcc(l.credit)).reduce((s,l)=>s+(l.amount||0),0);
+      const debitLines = g.lines.filter(l=>l.debit).map(l=>{const a=state.accounts.find(ac=>ac.id===l.debit);return(a?.name||l.debit)+': '+fmt(l.amount);}).join(', ');
+      return `<tr>
+        <td>${g.date}</td>
+        <td class="mono">${g.id}</td>
+        <td class="mono">${g.ref||'—'}</td>
+        <td>${g.desc||'—'}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">${cashAcc?.name||'—'}</td>
+        <td style="font-size:11px;color:var(--text-secondary);max-width:200px">${debitLines}</td>
+        <td style="text-align:right;font-weight:500;color:var(--red)">${fmt(totalPaid)}</td>
+      </tr>`;
+    }).join('');
+    const total = filtered.reduce((s,g)=>s+g.lines.filter(l=>l.credit&&isCashAcc(l.credit)).reduce((ss,l)=>ss+(l.amount||0),0),0);
+    rb.innerHTML = `
+<div class="report-section" style="max-width:960px">
+  <div style="text-align:center;margin-bottom:12px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">CASH DISBURSEMENTS BOOK (BIR)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr>
+      <th>Date</th><th>Entry No.</th><th>Voucher Ref.</th><th>Particulars</th>
+      <th>Fund Account</th><th>Accounts Charged</th>
+      <th style="text-align:right">Amount Paid</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--text-tertiary)">No disbursements in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="6">TOTAL</td>
+      <td style="text-align:right;color:var(--red)">${fmt(total)}</td>
+    </tr></tfoot>
+  </table>
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
+
+  else if(type === 'bir_gl') {
+    const cp = getCompanyProfile();
+    const accounts = state.accounts || [];
+    const journal = (state.journal||[]).filter(j=>inPeriod(j.date));
+    const html = accounts.map(acc => {
+      const lines = journal.filter(j=>j.debit===acc.id||j.credit===acc.id).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      if(!lines.length) return '';
+      let balance = acc.balance || 0;
+      const rows = lines.map(j => {
+        const isDebit = j.debit===acc.id;
+        if(isDebit) balance += (j.amount||0);
+        else balance -= (j.amount||0);
+        return `<tr>
+          <td>${j.date||'—'}</td>
+          <td class="mono">${j.group||j.id}</td>
+          <td>${j.ref||'—'}</td>
+          <td>${j.desc||'—'}</td>
+          <td style="text-align:right">${isDebit?fmt(j.amount||0):'—'}</td>
+          <td style="text-align:right">${!isDebit?fmt(j.amount||0):'—'}</td>
+          <td style="text-align:right;font-weight:500;color:${balance>=0?'var(--green)':'var(--red)'}">${fmt(Math.abs(balance))}</td>
+        </tr>`;
+      }).join('');
+      return `
+<div style="margin-bottom:20px;break-inside:avoid">
+  <div style="font-weight:700;font-size:13px;padding:6px 10px;background:var(--bg-card);border-radius:var(--radius-md) var(--radius-md) 0 0;border:1px solid var(--border-mid);border-bottom:none">
+    ${acc.id} — ${acc.name} <span style="font-size:11px;color:var(--text-tertiary);font-weight:400">(${acc.type})</span>
+  </div>
+  <table class="report-table" style="font-size:11px;border-top:none">
+    <thead><tr><th>Date</th><th>JE No.</th><th>Ref</th><th>Particulars</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th></tr></thead>
+    <tbody><tr><td>${pFrom}</td><td></td><td></td><td>Opening Balance</td><td></td><td></td><td style="text-align:right">${fmt(acc.balance||0)}</td></tr>${rows}</tbody>
+  </table>
+</div>`;
+    }).filter(Boolean).join('');
+    rb.innerHTML = `
+<div style="max-width:960px">
+  <div style="text-align:center;margin-bottom:16px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">GENERAL LEDGER (BIR)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+  ${html||'<div style="text-align:center;color:var(--text-tertiary);padding:32px">No journal entries or accounts in period</div>'}
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
+
+  else if(type === 'bir_slsp') {
+    const cp = getCompanyProfile();
+    // Summary List of Sales
+    const salesBySupplier = {};
+    invInPeriod.forEach(inv => {
+      const cust = state.customers.find(c=>c.id===inv.customer||c.name===inv.customer);
+      const key = cust?.tin || inv.customer || 'N/A';
+      if(!salesBySupplier[key]) salesBySupplier[key]={tin:cust?.tin||'N/A',name:cust?.name||inv.customer||'N/A',taxable:0,vat:0,gross:0};
+      salesBySupplier[key].taxable += (inv.vatBase??inv.amount??0);
+      salesBySupplier[key].vat += (inv.vat||0);
+      salesBySupplier[key].gross += (inv.amount||0);
+    });
+    // Summary List of Purchases
+    const purBySupplier = {};
+    [...purInPeriod,...expInPeriod].forEach(p => {
+      const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
+      const key = sup?.tin || p.vendor || 'N/A';
+      if(!purBySupplier[key]) purBySupplier[key]={tin:sup?.tin||'N/A',name:sup?.name||p.vendor||'N/A',taxable:0,vat:0,gross:0};
+      purBySupplier[key].taxable += (p.vatBase??p.amount??0);
+      purBySupplier[key].vat += (p.vat||0);
+      purBySupplier[key].gross += (p.amount||0);
+    });
+    const salesRows = Object.values(salesBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
+      <td class="mono" style="font-size:11px">${r.tin}</td><td>${r.name}</td>
+      <td style="text-align:right">${fmt(r.taxable)}</td>
+      <td style="text-align:right">${fmt(r.vat)}</td>
+      <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
+    </tr>`).join('');
+    const purRows = Object.values(purBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
+      <td class="mono" style="font-size:11px">${r.tin}</td><td>${r.name}</td>
+      <td style="text-align:right">${fmt(r.taxable)}</td>
+      <td style="text-align:right">${fmt(r.vat)}</td>
+      <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
+    </tr>`).join('');
+    const totSales={taxable:Object.values(salesBySupplier).reduce((s,r)=>s+r.taxable,0),vat:Object.values(salesBySupplier).reduce((s,r)=>s+r.vat,0),gross:Object.values(salesBySupplier).reduce((s,r)=>s+r.gross,0)};
+    const totPur={taxable:Object.values(purBySupplier).reduce((s,r)=>s+r.taxable,0),vat:Object.values(purBySupplier).reduce((s,r)=>s+r.vat,0),gross:Object.values(purBySupplier).reduce((s,r)=>s+r.gross,0)};
+    rb.innerHTML = `
+<div style="max-width:900px">
+  <div style="text-align:center;margin-bottom:16px">
+    <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
+    <div style="font-size:13px;font-weight:600;margin-top:6px">SUMMARY LIST OF SALES AND PURCHASES (SLSP)</div>
+    <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
+  </div>
+
+  <div style="font-weight:700;font-size:13px;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-top:16px">
+    SCHEDULE 1 — Summary List of Sales (SLS)
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr><th>TIN</th><th>Customer Name</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Output VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
+    <tbody>${salesRows||'<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totSales.taxable)}</td><td style="text-align:right">${fmt(totSales.vat)}</td><td style="text-align:right">${fmt(totSales.gross)}</td></tr></tfoot>
+  </table>
+
+  <div style="font-weight:700;font-size:13px;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-top:24px">
+    SCHEDULE 2 — Summary List of Purchases (SLP)
+  </div>
+  <table class="report-table" style="font-size:12px">
+    <thead><tr><th>TIN</th><th>Supplier Name</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
+    <tbody>${purRows||'<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totPur.taxable)}</td><td style="text-align:right">${fmt(totPur.vat)}</td><td style="text-align:right">${fmt(totPur.gross)}</td></tr></tfoot>
+  </table>
+
+  <div style="margin-top:16px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);font-size:12px">
+    <strong>VAT Summary:</strong> &nbsp;
+    Output VAT: <strong>${fmt(totSales.vat)}</strong> &nbsp;|&nbsp;
+    Input VAT: <strong>${fmt(totPur.vat)}</strong> &nbsp;|&nbsp;
+    VAT Payable: <strong style="color:${totSales.vat-totPur.vat>=0?'var(--red)':'var(--green)'}">${fmt(Math.abs(totSales.vat-totPur.vat))} ${totSales.vat-totPur.vat>=0?'(Payable)':'(Creditable)'}</strong>
+  </div>
+  <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
+</div>`;
+  }
 }
+
 function toWords(n) {
   const a=['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
   const b=['','','twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'];
