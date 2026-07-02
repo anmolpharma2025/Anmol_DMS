@@ -5846,8 +5846,19 @@ function saveMovement2() {
 }
 
 function showAddItem() {
+  const branches = getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId = currentUser?.branchId || null;
+  const myBranch = myBranchId ? branches.find(b=>b.id===myBranchId) : null;
+  const isMain = !myBranchId || myBranchId === mainId;
+  const branchBanner = myBranch && !isMain
+    ? `<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--accent)">
+        <i class="ti ti-building-store" style="margin-right:5px"></i>
+        Opening stock will be added to <strong>${myBranch.name}</strong> (your assigned branch).
+      </div>` : '';
   showModal(`
 <div class="modal-head"><h3>Add Inventory Item</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+${branchBanner}
 
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px">
   <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--accent);margin-bottom:8px"><i class="ti ti-barcode" style="margin-right:5px"></i>Barcode Scanner</div>
@@ -5963,8 +5974,45 @@ function saveItem() {
   const reorderLevel = parseInt(document.getElementById('itm-reorder').value)||5;
   if(!id||!name) { alert('Item code and name are required.'); return; }
   if(state.inventory.find(i=>i.id===id)) { alert('Item code already exists.'); return; }
-  state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
-  if(qty>0) state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
+
+  const branches = getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId = currentUser?.branchId || null;
+  const isMain = !myBranchId || myBranchId === mainId;
+
+  if(isMain) {
+    // Admin or main branch user — add directly to main inventory
+    state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
+    if(qty > 0) {
+      if(!state.inventoryMovements) state.inventoryMovements = [];
+      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
+    }
+  } else {
+    // Branch-assigned user — item goes to main with qty:0, then a received
+    // transfer adds the opening stock directly to their branch
+    state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty:0, reorderLevel });
+    if(qty > 0) {
+      // Create a pre-received transfer representing the opening stock at this branch
+      const txNum = String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
+      const txId = 'TX-'+txNum;
+      if(!state.inventoryTransfers) state.inventoryTransfers = [];
+      state.inventoryTransfers.push({
+        id: txId,
+        date: today(),
+        fromBranch: mainId,
+        toBranch: myBranchId,
+        lines: [{ itemId:id, desc:name, qty, unit }],
+        notes: 'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:''),
+        transferredBy: currentUser?.name||'System',
+        status: 'received', // Mark as already received so stock shows immediately
+        receivedDate: today(),
+        receivedBy: currentUser?.name||'System'
+      });
+      if(!state.inventoryMovements) state.inventoryMovements = [];
+      const myBranch = branches.find(b=>b.id===myBranchId);
+      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+( myBranch?.name||myBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
+    }
+  }
   save(); closeModal(); render();
 }
 
