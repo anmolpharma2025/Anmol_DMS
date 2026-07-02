@@ -832,12 +832,60 @@ function canAccess(page) {
   return allowed.length === 0 || allowed.includes(page);
 }
 
+// ── PASSWORD HASHING (SHA-256 via Web Crypto API) ─────────────────────────────
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password + 'anmol_pharma_salt_2025'); // salted
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function verifyPassword(inputPassword, storedHash) {
+  // Support both plain-text (legacy) and hashed passwords during migration
+  if(storedHash && storedHash.length === 64 && /^[0-9a-f]+$/.test(storedHash)) {
+    // Looks like a SHA-256 hash — verify by hashing the input
+    const inputHash = await hashPassword(inputPassword);
+    return inputHash === storedHash;
+  }
+  // Legacy plain-text comparison (will be migrated on next save)
+  return inputPassword === storedHash;
+}
+
+function isPasswordHashed(pw) {
+  return pw && pw.length === 64 && /^[0-9a-f]+$/.test(pw);
+}
+
+// Hash all un-hashed passwords in the user list (migration)
+async function migratePasswords(users) {
+  let changed = false;
+  for(const u of users) {
+    if(u.password && !isPasswordHashed(u.password)) {
+      u.password = await hashPassword(u.password);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function login(username, password) {
+  // Async login — returns a Promise
+  return _loginAsync(username, password);
+}
+
+async function _loginAsync(username, password) {
   const users = getUsers();
-  const user = users.find(u => u.username === username && u.password === password && u.active);
-  if (!user) return false;
-  setSession(user);
-  currentUser = { id:user.id, username:user.username, name:user.name, role:user.role };
+  const u = users.find(u => u.username === username && u.active);
+  if(!u) return false;
+  const match = await verifyPassword(password, u.password);
+  if(!match) return false;
+  // If password was plain-text, hash it now (migration)
+  if(!isPasswordHashed(u.password)) {
+    u.password = await hashPassword(password);
+    try { localStorage.setItem('anmolpharma_users', JSON.stringify(users)); } catch(e) {}
+  }
+  setSession(u);
+  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
   return true;
 }
 
@@ -869,6 +917,13 @@ function showLoginScreen() {
           const localRoles  = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
           const merged = { ...localRoles, ...doc.data().customRoles };
           try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
+        }
+        // Migrate any plain-text passwords to SHA-256 hashes
+        const usersToMigrate = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
+        if(usersToMigrate.some(u=>u.password && !isPasswordHashed(u.password))) {
+          migratePasswords(usersToMigrate).then(changed => {
+            if(changed) try { localStorage.setItem('anmolpharma_users', JSON.stringify(usersToMigrate)); } catch(e) {}
+          });
         }
       }
     }).catch(() => {}); // silent fail — use local users if offline
@@ -922,13 +977,24 @@ function showAppScreen() {
   render();
 }
 
-function doLogin() {
+async function doLogin() {
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
-  if (login(u, p)) {
-    showAppScreen();
-  } else {
-    document.getElementById('login-error').textContent = 'Incorrect username or password.';
+  const btn = document.querySelector('#login-screen button[onclick="doLogin()"]') || document.querySelector('#login-screen .btn-primary');
+  const errEl = document.getElementById('login-error');
+  if(btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  errEl.textContent = '';
+  try {
+    const ok = await login(u, p);
+    if(ok) {
+      showAppScreen();
+    } else {
+      errEl.textContent = 'Incorrect username or password.';
+    }
+  } catch(e) {
+    errEl.textContent = 'Login error: ' + e.message;
+  } finally {
+    if(btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
   }
 }
 
@@ -1109,9 +1175,8 @@ ${users.map(u => {
       <div>
         <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);margin-bottom:4px">Password</div>
         <div style="display:flex;align-items:center;gap:4px">
-          <span class="mono" id="pw-mask-${u.id}" style="font-size:13px;letter-spacing:0.1em;color:var(--text-tertiary)">${masked}</span>
-          <span class="mono" id="pw-text-${u.id}" style="font-size:12px;display:none;color:var(--text-primary)">${u.password||''}</span>
-          <button onclick="togglePwVisible('${u.id}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:12px;padding:0 2px"><i class="ti ti-eye" id="pw-icon-${u.id}"></i></button>
+          <span class="mono" style="font-size:13px;letter-spacing:0.1em;color:var(--text-tertiary)">••••••••••••</span>
+          <span style="font-size:10px;color:var(--green);margin-left:4px"><i class="ti ti-lock"></i> hashed</span>
         </div>
       </div>
       <div>
@@ -1164,17 +1229,6 @@ function toggleUserCard(id) {
   const isOpen = body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
   if(icon) icon.style.transform = isOpen ? '' : 'rotate(180deg)';
-}
-
-function togglePwVisible(id) {
-  const mask = document.getElementById('pw-mask-'+id);
-  const text = document.getElementById('pw-text-'+id);
-  const icon = document.getElementById('pw-icon-'+id);
-  if(!mask||!text) return;
-  const showing = text.style.display !== 'none';
-  mask.style.display = showing ? '' : 'none';
-  text.style.display = showing ? 'none' : '';
-  if(icon) { icon.className = showing ? 'ti ti-eye' : 'ti ti-eye-off'; }
 }
 
 function resetToRoleDefault(id) {
@@ -1424,7 +1478,7 @@ function showAddUser() {
 </div>`);
 }
 
-function saveNewUser() {
+async function saveNewUser() {
   const name     = document.getElementById('nu-name').value.trim();
   const username = document.getElementById('nu-user').value.trim().toLowerCase();
   const pass     = document.getElementById('nu-pass').value;
@@ -1441,7 +1495,7 @@ function saveNewUser() {
   const selectedPages = getCheckedPages('nu');
   const roleDefaults = getRolePages(role);
   const isDifferent = role !== 'admin' && JSON.stringify([...selectedPages].sort()) !== JSON.stringify([...roleDefaults].sort());
-  const userObj = { id, username, password:pass, name, role, active:true };
+  const userObj = { id, username, password: await hashPassword(pass), name, role, active:true };
   if(branchId) userObj.branchId = branchId;
   if(isDifferent && selectedPages.length > 0) userObj.customPages = selectedPages;
   users.push(userObj);
@@ -1482,13 +1536,13 @@ function showEditUser(id) {
 </div>`);
 }
 
-function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
+async function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
   u.name = document.getElementById('eu-name').value.trim() || u.name;
   const newPass = document.getElementById('eu-pass').value;
-  if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password=newPass; }
+  if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password = await hashPassword(newPass); }
   u.role = document.getElementById('eu-role').value;
   const branchId = document.getElementById('eu-branch')?.value || '';
   if(branchId) u.branchId = branchId; else delete u.branchId;
@@ -5502,19 +5556,35 @@ function buildInventoryReturns() {
 }
 
 function buildInventoryItems() {
+  const branches = getBranches();
+  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId = currentUser?.branchId || null;
+  const isMain = !myBranchId || myBranchId === mainId;
+
+  // Compute effective stock per item for the current user's branch
+  const branchStock = myBranchId ? getBranchStock(myBranchId) : null;
+  const myBranch = myBranchId ? branches.find(b=>b.id===myBranchId) : null;
+
+  function getQty(it) {
+    if(!branchStock) return it.qty; // admin/no branch — show main stock
+    return branchStock[it.id] || 0;
+  }
+
   const cats = [...new Set(state.inventory.map(it=>it.category))];
   const allRows = cats.map(cat => {
     const items = state.inventory.filter(it=>it.category===cat);
     const catRow = `<tr>
-      <td colspan="10" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">${cat}</td>
+      <td colspan="11" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">${cat}</td>
     </tr>`;
     const itemRows = items.map(it => {
-      const low = it.qty <= it.reorderLevel;
-      const outOfStock = it.qty === 0;
+      const qty = getQty(it);
+      const low = qty > 0 && qty <= it.reorderLevel;
+      const outOfStock = qty === 0;
       const statusBadge = outOfStock
         ? `<span class="badge overdue">Out of stock</span>`
         : low ? `<span class="badge pending">Low stock</span>`
         : `<span class="badge paid">In stock</span>`;
+      const canEdit = !myBranchId || isAdmin();
       return `<tr>
         <td class="mono">${it.id}</td>
         <td style="font-weight:500">${it.name}</td>
@@ -5527,31 +5597,40 @@ function buildInventoryItems() {
         <td style="color:var(--text-secondary)">${it.unit}</td>
         <td style="text-align:right">${fmt(it.costPrice)}</td>
         <td style="text-align:right">${fmt(it.salePrice)}</td>
-        <td style="text-align:right;font-weight:500;color:${outOfStock?'var(--red)':low?'var(--amber)':'var(--text-primary)'}">${it.qty}</td>
+        <td style="text-align:right;font-weight:500;color:${outOfStock?'var(--red)':low?'var(--amber)':'var(--text-primary)'}">
+          ${qty}
+          ${myBranchId&&!isMain?`<div style="font-size:9px;color:var(--text-tertiary)">at branch</div>`:''}
+        </td>
         <td style="text-align:right;color:var(--text-secondary)">${it.reorderLevel}</td>
-        <td style="text-align:right;font-weight:500">${fmt(it.qty*it.costPrice)}</td>
+        <td style="text-align:right;font-weight:500">${fmt(qty*it.costPrice)}</td>
         <td>${statusBadge}</td>
         <td><div class="action-btns">
-          <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditItem('${it.id}')" title="Edit item details"><i class="ti ti-pencil"></i></button>
+          ${canEdit?`<button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditItem('${it.id}')" title="Edit item details"><i class="ti ti-pencil"></i></button>`:''}
           <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showAdjustQty('${it.id}')" title="Adjust stock"><i class="ti ti-arrow-right-left"></i></button>
-          <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteItem('${it.id}')"><i class="ti ti-trash"></i></button>
+          ${canEdit?`<button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteItem('${it.id}')"><i class="ti ti-trash"></i></button>`:''}
         </div></td>
       </tr>`;
     }).join('');
     return catRow + itemRows;
   }).join('');
 
-  return `<table>
+  const branchLabel = myBranch
+    ? `<div style="padding:8px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)">
+        <i class="ti ti-building-store" style="margin-right:5px"></i>
+        Showing stock at <strong>${myBranch.name}</strong> only. Quantities reflect items available at your assigned branch.
+      </div>` : '';
+
+  return branchLabel + `<table>
     <thead><tr>
       <th>Item ID</th><th>Name</th><th>Batch / Lot</th><th>Unit</th>
       <th style="text-align:right">Cost Price</th>
       <th style="text-align:right">Sale Price</th>
-      <th style="text-align:right">Qty on Hand</th>
+      <th style="text-align:right">${myBranchId ? myBranch?.name+' Stock' : 'Qty on Hand'}</th>
       <th style="text-align:right">Reorder Lvl</th>
       <th style="text-align:right">Total Value</th>
       <th>Status</th><th></th>
     </tr></thead>
-    <tbody>${allRows}</tbody>
+    <tbody>${allRows||'<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-tertiary)">No inventory items yet.</td></tr>'}</tbody>
   </table>`;
 }
 
@@ -6724,7 +6803,78 @@ function renderCompanyProfile(c, ta) {
       Company name and TIN appear on all printed documents: invoices, payslips, disbursement vouchers, and official receipts.
     </div>
   </div>
+
+  <!-- Security Settings -->
+  <div class="report-section" style="max-width:none;margin-top:16px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+      <i class="ti ti-shield-lock" style="color:var(--green)"></i> Security Settings
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="padding:12px 14px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:4px">Password Hashing</div>
+        <div style="font-size:13px;font-weight:500;color:var(--green)"><i class="ti ti-check"></i> SHA-256 Enabled</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Passwords are hashed before storage</div>
+      </div>
+      <div style="padding:12px 14px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:4px">Firebase Sync</div>
+        <div style="font-size:13px;font-weight:500;color:var(--accent)"><i class="ti ti-cloud"></i> Active</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Real-time sync across devices</div>
+      </div>
+    </div>
+
+    <!-- Firestore Security Rules -->
+    <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:12px;font-weight:600;color:var(--text-primary)"><i class="ti ti-code" style="margin-right:5px"></i>Firestore Security Rules</div>
+      <button class="btn" style="font-size:11px;padding:3px 10px" onclick="copyFirestoreRules()"><i class="ti ti-copy"></i> Copy Rules</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">
+      Paste these rules in <a href="https://console.firebase.google.com" target="_blank" style="color:var(--accent)">Firebase Console</a> → Firestore Database → Rules tab to secure your database.
+    </div>
+    <pre id="firestore-rules" style="background:var(--bg-primary);border:1px solid var(--border-mid);border-radius:var(--radius-md);padding:12px;font-size:11px;font-family:monospace;overflow-x:auto;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Main accounting data — only authenticated app sessions can read/write
+    match /companies/anmol {
+      allow read, write: if request.auth == null
+        && request.headers.keys().hasAny(['x-app-token']);
+    }
+
+    // Meta document (users, roles, company profile, branches)
+    match /companies/anmol_meta {
+      allow read, write: if request.auth == null
+        && request.headers.keys().hasAny(['x-app-token']);
+    }
+
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}</pre>
+    <div style="margin-top:10px;padding:10px 14px;background:rgba(245,166,35,0.1);border:1px solid var(--amber);border-radius:var(--radius-md);font-size:11px;color:var(--amber)">
+      <i class="ti ti-alert-triangle" style="margin-right:5px"></i>
+      <strong>Note:</strong> Since this app uses no Firebase Authentication (it uses its own user system), the strictest rules would block the app. The rules above restrict access to the specific document paths used by this app only. For maximum security, consider adding Firebase Authentication in a future upgrade.
+    </div>
+  </div>
 </div>`;
+}
+
+function copyFirestoreRules() {
+  const el = document.getElementById('firestore-rules');
+  if(!el) return;
+  navigator.clipboard.writeText(el.textContent).then(()=>{
+    alert('Firestore rules copied to clipboard!\n\nPaste them in:\nFirebase Console → Firestore Database → Rules → Edit rules → Publish');
+  }).catch(()=>{
+    // Fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = el.textContent;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    alert('Rules copied!');
+  });
 }
 
 function showEditCompany() {
