@@ -1918,8 +1918,10 @@ function buildGeneralJournalRows(entries) {
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
           <div class="action-btns">
             <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
+            ${!g.approved?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','general')"><i class="ti ti-edit"></i></button>`:''}
+            ${!g.approved?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`}
             <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>
-            <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
+            ${!g.approved?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
           </div>
         </td>` : '';
       if(l.debit) return `<tr style="${border}">${meta}
@@ -1969,8 +1971,10 @@ function buildDisbursementRows(entries) {
       <td class="no-print">
         <div class="action-btns">
           <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
+          ${!g.approved?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','disbursement')"><i class="ti ti-edit"></i></button>`:''}
+          ${!g.approved?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`}
           <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>
-          <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>
+          ${!g.approved?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
         </div>
       </td>
     </tr>`;
@@ -2240,6 +2244,26 @@ function viewJournal(groupId) {
 </div>`);
 }
 
+function approveJournalEntry(groupId) {
+  if(!requireAdmin('approve journal entries')) return;
+  if(!confirm('Approve this journal entry? Once approved it cannot be edited or deleted.')) return;
+  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
+  lines.forEach(l => { l.approved = true; l.approvedBy = currentUser.name; l.approvedAt = today(); });
+  save(); render();
+}
+
+function editJournalEntry(groupId, type) {
+  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
+  if(!lines.length) return;
+  if(lines[0].approved) { alert('This entry has been approved and cannot be edited.'); return; }
+  const first = lines[0];
+  // Remove old lines
+  state.journal = state.journal.filter(j=>(j.group||j.id)!==groupId);
+  save();
+  // Re-open the journal entry form with pre-filled data
+  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', lines });
+}
+
 function deleteJournalGroup(groupId) {
   if(!requireAdmin('delete journal entries')) return;
   if(!confirm('Delete this journal entry?')) return;
@@ -2249,9 +2273,19 @@ function deleteJournalGroup(groupId) {
 
 let jeLines = [];
 
-function showAddJournal(type) {
+function showAddJournal(type, prefill) {
   const isDisbursement = type === 'disbursement';
-  jeLines = isDisbursement ? [{ type:'debit', debit:'', credit:'', amount:'' }] : [{ debit:'', credit:'', amount:'' }];
+  // If editing, restore the lines; otherwise start fresh
+  if(prefill && prefill.lines) {
+    jeLines = prefill.lines.map(l => ({
+      type: l.debit ? 'debit' : 'credit',
+      debit: l.debit||'',
+      credit: l.credit||'',
+      amount: l.amount||''
+    }));
+  } else {
+    jeLines = isDisbursement ? [{ type:'debit', debit:'', credit:'', amount:'' }] : [{ debit:'', credit:'', amount:'' }];
+  }
   const opts = state.accounts.map(a => `<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
 
   // Fund accounts: cash, bank, petty, drawing
@@ -2273,15 +2307,15 @@ function showAddJournal(type) {
 
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
-<div class="modal-head"><h3>${isDisbursement ? 'New Disbursement Entry' : 'New Journal Entry'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="modal-head"><h3>${prefill?'Edit':'New'} ${isDisbursement ? 'Disbursement Entry' : 'Journal Entry'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
-  <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${today()}"></div>
-  <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. DV-001"></div>
+  <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${prefill?.date||today()}"></div>
+  <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. DV-001" value="${prefill?.ref||''}"></div>
 </div>
-<div class="form-group"><label>Description / Memo</label><input type="text" id="je-desc" placeholder="Transaction description"></div>
+<div class="form-group"><label>Description / Memo</label><input type="text" id="je-desc" placeholder="Transaction description" value="${prefill?.desc||''}"></div>
 <div class="form-row">
-  <div class="form-group"><label>Prepared By</label>${empDropdown('je-prepared', currentUser?.name||'')}</div>
-  <div class="form-group"><label>Approved By <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>${empDropdown('je-approved', '')}</div>
+  <div class="form-group"><label>Prepared By</label>${empDropdown('je-prepared', prefill?.preparedBy||currentUser?.name||'')}</div>
+  <div class="form-group"><label>Approved By <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>${empDropdown('je-approved', prefill?.approvedBy||'')}</div>
 </div>
 ${disbFields}
 <div style="margin-bottom:10px">
@@ -2722,8 +2756,8 @@ function showAddInvoice() {
 </div>
 <div class="form-group"><label>VAT Treatment</label>
   <select id="inv-vat-type" onchange="window._invVatType=this.value; calcInvLines()">
+    <option value="inclusive">VAT-inclusive — selling price already includes 12% VAT</option>
     <option value="exclusive">VAT-exclusive — add 12% on top of line totals</option>
-    <option value="inclusive">VAT-inclusive — prices already include 12%</option>
     <option value="exempt">VAT-exempt / zero-rated</option>
   </select>
 </div>
@@ -2877,7 +2911,7 @@ function removeInvLine(i) { if(invLines.length>1){ invLines.splice(i,1); renderI
 
 function calcInvLines() {
   const subtotal = invLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
-  const type = window._invVatType || document.getElementById('inv-vat-type')?.value || 'exclusive';
+  const type = window._invVatType || document.getElementById('inv-vat-type')?.value || 'inclusive';
   let base=0, vat=0, gross=0;
   if(type==='exclusive')      { const r=computeVAT(subtotal); base=r.vatBase; vat=r.vat; gross=r.amount; }
   else if(type==='inclusive') { const r=vatFromGross(subtotal); base=r.vatBase; vat=r.vat; gross=r.amount; }
@@ -7363,7 +7397,7 @@ function renderSalesOrders(c, ta) {
   <div class="kpi"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
   <div class="kpi"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
   <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
-  <div class="kpi"><div class="kpi-label">Dispatched</div><div class="kpi-value" style="color:#a78bfa">${byStatus('dispatched')}</div></div>
+  <div class="kpi"><div class="kpi-label">Delivered</div><div class="kpi-value" style="color:var(--green)">${byStatus('delivered')}</div></div>
   <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value pos">${fmt(total)}</div></div>
 </div>
 <table>
@@ -7446,8 +7480,7 @@ ${canApproveItems?`<div style="padding:8px 12px;background:var(--accent-bg);bord
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print</button>
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
-  ${so.status==='approved'&&isAdmin()?`<button class="btn primary" style="background:#a78bfa;border-color:#a78bfa" onclick="closeModal();dispatchSO('${so.id}')"><i class="ti ti-truck"></i>Dispatch</button>`:''}
-  ${so.status==='dispatched'&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
+  ${so.status==='approved'&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
 </div>`);
 }
 
@@ -7583,7 +7616,6 @@ function renderOrderLines(prefix) {
       <select onchange="selectOrderItem('${prefix}',${i},this)" style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
         ${itemOpts.replace(`value="${l.itemId||''}"`,`value="${l.itemId||''}" selected`)}
       </select>
-      <input type="text" value="${l.desc||''}" placeholder="Description" oninput="updateOrderLine('${prefix}',${i},'desc',this.value)" style="width:100%;padding:3px 6px;border:none;border-top:1px solid var(--border-light);background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
     </td>
     <td><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updateOrderLine('${prefix}',${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
     <td><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updateOrderLine('${prefix}',${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
