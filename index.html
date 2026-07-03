@@ -286,7 +286,6 @@
     <div class="nav-item" title="Invoices" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Invoices</span></div>
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
     <div class="nav-item" title="Purchase Orders" data-page="purchaseorders"><i class="ti ti-truck-delivery"></i><span>Purchase Orders</span></div>
-    <div class="nav-item" title="Purchases (COS)" data-page="purchases"><i class="ti ti-shopping-cart"></i><span>Purchases (COS)</span></div>
     <div class="nav-item" title="Expenses" data-page="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></div>
 
     <div class="nav-section">Accounting</div>
@@ -953,7 +952,6 @@ const ALL_PAGES = [
   { id:'invoices',    label:'Invoices',              section:'Transactions' },
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
   { id:'purchaseorders',label:'Purchase Orders',     section:'Transactions' },
-  { id:'purchases',   label:'Purchases (COS)',        section:'Transactions' },
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
   { id:'coa',         label:'Chart of Accounts',     section:'Accounting' },
   { id:'reports',     label:'Reports',               section:'Accounting' },
@@ -2321,7 +2319,10 @@ ${disbFields}
 <div style="margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
     <span style="font-size:12px;color:var(--text-secondary)">${isDisbursement ? 'Expense / Debit lines' : 'Journal lines'}</span>
-    <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addJeLine()"><i class="ti ti-plus"></i>Add line</button>
+    <div style="display:flex;gap:6px">
+      ${!isDisbursement?`<button class="btn" style="padding:3px 10px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="addCWT2307GJ()" title="Add CWT/2307 withholding entry"><i class="ti ti-receipt-tax"></i>CWT/2307</button>`:''}
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addJeLine()"><i class="ti ti-plus"></i>Add line</button>
+    </div>
   </div>
   <table class="je-lines">
     <thead><tr>
@@ -2426,8 +2427,11 @@ ${debitLines.map(l => {
 
 <!-- OTHER CREDITS SECTION -->
 <tr><td colspan="4" style="padding:5px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);background:var(--bg-secondary);border-top:1.5px solid var(--border-mid)">
-  <span>Other Credit Lines <span style="font-weight:400;text-transform:none">(e.g. Withholding Tax Payable, VAT Payable)</span></span>
-  <button class="btn" style="float:right;padding:1px 8px;font-size:10px" onclick="addDisbLine('credit')"><i class="ti ti-plus"></i> Add</button>
+  <span>Other Credit Lines <span style="font-weight:400;text-transform:none">(e.g. Withholding Tax Payable, VAT Payable, CWT/2307)</span></span>
+  <div style="display:flex;gap:4px">
+    <button class="btn" style="float:right;padding:1px 8px;font-size:10px;color:var(--amber);border-color:var(--amber)" onclick="addCWT2307()"><i class="ti ti-receipt-tax"></i> Add CWT</button>
+    <button class="btn" style="float:right;padding:1px 8px;font-size:10px" onclick="addDisbLine('credit')"><i class="ti ti-plus"></i> Add</button>
+  </div>
 </td></tr>
 <tr style="background:var(--bg-secondary)">
   <th style="font-size:11px;padding:4px 8px">Debit (offset — net from drawn)</th>
@@ -2546,6 +2550,36 @@ function updateNetDrawn() {
   const dEl=document.getElementById('je-total-debit'), cEl=document.getElementById('je-total-credit');
   if(dEl) dEl.textContent=fmt(totalDebit);
   if(cEl) { cEl.textContent=fmt(totalDebit); cEl.style.color='var(--green)'; }
+}
+
+function addCWT2307GJ() {
+  const whtAcc = state.accounts.find(a=>
+    String(a.name||'').toLowerCase().includes('withholding') ||
+    String(a.name||'').toLowerCase().includes('cwt') ||
+    String(a.name||'').toLowerCase().includes('2307')
+  );
+  // Add a debit (expense/payable) and credit (CWT payable) pair
+  const arAcc = state.accounts.find(a=>String(a.name||'').toLowerCase().includes('accounts receivable'));
+  jeLines.push({ debit: arAcc?String(arAcc.id):'', credit:'', amount:0 });
+  jeLines.push({ debit:'', credit: whtAcc?String(whtAcc.id):'', amount:0 });
+  renderJeLines();
+  if(!whtAcc) setTimeout(()=>alert('No "Withholding Tax Payable" or "CWT" account found.\nPlease select it manually or add it to your Chart of Accounts.'),100);
+}
+
+function addCWT2307() {
+  // Auto-find withholding tax payable account
+  const whtAcc = state.accounts.find(a=>
+    String(a.name||'').toLowerCase().includes('withholding') ||
+    String(a.name||'').toLowerCase().includes('cwt') ||
+    String(a.name||'').toLowerCase().includes('2307')
+  );
+  const totalDebit = jeLines.filter(l=>l.type==='debit').reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+  const suggestedCWT = parseFloat((totalDebit * 0.01).toFixed(2)); // default 1%
+  jeLines.push({ type:'credit', debit:'', credit: whtAcc ? String(whtAcc.id) : '', amount: suggestedCWT });
+  renderJeLines();
+  if(!whtAcc) {
+    setTimeout(()=>alert('No "Withholding Tax Payable" account found in your Chart of Accounts.\nPlease select the correct account from the Credit dropdown, or add it to your Chart of Accounts first.'),100);
+  }
 }
 
 function addDisbLine(type) {
@@ -2769,10 +2803,11 @@ function showAddInvoice() {
   <div id="so-load-banner" style="display:none"></div>
   <table class="je-lines">
     <thead><tr>
-      <th style="width:46%">Item / Description</th>
+      <th style="width:38%">Item / Description</th>
       <th style="width:10%">Qty</th>
-      <th style="width:20%">Unit Price (&#8369;)</th>
-      <th style="width:20%;text-align:right">Line Total</th>
+      <th style="width:18%">Unit Price (&#8369;)</th>
+      <th style="width:12%;text-align:center">VAT Status</th>
+      <th style="width:18%;text-align:right">Line Total</th>
       <th style="width:4%"></th>
     </tr></thead>
     <tbody id="inv-lines-body"></tbody>
@@ -2813,22 +2848,24 @@ function renderInvLines() {
   const tbody = document.getElementById('inv-lines-body');
   if(!tbody) return;
   const items = state.inventory || [];
-  // Build item options: show item name, unit, and sale price
-  const itemOpts = `<option value="">— type or pick item —</option>` +
-    items.map(it => `<option value="${it.id}" data-name="${it.name}" data-price="${it.salePrice}" data-unit="${it.unit}" data-qty="${it.qty}">${it.name} (${it.unit}) — ${fmt(it.salePrice)} | Stock: ${it.qty}</option>`).join('');
+  const dlId = 'inv-items-dl';
+  const datalist = `<datalist id="${dlId}">${items.map(it=>`<option value="${it.name}" data-id="${it.id}" data-price="${it.salePrice}">`).join('')}</datalist>`;
 
-  tbody.innerHTML = invLines.map((l, i) => {
+  tbody.innerHTML = datalist + invLines.map((l, i) => {
     const lineTotal = (parseFloat(l.qty)||0) * (parseFloat(l.unitPrice)||0);
-    // Stock warning: if linked to an inventory item and qty exceeds available stock
-    const linkedItem = items.find(it => it.id === l.itemId);
+    const linkedItem = items.find(it => String(it.id) === String(l.itemId));
     const stockWarn = linkedItem && (parseFloat(l.qty)||0) > linkedItem.qty
       ? `<div style="font-size:10px;color:var(--red);margin-top:2px">Only ${linkedItem.qty} ${linkedItem.unit} in stock</div>` : '';
+    const isExempt = l.vatExempt === true;
 
     return `<tr>
       <td style="padding:4px 6px;vertical-align:top">
-        <select style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none;margin-bottom:2px" onchange="selectInvItem(${i},this)">
-          ${itemOpts.replace(`value="${l.itemId||''}"`, `value="${l.itemId||''}" selected`)}
-        </select>
+        <input type="text" id="inv-item-${i}" list="${dlId}"
+          value="${linkedItem?linkedItem.name:(l.desc||'')}" placeholder="Search item…"
+          autocomplete="off"
+          oninput="matchInvItem(${i},this.value)"
+          onchange="matchInvItem(${i},this.value)"
+          style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
         ${stockWarn}
       </td>
       <td style="padding:4px 6px;vertical-align:top">
@@ -2838,17 +2875,49 @@ function renderInvLines() {
         <input type="number" min="0" step="0.01" placeholder="0.00" value="${l.unitPrice||''}" oninput="updateInvLine(${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
         ${linkedItem?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px;text-align:right">Cost: ${fmt(linkedItem.costPrice)}</div>`:''}
       </td>
-      <td style="text-align:right;font-size:13px;padding:4px 8px;font-weight:500;vertical-align:top">${fmt(lineTotal)}</td>
+      <td style="padding:4px 6px;vertical-align:middle;text-align:center">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;white-space:nowrap;justify-content:center">
+          <input type="checkbox" ${isExempt?'checked':''} onchange="invLines[${i}].vatExempt=this.checked;calcInvLines()" style="cursor:pointer">
+          <span style="color:${isExempt?'var(--amber)':'var(--text-tertiary)'}">VAT-exempt</span>
+        </label>
+      </td>
+      <td style="text-align:right;font-size:13px;padding:4px 8px;font-weight:500;vertical-align:top">
+        ${fmt(lineTotal)}
+        ${isExempt?`<div style="font-size:9px;color:var(--amber)">exempt</div>`:''}
+      </td>
       <td style="vertical-align:top;padding:4px 4px"><button class="je-line-btn" onclick="removeInvLine(${i})" title="Remove line">×</button></td>
     </tr>`;
   }).join('');
   calcInvLines();
 }
 
+function matchInvItem(i, val) {
+  const items = state.inventory||[];
+  const match = items.find(it=>it.name.toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
+  if(match) {
+    invLines[i].itemId = match.id;
+    invLines[i].desc = match.name;
+    if(!invLines[i].unitPrice || invLines[i].unitPrice===0) invLines[i].unitPrice = match.salePrice||0;
+    invLines[i].lineTotal = (invLines[i].qty||1)*invLines[i].unitPrice;
+    // Update price cell without re-render
+    const tbody = document.getElementById('inv-lines-body');
+    if(tbody) {
+      const rows = tbody.querySelectorAll('tr');
+      if(rows[i]) {
+        const priceInput = rows[i].querySelectorAll('input[type="number"]')[1];
+        if(priceInput && !priceInput.value) priceInput.value = invLines[i].unitPrice;
+      }
+    }
+  } else {
+    invLines[i].itemId = '';
+    invLines[i].desc = val;
+  }
+  calcInvLines();
+}
+
 function selectInvItem(i, selectEl) {
   const selected = selectEl.options[selectEl.selectedIndex];
   if (!selected || !selected.value) {
-    // Cleared selection — just keep existing desc and price
     invLines[i].itemId = '';
     renderInvLines();
     return;
@@ -2856,18 +2925,7 @@ function selectInvItem(i, selectEl) {
   invLines[i].itemId    = selected.value;
   invLines[i].desc      = selected.getAttribute('data-name') || invLines[i].desc;
   invLines[i].unitPrice = parseFloat(selected.getAttribute('data-price')) || invLines[i].unitPrice;
-  // Re-render to show the stock warning and cost price hint
   renderInvLines();
-  // Restore the select value since re-render rebuilds the DOM
-  setTimeout(() => {
-    const tbody = document.getElementById('inv-lines-body');
-    if(!tbody) return;
-    const rows = tbody.querySelectorAll('tr');
-    if(rows[i]) {
-      const sel = rows[i].querySelector('select');
-      if(sel) sel.value = invLines[i].itemId;
-    }
-  }, 0);
 }
 
 function updateInvLine(i, field, val) {
@@ -2910,12 +2968,16 @@ function addInvLine() { invLines.push({ desc:'', qty:1, unitPrice:0, itemId:'' }
 function removeInvLine(i) { if(invLines.length>1){ invLines.splice(i,1); renderInvLines(); } }
 
 function calcInvLines() {
-  const subtotal = invLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
+  // Separate VAT-able and exempt lines
+  const vatableLines = invLines.filter(l=>!l.vatExempt);
+  const exemptLines  = invLines.filter(l=>l.vatExempt);
+  const vatableTotal = vatableLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
+  const exemptTotal  = exemptLines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
   const type = window._invVatType || document.getElementById('inv-vat-type')?.value || 'inclusive';
   let base=0, vat=0, gross=0;
-  if(type==='exclusive')      { const r=computeVAT(subtotal); base=r.vatBase; vat=r.vat; gross=r.amount; }
-  else if(type==='inclusive') { const r=vatFromGross(subtotal); base=r.vatBase; vat=r.vat; gross=r.amount; }
-  else                        { base=subtotal; vat=0; gross=subtotal; }
+  if(type==='exclusive')      { const r=computeVAT(vatableTotal); base=r.vatBase+exemptTotal; vat=r.vat; gross=r.amount+exemptTotal; }
+  else if(type==='inclusive') { const r=vatFromGross(vatableTotal); base=r.vatBase+exemptTotal; vat=r.vat; gross=vatableTotal+exemptTotal; }
+  else                        { base=vatableTotal+exemptTotal; vat=0; gross=vatableTotal+exemptTotal; }
   const b=document.getElementById('inv-vat-base'), a=document.getElementById('inv-vat-amt'), g=document.getElementById('inv-vat-gross');
   if(b) b.textContent=fmt(base); if(a) a.textContent=fmt(vat); if(g) g.textContent=fmt(gross);
 }
@@ -4476,7 +4538,7 @@ function renderCollections(c, ta) {
   </div>
 </div>
 <table id="col-table">
-  <thead><tr><th>OR No.</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Mode of Payment</th><th>Reference</th><th>Received by</th><th style="text-align:right">Amount</th><th class="no-print"></th></tr></thead>
+  <thead><tr><th>OR No.</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Mode of Payment</th><th>Reference</th><th>Received by</th><th style="text-align:right">Gross Amount</th><th style="text-align:right">CWT (2307)</th><th style="text-align:right">Net Cash</th><th class="no-print"></th></tr></thead>
   <tbody id="col-tbody">${buildCollectionRows(state.collections)}</tbody>
   <tfoot><tr style="background:var(--bg-secondary)"><td colspan="7" style="font-weight:500;padding:8px 10px">Total</td><td style="text-align:right;font-weight:500;padding:8px 10px">${fmt(total)}</td><td class="no-print"></td></tr></tfoot>
 </table>
@@ -4484,13 +4546,18 @@ function renderCollections(c, ta) {
 }
 
 function buildCollectionRows(rows) {
-  if(!rows.length) return `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)">No collections found</td></tr>`;
+  if(!rows.length) return `<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No collections found</td></tr>`;
   return rows.map(r => `<tr>
     <td class="mono">${r.id}</td><td>${r.date}</td><td style="font-weight:500">${r.customer}</td>
     <td class="mono">${r.invoice}</td><td>${r.mode}</td>
     <td style="font-size:12px;color:var(--text-secondary)">${r.reference}</td>
     <td style="font-size:12px">${r.receivedBy}</td>
     <td style="text-align:right;font-weight:500" class="pos">${fmt(r.amount)}</td>
+    <td style="text-align:right;font-size:12px;color:${r.cwtAmount?'var(--amber)':'var(--text-tertiary)'}">
+      ${r.cwtAmount?fmt(r.cwtAmount):'—'}
+      ${r.cwtAmount?`<div style="font-size:9px;color:var(--text-tertiary)">${(parseFloat(r.cwtRate)||0)*100}% CWT</div>`:''}
+    </td>
+    <td style="text-align:right;font-weight:500">${r.cwtAmount?fmt(r.netCash||r.amount-r.cwtAmount):'—'}</td>
     <td class="no-print"><div class="action-btns">
       <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printOR('${r.id}')"><i class="ti ti-printer"></i></button>
       <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteCollection('${r.id}')"><i class="ti ti-trash"></i></button>
@@ -4588,6 +4655,30 @@ function showAddCollection() {
   <div class="form-group"><label>Mode of Payment</label><select id="col-mode2"><option>Bank Transfer</option><option>Check</option><option>Cash</option><option>Online</option></select></div>
   <div class="form-group"><label>Reference No.</label><input type="text" id="col-ref" placeholder="Bank ref / Check no."></div>
 </div>
+<div style="padding:10px 14px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:10px">
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--amber);margin-bottom:8px"><i class="ti ti-receipt-tax" style="margin-right:5px"></i>BIR Form 2307 — Creditable Withholding Tax (Optional)</div>
+  <div class="form-row">
+    <div class="form-group"><label style="font-size:11px">CWT Rate</label>
+      <select id="col-cwt-rate" onchange="calcCWT()">
+        <option value="0">No CWT / Not applicable</option>
+        <option value="0.01">1% — Goods purchased for resale</option>
+        <option value="0.02">2% — Services rendered</option>
+        <option value="0.05">5% — Professional fees</option>
+        <option value="0.10">10% — Professional fees (TOP)</option>
+        <option value="0.15">15% — Management fees</option>
+        <option value="custom">Custom rate…</option>
+      </select>
+    </div>
+    <div class="form-group"><label style="font-size:11px">CWT Amount (₱) <span style="color:var(--text-tertiary);font-weight:400">(auto-calculated)</span></label>
+      <input type="number" id="col-cwt-amt" placeholder="0.00" min="0" step="0.01" oninput="invLines_cwt_manual=true">
+    </div>
+  </div>
+  <div class="form-group" id="col-cwt-custom-wrap" style="display:none">
+    <label style="font-size:11px">Custom Rate (%)</label>
+    <input type="number" id="col-cwt-custom" placeholder="e.g. 8" min="0" max="100" step="0.01" oninput="calcCWT()">
+  </div>
+  <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">CWT is deducted from the gross amount. Net cash received = Amount Received − CWT.</div>
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveCollection()">Save &amp; Issue OR</button>
@@ -4627,6 +4718,25 @@ function recomputeBalances() {
   });
 }
 
+function calcCWT() {
+  const rateEl = document.getElementById('col-cwt-rate');
+  const amtEl  = document.getElementById('col-amt');
+  const cwtEl  = document.getElementById('col-cwt-amt');
+  const customWrap = document.getElementById('col-cwt-custom-wrap');
+  if(!rateEl||!cwtEl) return;
+  if(rateEl.value==='custom') {
+    if(customWrap) customWrap.style.display='';
+    const customRate = parseFloat(document.getElementById('col-cwt-custom')?.value||0)/100;
+    const gross = parseFloat(amtEl?.value)||0;
+    cwtEl.value = (gross * customRate).toFixed(2);
+  } else {
+    if(customWrap) customWrap.style.display='none';
+    const rate = parseFloat(rateEl.value)||0;
+    const gross = parseFloat(amtEl?.value)||0;
+    cwtEl.value = (gross * rate).toFixed(2);
+  }
+}
+
 function saveCollection() {
   const date       = document.getElementById('col-date').value;
   const customer   = document.getElementById('col-cust').value;
@@ -4635,14 +4745,17 @@ function saveCollection() {
   const mode       = document.getElementById('col-mode2').value;
   const reference  = document.getElementById('col-ref').value || '—';
   const receivedBy = document.getElementById('col-by').value || '—';
+  const cwtAmt     = parseFloat(document.getElementById('col-cwt-amt')?.value)||0;
+  const cwtRateEl  = document.getElementById('col-cwt-rate');
+  const cwtRate    = cwtRateEl ? cwtRateEl.value : '0';
   if (!amount) { alert('Please enter the amount received.'); return; }
 
   const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
-  state.collections.push({ id, date, customer, invoice, amount, mode, reference, receivedBy });
+  const rec = { id, date, customer, invoice, amount, mode, reference, receivedBy };
+  if(cwtAmt > 0) { rec.cwtAmount = cwtAmt; rec.cwtRate = cwtRate; rec.netCash = amount - cwtAmt; }
+  state.collections.push(rec);
 
-  // Recompute all balances and invoice statuses from scratch
   recomputeBalances();
-
   save(); closeModal(); render();
 }
 
@@ -7611,17 +7724,55 @@ function renderOrderLines(prefix) {
 
   const tbody = document.getElementById(`${prefix}-lines-body`);
   if(!tbody) return;
-  tbody.innerHTML = lines.map((l,i)=>`<tr>
+  const datalistId = `${prefix}-items-dl`;
+  const datalist = `<datalist id="${datalistId}">${items.map(it=>`<option value="${it.name}" data-id="${it.id}">`).join('')}</datalist>`;
+
+  tbody.innerHTML = datalist + lines.map((l,i)=>{
+    const item = items.find(it=>it.id===l.itemId);
+    return `<tr>
     <td>
-      <select onchange="selectOrderItem('${prefix}',${i},this)" style="width:100%;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
-        ${itemOpts.replace(`value="${l.itemId||''}"`,`value="${l.itemId||''}" selected`)}
-      </select>
+      <input type="text" id="${prefix}-item-${i}" list="${datalistId}"
+        value="${item?item.name:''}" placeholder="Search item…"
+        autocomplete="off"
+        oninput="matchOrderItem('${prefix}',${i},this.value)"
+        onchange="matchOrderItem('${prefix}',${i},this.value)"
+        style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
     </td>
     <td><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updateOrderLine('${prefix}',${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
     <td><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updateOrderLine('${prefix}',${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
     <td style="text-align:right;padding:4px 8px;font-weight:500">${fmt((parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0))}</td>
     <td><button class="je-line-btn" onclick="removeOrderLine('${prefix}',${i})">×</button></td>
-  </tr>`).join('');
+  </tr>`;}).join('');
+}
+
+function matchOrderItem(prefix, i, val) {
+  const isSOLine = prefix === 'so' || prefix === 'inv';
+  const items = state.inventory||[];
+  const match = items.find(it=>it.name.toLowerCase()===val.toLowerCase() || it.id.toLowerCase()===val.toLowerCase());
+  const lines = getOrderLines(prefix);
+  if(match) {
+    lines[i].itemId = match.id;
+    lines[i].desc = match.name;
+    lines[i].unit = match.unit;
+    if(!lines[i].unitPrice || lines[i].unitPrice === 0) {
+      lines[i].unitPrice = isSOLine ? (match.salePrice||0) : (match.costPrice||0);
+    }
+    lines[i].lineTotal = (lines[i].qty||1) * lines[i].unitPrice;
+    // Update price and total cells without re-rendering
+    const tbody = document.getElementById(`${prefix}-lines-body`);
+    if(tbody) {
+      const rows = tbody.querySelectorAll('tr');
+      if(rows[i]) {
+        const priceInput = rows[i].querySelectorAll('input[type="number"]')[1];
+        const totalCell = rows[i].querySelectorAll('td')[3];
+        if(priceInput && !priceInput.value) priceInput.value = lines[i].unitPrice;
+        if(totalCell) totalCell.textContent = fmt((lines[i].qty||1)*lines[i].unitPrice);
+      }
+    }
+  } else {
+    lines[i].itemId = '';
+    lines[i].desc = val;
+  }
 }
 
 function selectOrderItem(prefix, i, sel) {
