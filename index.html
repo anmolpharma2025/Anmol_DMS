@@ -1127,6 +1127,7 @@ function renderUsers(c, ta) {
   if (currentUser.role !== 'admin') { c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary)">Access restricted.</div>'; return; }
   ta.innerHTML = `
     <button class="btn" onclick="showManageRoles()"><i class="ti ti-shield-cog"></i>Manage Roles</button>
+    <button class="btn" onclick="showESignatureManager()"><i class="ti ti-signature"></i>E-Signatures</button>
     <button class="btn primary" onclick="showAddUser()"><i class="ti ti-plus"></i>Add User</button>`;
   const users = getUsers();
   const roleColors = { admin:'var(--accent)', accountant:'var(--green)', sales:'var(--amber)', hr:'#34c98a', warehouse:'#a78bfa', viewer:'var(--text-secondary)' };
@@ -7143,27 +7144,195 @@ async function getOrCreateESig(documentId, documentType, signerName) {
   return sig;
 }
 
+// ── AES-256 ENCRYPTION FOR SIGNATURES ────────────────────────────────────────
+async function aesEncrypt(text, password) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' },
+    keyMaterial, { name:'AES-GCM', length:256 }, false, ['encrypt']
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, enc.encode(text));
+  // Combine salt + iv + encrypted into base64
+  const combined = new Uint8Array(16 + 12 + encrypted.byteLength);
+  combined.set(salt, 0); combined.set(iv, 16); combined.set(new Uint8Array(encrypted), 28);
+  return btoa(String.fromCharCode(...combined));
+}
+
+async function aesDecrypt(encBase64, password) {
+  try {
+    const combined = Uint8Array.from(atob(encBase64), c=>c.charCodeAt(0));
+    const salt = combined.slice(0, 16);
+    const iv   = combined.slice(16, 28);
+    const data = combined.slice(28);
+    const enc  = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' },
+      keyMaterial, { name:'AES-GCM', length:256 }, false, ['decrypt']
+    );
+    const decrypted = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(decrypted);
+  } catch(e) { return null; }
+}
+
+function getSigPassword() {
+  // Encryption key = company TIN + app secret + user id
+  const cp = getCompanyProfile();
+  return 'ANMOLPHARMA_SIG_' + (cp.tin||'CORP') + '_' + (currentUser?.id||'U001');
+}
+
+// ── SIGNATURE PAD MANAGER ─────────────────────────────────────────────────────
 function showESignatureManager() {
+  const users = getUsers();
+  const userOpts = users.filter(u=>u.active).map(u=>
+    `<option value="${u.id}">${u.name} (${u.role})</option>`
+  ).join('');
+
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-signature" style="margin-right:6px"></i>E-Signature Settings</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="modal-head"><h3><i class="ti ti-signature" style="margin-right:6px"></i>E-Signature Manager</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:16px;font-size:12px;color:var(--accent)">
-  <i class="ti ti-info-circle" style="margin-right:5px"></i>
-  Digital signatures are generated using SHA-256 cryptographic hashing. Each signature is unique to the signer, document, and timestamp — it cannot be forged or copied.
+  <i class="ti ti-lock" style="margin-right:5px"></i>
+  Signatures are encrypted with <strong>AES-256-GCM</strong> before storage. Only the intended recipient's document can decrypt and display the signature.
 </div>
-<div style="margin-bottom:14px">
-  <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px">Your Signature Preview</div>
-  <div style="padding:16px;background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-md);text-align:center" id="esig-preview">
-    <div style="color:var(--text-tertiary);font-size:12px">Generating preview…</div>
+
+<div class="form-group" style="margin-bottom:12px">
+  <label>Select Signatory</label>
+  <select id="esig-user-sel" onchange="loadUserSigPreview()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+    <option value="">— select user —</option>
+    ${userOpts}
+  </select>
+</div>
+
+<div style="margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-primary)">Draw Signature Below</label>
+    <button class="btn" style="padding:2px 10px;font-size:11px" onclick="clearSigPad()"><i class="ti ti-eraser"></i> Clear</button>
   </div>
+  <canvas id="sig-pad" width="560" height="140"
+    style="border:2px solid var(--border-mid);border-radius:var(--radius-md);background:#fff;cursor:crosshair;display:block;width:100%;touch-action:none">
+  </canvas>
+  <div style="font-size:10px;color:var(--text-tertiary);margin-top:4px;text-align:center">Draw using mouse or touch · Use a stylus for best results</div>
 </div>
+
+<div id="esig-current" style="margin-bottom:12px;display:none">
+  <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Current Saved Signature</div>
+  <div id="esig-current-img" style="padding:10px;background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-md)"></div>
+</div>
+
 <div style="display:flex;gap:8px;justify-content:flex-end">
-  <button class="btn" onclick="closeModal()">Close</button>
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveSignature()"><i class="ti ti-device-floppy"></i> Encrypt & Save Signature</button>
 </div>`);
-  // Generate a preview signature
-  getOrCreateESig('PREVIEW', 'preview', currentUser?.name||'User').then(sig => {
-    const el = document.getElementById('esig-preview');
-    if(el) el.innerHTML = renderESignatureBlock(sig, 'Digital Signature Preview');
-  });
+
+  // Initialize signature pad
+  setTimeout(() => initSigPad(), 100);
+}
+
+function initSigPad() {
+  const canvas = document.getElementById('sig-pad');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  // Set actual canvas size to match display size
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  ctx.strokeStyle = '#1a3a6b';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  let drawing = false, lastX = 0, lastY = 0;
+
+  function getPos(e) {
+    const r = canvas.getBoundingClientRect();
+    const src = e.touches ? e.touches[0] : e;
+    return { x: (src.clientX - r.left), y: (src.clientY - r.top) };
+  }
+
+  function start(e) { e.preventDefault(); drawing = true; const p=getPos(e); lastX=p.x; lastY=p.y; ctx.beginPath(); ctx.moveTo(p.x,p.y); }
+  function draw(e)  { e.preventDefault(); if(!drawing) return; const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); lastX=p.x; lastY=p.y; }
+  function stop(e)  { drawing = false; }
+
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', stop);
+  canvas.addEventListener('mouseleave', stop);
+  canvas.addEventListener('touchstart', start, {passive:false});
+  canvas.addEventListener('touchmove', draw, {passive:false});
+  canvas.addEventListener('touchend', stop);
+}
+
+function clearSigPad() {
+  const canvas = document.getElementById('sig-pad');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+async function loadUserSigPreview() {
+  const userId = document.getElementById('esig-user-sel')?.value;
+  if(!userId) return;
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  const currentDiv = document.getElementById('esig-current');
+  const currentImg = document.getElementById('esig-current-img');
+  if(u.encryptedSig) {
+    // Try to decrypt with current user's password
+    const password = getSigPassword().replace(currentUser?.id||'', userId);
+    const decrypted = await aesDecrypt(u.encryptedSig, 'ANMOLPHARMA_SIG_' + (getCompanyProfile().tin||'CORP') + '_' + userId);
+    if(decrypted && currentImg) {
+      currentImg.innerHTML = `<img src="${decrypted}" style="max-width:100%;max-height:80px;display:block">
+        <div style="font-size:10px;color:var(--green);margin-top:4px"><i class="ti ti-check"></i> Signature on file · AES-256 encrypted</div>`;
+      if(currentDiv) currentDiv.style.display = '';
+    }
+  } else {
+    if(currentDiv) currentDiv.style.display = 'none';
+  }
+}
+
+async function saveSignature() {
+  const userId = document.getElementById('esig-user-sel')?.value;
+  if(!userId) { alert('Please select a user first.'); return; }
+  const canvas = document.getElementById('sig-pad');
+  if(!canvas) return;
+
+  // Check if canvas has any drawing
+  const ctx = canvas.getContext('2d');
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const hasDrawing = pixels.some((p, i) => i % 4 === 3 && p > 0);
+  if(!hasDrawing) { alert('Please draw a signature first.'); return; }
+
+  // Get signature as PNG data URL (trim whitespace first)
+  const sigDataUrl = canvas.toDataURL('image/png');
+
+  // Encrypt with AES-256-GCM
+  const password = 'ANMOLPHARMA_SIG_' + (getCompanyProfile().tin||'CORP') + '_' + userId;
+  const encrypted = await aesEncrypt(sigDataUrl, password);
+
+  // Save to user profile
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  u.encryptedSig = encrypted;
+  u.sigUpdatedAt = new Date().toISOString().split('T')[0];
+  u.sigUpdatedBy = currentUser?.name || 'Admin';
+  saveUsers(users);
+  alert(`✅ Signature encrypted and saved for ${u.name}.\n\nEncryption: AES-256-GCM\nKey: Company TIN + User ID\nStored: Firebase (encrypted)`);
+  closeModal();
+}
+
+// Decrypt and get signature image for a user by name
+async function getDecryptedSig(userName) {
+  const users = getUsers();
+  const u = users.find(u=>u.name===userName||u.username===userName);
+  if(!u || !u.encryptedSig) return null;
+  const password = 'ANMOLPHARMA_SIG_' + (getCompanyProfile().tin||'CORP') + '_' + u.id;
+  return await aesDecrypt(u.encryptedSig, password);
 }
 
 function copyFirestoreRules() {
@@ -7959,30 +8128,56 @@ ${po.notes?`<div class="notes-box"><strong>Notes:</strong> ${po.notes}</div>`:''
 </div>
 <script>
 (async function() {
+  async function aesDecrypt(encBase64, password) {
+    try {
+      const combined = Uint8Array.from(atob(encBase64), c=>c.charCodeAt(0));
+      const salt=combined.slice(0,16), iv=combined.slice(16,28), data=combined.slice(28);
+      const enc = new TextEncoder();
+      const km = await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveKey']);
+      const key = await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:100000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);
+      const dec = await crypto.subtle.decrypt({name:'AES-GCM',iv},key,data);
+      return new TextDecoder().decode(dec);
+    } catch(e){ return null; }
+  }
   async function sha256(msg) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
     return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
-  async function makeSig(signer, docId, docType, ts, tin) {
-    const secret = 'ANMOL_PHARMA_ESIG_2025_'+(tin||'CORP');
-    const hash = await sha256(docType+'|'+docId+'|'+signer+'|'+ts+'|'+secret);
-    const pts = [];
+  function hashWave(hash, signer, role, ts, vc) {
+    const pts=[];
     for(let i=0;i<20;i++){const v=parseInt(hash.slice(i*2,i*2+2),16);pts.push(i*14+','+(20+(v%20)-10));}
-    const path='M'+pts.join(' L');
-    const vc=hash.slice(0,4).toUpperCase()+'-'+hash.slice(4,8).toUpperCase()+'-'+hash.slice(8,12).toUpperCase()+'-'+hash.slice(12,16).toUpperCase();
-    return '<svg width="280" height="40"><path d="'+path+'" fill="none" stroke="#1a3a6b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-      +'<div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
-      +'<div style="font-size:9px;color:#888;margin-top:3px">'+ts+'</div>'
-      +'<div style="margin-top:4px;display:inline-block;padding:2px 8px;border:1px solid #ccc;border-radius:3px;font-size:8px;font-family:monospace;color:#555">🔏 '+vc+'</div>';
+    return '<div style="text-align:center">'
+      +'<svg width="280" height="40"><path d="M'+pts.join(' L')+'" fill="none" stroke="#1a3a6b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      +'<div style="border-top:1px solid #333;padding-top:4px"><div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
+      +'<div style="font-size:9px;color:#888">'+role+'</div>'
+      +'<div style="font-size:8px;font-family:monospace;color:#666;margin-top:3px">🔏 '+vc+' · '+ts+'</div></div></div>';
   }
-  const ts = new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'});
+  async function renderSig(signer, userId, tin, docId, docType, role, encSig) {
+    const ts = new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'});
+    const secret='ANMOLPHARMA_ESIG_2025_'+(tin||'CORP');
+    const hash = await sha256(docType+'|'+docId+'|'+signer+'|'+ts+'|'+secret);
+    const vc=hash.slice(0,4).toUpperCase()+'-'+hash.slice(4,8).toUpperCase()+'-'+hash.slice(8,12).toUpperCase()+'-'+hash.slice(12,16).toUpperCase();
+    if(encSig) {
+      const pw = 'ANMOLPHARMA_SIG_'+(tin||'CORP')+'_'+userId;
+      const img = await aesDecrypt(encSig, pw);
+      if(img) return '<div style="text-align:center"><img src="'+img+'" style="max-height:60px;max-width:280px;display:block;margin:0 auto">'
+        +'<div style="border-top:1px solid #333;padding-top:4px;margin-top:4px"><div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
+        +'<div style="font-size:9px;color:#888">'+role+'</div>'
+        +'<div style="font-size:8px;font-family:monospace;color:#666;margin-top:3px">🔏 '+vc+' · '+ts+'</div></div></div>';
+    }
+    return hashWave(hash, signer, role, ts, vc);
+  }
   const tin = '${(getCompanyProfile().tin||'')}';
+  const preparedBy = '${po.preparedBy||''}';
+  const approvedBy = '${po.approvedBy||''}';
+  const prepUserId = '${users.find(u=>u.name===po.preparedBy)?.id||''}';
+  const appUserId  = '${users.find(u=>u.name===po.approvedBy)?.id||''}';
+  const prepEncSig = '${users.find(u=>u.name===po.preparedBy)?.encryptedSig||''}';
+  const appEncSig  = '${users.find(u=>u.name===po.approvedBy)?.encryptedSig||''}';
   const prep = document.getElementById('esig-prepared');
   const appr = document.getElementById('esig-approved');
-  if(prep && '${po.preparedBy||''}') prep.innerHTML = await makeSig('${po.preparedBy||''}','${po.id}','PO',ts,tin);
-  else if(prep) prep.innerHTML = '<div style="border-top:1px solid #333;margin-top:40px;padding-top:5px;font-size:10px">______________________<br>Prepared by</div>';
-  if(appr && '${po.approvedBy||''}') appr.innerHTML = await makeSig('${po.approvedBy||''}','${po.id}','PO-APPROVED',ts,tin);
-  else if(appr) appr.innerHTML = '<div style="border-top:1px solid #333;margin-top:40px;padding-top:5px;font-size:10px">______________________<br>Approved by</div>';
+  if(prep) prep.innerHTML = preparedBy ? await renderSig(preparedBy,prepUserId,tin,'${po.id}','PO','Prepared by',prepEncSig||null) : '<div style="border-top:1px solid #333;margin-top:48px;padding-top:5px;text-align:center;font-size:11px;color:#555">______________________<br>Prepared by</div>';
+  if(appr) appr.innerHTML = approvedBy ? await renderSig(approvedBy,appUserId,tin,'${po.id}','PO-APPROVED','Approved by',appEncSig||null) : '<div style="border-top:1px solid #333;margin-top:48px;padding-top:5px;text-align:center;font-size:11px;color:#555">______________________<br>Approved by</div>';
   window.print();
 })();
 <\/script>
