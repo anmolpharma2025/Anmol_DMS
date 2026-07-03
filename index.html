@@ -1948,8 +1948,8 @@ function buildGeneralJournalRows(entries) {
   if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No General Journal entries yet.</div>`;
   const rows = Object.values(groups).map(g => {
     return g.lines.map((l,idx) => {
-      const da = state.accounts.find(a=>a.id===l.debit);
-      const ca = state.accounts.find(a=>a.id===l.credit);
+      const da = state.accounts.find(a=>String(a.id)===String(l.debit));
+      const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
       const isFirst = idx===0;
       const border = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
       const meta = isFirst ? `
@@ -1989,7 +1989,7 @@ function buildGeneralJournalRows(entries) {
 
 function buildDisbursementRows(entries) {
   const cashKeywords = ['cash','bank','petty','drawing'];
-  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  function isCashAcc(id) { const a=state.accounts.find(a=>String(a.id)===String(id)); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   const groups = {};
   entries.forEach(j => {
     const gid = j.group||j.id;
@@ -2000,7 +2000,7 @@ function buildDisbursementRows(entries) {
   const rows = Object.values(groups).map(g => {
     const crLines = g.lines.filter(l=>l.credit && isCashAcc(l.credit));
     const cashLine = crLines[0] || g.lines.find(l=>l.credit);
-    const cashAcc = cashLine ? state.accounts.find(a=>a.id===cashLine.credit) : null;
+    const cashAcc = cashLine ? state.accounts.find(a=>String(a.id)===String(cashLine.credit)) : null;
     const totalDisb = crLines.reduce((s,l)=>s+(l.amount||0),0) || (cashLine?.amount||0);
     return `<tr>
       <td class="mono">${g.id}</td>
@@ -2145,7 +2145,7 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
 
 function printAllJournal(type) {
   const cashKeywords = ['cash','bank','petty','drawing'];
-  function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+  function isCashAcc(id) { const a=state.accounts.find(a=>String(a.id)===String(id)); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
   const entries = state.journal.filter(j => {
     if(type==='disbursement') {
       if(j.type==='disbursement') return true; if(j.type==='general') return false;
@@ -2162,7 +2162,7 @@ function printAllJournal(type) {
   const cp = getCompanyProfile();
   const title = type==='disbursement' ? 'Disbursement Journal' : 'General Journal';
   const tableRows = Object.values(groups).map(g => g.lines.map((l,idx)=>{
-    const da=state.accounts.find(a=>a.id===l.debit), ca=state.accounts.find(a=>a.id===l.credit);
+    const da=state.accounts.find(a=>String(a.id)===String(l.debit)), ca=state.accounts.find(a=>String(a.id)===String(l.credit));
     const meta=idx===0?`<td rowspan="${g.lines.length}">${g.id}</td><td rowspan="${g.lines.length}">${g.date}</td><td rowspan="${g.lines.length}">${g.ref}</td><td rowspan="${g.lines.length}">${g.desc}</td>`:'';
     if(l.debit) return `<tr>${meta}<td style="padding-left:8px">${da?da.name:l.debit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td></tr>`;
     return `<tr>${meta}<td></td><td style="padding-left:20px;font-style:italic">${ca?ca.name:l.credit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td></tr>`;
@@ -2214,8 +2214,8 @@ function viewJournal(groupId) {
   </tr></thead>
   <tbody>
   ${groupLines.map(l => {
-    const da = state.accounts.find(a=>a.id===l.debit);
-    const ca = state.accounts.find(a=>a.id===l.credit);
+    const da = state.accounts.find(a=>String(a.id)===String(l.debit));
+    const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
     if(l.debit) return `<tr>
       <td style="font-weight:500">${da?da.name:l.debit} <span class="mono" style="font-size:10px;color:var(--text-tertiary)">${l.debit}</span></td>
       <td><span class="badge" style="background:var(--accent-bg);color:var(--accent);font-size:10px">DR</span></td>
@@ -3942,7 +3942,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   else if(type === 'bir_sales') {
     const cp = getCompanyProfile();
     const rows = invInPeriod.sort((a,b)=>a.date.localeCompare(b.date)).map(inv => {
-      const cust = state.customers.find(c=>c.id===inv.customer||c.name===inv.customer);
+      const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
       const vatBase = inv.vatBase ?? inv.amount;
       const vat = inv.vat ?? 0;
       const exempt = 0;
@@ -4084,7 +4084,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   else if(type === 'bir_disbursements') {
     const cp = getCompanyProfile();
     const cashKeywords = ['cash','bank','petty','drawing'];
-    function isCashAcc(id) { const a=state.accounts.find(a=>a.id===id); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
+    function isCashAcc(id) { const a=state.accounts.find(a=>String(a.id)===String(id)); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
     // Get all disbursement journal entries grouped
     const disbJournal = state.journal.filter(j => {
       if(j.type==='disbursement') return true;
@@ -4190,7 +4190,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     // Summary List of Sales
     const salesBySupplier = {};
     invInPeriod.forEach(inv => {
-      const cust = state.customers.find(c=>c.id===inv.customer||c.name===inv.customer);
+      const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
       const key = cust?.tin || inv.customer || 'N/A';
       if(!salesBySupplier[key]) salesBySupplier[key]={tin:cust?.tin||'N/A',name:cust?.name||inv.customer||'N/A',taxable:0,vat:0,gross:0};
       salesBySupplier[key].taxable += (inv.vatBase??inv.amount??0);
