@@ -2768,22 +2768,21 @@ function showAddInvoice() {
   // - not delivered
   const invoicedSOs = new Set((state.invoices||[]).map(i=>i.soRef).filter(Boolean));
   const eligibleSOs = (state.salesOrders||[]).filter(so =>
-    so.lines && so.lines.some(l=>l.approved) &&
+    so.lines && so.lines.length > 0 &&
     so.status !== 'delivered' &&
-    !invoicedSOs.has(so.id)  // exclude already invoiced SOs
+    !invoicedSOs.has(so.id)
   );
   const soOpts = '<option value="">— none / manual entry —</option>' +
     eligibleSOs.map(so => {
-      const approvedLines = so.lines.filter(l=>l.approved);
-      const total = approvedLines.reduce((s,l)=>s+(l.lineTotal||0),0);
-      return `<option value="${so.id}">${so.id} — ${so.customer} (${approvedLines.length} approved item${approvedLines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
+      const total = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+      return `<option value="${so.id}">${so.id} — ${so.customer} (${so.lines.length} item${so.lines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
     }).join('');
 
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>New Invoice</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:11px 14px;margin-bottom:14px">
-  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (auto-fills approved items only)</label>
+  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (loads all items)</label>
   <select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${soOpts}</select>
 </div>
 <div class="form-row">
@@ -2855,14 +2854,10 @@ function loadSOIntoInvoice() {
     }
   }
 
-  // Load APPROVED lines only
-  const approvedLines = so.lines.filter(l=>l.approved);
-  if(!approvedLines.length) {
-    alert('No approved items in this SO.\nPlease approve line items in the Sales Order view first.');
-    document.getElementById('inv-so').value='';
-    return;
-  }
-  invLines = approvedLines.map(l=>({
+  // Load ALL lines regardless of approval status
+  const soLines = so.lines || [];
+  if(!soLines.length) { alert('This SO has no items.'); document.getElementById('inv-so').value=''; return; }
+  invLines = soLines.map(l=>({
     desc: l.desc||'',
     qty: l.qty||1,
     unitPrice: l.unitPrice||0,
@@ -2876,7 +2871,7 @@ function loadSOIntoInvoice() {
   const banner = document.getElementById('so-load-banner');
   if(banner) {
     banner.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);font-size:12px;color:var(--green);margin-bottom:8px';
-    banner.innerHTML = `<i class="ti ti-check-all"></i> ${approvedLines.length} approved item${approvedLines.length!==1?'s':''} from ${soId} loaded. Customer auto-filled.`;
+    banner.innerHTML = `<i class="ti ti-check-all"></i> ${soLines.length} item${soLines.length!==1?'s':''} from ${soId} loaded. Customer auto-filled.`;
   }
 }
 
