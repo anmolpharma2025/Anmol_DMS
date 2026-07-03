@@ -7446,7 +7446,7 @@ function renderPurchaseOrders(c, ta) {
   <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value neg">${fmt(total)}</div></div>
 </div>
 <table>
-  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Payment Terms</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${pos.map(po=>{
     const poTotal=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
@@ -7454,6 +7454,12 @@ function renderPurchaseOrders(c, ta) {
       <td class="mono">${po.id}</td><td>${po.date}</td><td>${po.deliveryDate||'—'}</td>
       <td style="font-weight:500">${po.supplier}</td>
       <td style="text-align:right;font-weight:500">${fmt(poTotal)}</td>
+      <td>
+        <span class="badge" style="background:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green-bg)':'var(--accent-bg)'};color:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green)':'var(--accent)'};font-size:11px">
+          ${paymentTermsLabel(po.paymentTerms||'on_account')}
+        </span>
+        ${po.dueDate&&po.paymentTerms&&po.paymentTerms!=='cod'&&po.paymentTerms!=='cod_check'?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">Due: ${po.dueDate}</div>`:''}
+      </td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
@@ -7506,6 +7512,22 @@ function showAddPO() {
   <div class="form-group"><label>Order Date</label><input type="date" id="po-date" value="${today()}"></div>
   <div class="form-group"><label>Expected Delivery</label><input type="date" id="po-del" value="${due.toISOString().split('T')[0]}"></div>
 </div>
+<div class="form-row">
+  <div class="form-group"><label>Payment Terms</label>
+    <select id="po-payment-terms">
+      <option value="on_account">On Account (Credit)</option>
+      <option value="cod">Cash on Delivery (COD)</option>
+      <option value="cod_check">COD — Check</option>
+      <option value="prepaid">Prepaid / Advance Payment</option>
+      <option value="net15">Net 15 Days</option>
+      <option value="net30">Net 30 Days</option>
+      <option value="net60">Net 60 Days</option>
+    </select>
+  </div>
+  <div class="form-group"><label>Due Date <span style="font-size:10px;color:var(--text-tertiary)">(for on-account)</span></label>
+    <input type="date" id="po-due" value="${due.toISOString().split('T')[0]}">
+  </div>
+</div>
 <div style="margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
     <span style="font-size:12px;color:var(--text-secondary)">Order lines</span>
@@ -7522,16 +7544,18 @@ function showAddPO() {
 }
 
 function savePO() {
-  const supplier=document.getElementById('po-sup').value;
-  const date=document.getElementById('po-date').value;
-  const deliveryDate=document.getElementById('po-del').value;
-  const notes=document.getElementById('po-notes').value;
-  const preparedBy=document.getElementById('po-by').value;
-  const lines=window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
+  const supplier     = document.getElementById('po-sup').value;
+  const date         = document.getElementById('po-date').value;
+  const deliveryDate = document.getElementById('po-del').value;
+  const notes        = document.getElementById('po-notes').value;
+  const preparedBy   = document.getElementById('po-by').value;
+  const paymentTerms = document.getElementById('po-payment-terms').value;
+  const dueDate      = document.getElementById('po-due').value;
+  const lines = window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
   if(!lines.length){ alert('Add at least one line item.'); return; }
-  const id='PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
-  if(!state.purchaseOrders) state.purchaseOrders=[];
-  state.purchaseOrders.push({id,date,deliveryDate,supplier,lines,notes,preparedBy,status:'pending'});
+  const id = 'PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
+  if(!state.purchaseOrders) state.purchaseOrders = [];
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, status:'pending' });
   save(); closeModal(); render();
 }
 
@@ -7552,6 +7576,7 @@ function viewPO(id) {
     <h3>${po.id}</h3>
     <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">
       Ordered: ${po.date} · Expected: ${po.deliveryDate||'TBD'} · Prepared by: ${po.preparedBy||'—'}
+      ${po.dueDate&&po.paymentTerms&&po.paymentTerms!=='cod'&&po.paymentTerms!=='cod_check'?` · <span style="color:var(--amber)">Due: ${po.dueDate}</span>`:''}
       ${po.receivedDate?` · <span style="color:var(--green)">Fully received: ${po.receivedDate}</span>`:''}
     </div>
   </div>
@@ -7560,6 +7585,7 @@ function viewPO(id) {
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
   <span class="badge" style="background:${(statusColor[po.status]||'var(--text-secondary)')+ '22'};color:${statusColor[po.status]||'var(--text-secondary)'};font-size:12px">${po.status.toUpperCase()}</span>
   <span style="font-size:12px;color:var(--text-secondary)">${deliveredCount}/${totalLines} lines delivered</span>
+  ${po.paymentTerms ? `<span class="badge" style="background:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green-bg)':'var(--accent-bg)'};color:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green)':'var(--accent)'};font-size:11px"><i class="ti ti-cash" style="margin-right:3px"></i>${paymentTermsLabel(po.paymentTerms)}</span>` : ''}
   ${po.notes?`<span style="font-size:12px;color:var(--text-secondary);font-style:italic">· ${po.notes}</span>`:''}
 </div>
 <div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:12px 14px;border:1px solid var(--border-light);margin-bottom:14px">
@@ -7582,6 +7608,19 @@ ${canReceive && (po.status==='approved'||po.status==='partial')?`<div style="pad
   ${po.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approvePO('${po.id}')">Approve PO</button>`:''}
   ${(po.status==='approved'||po.status==='partial')&&canReceive?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="receiveAllPOLines('${po.id}')"><i class="ti ti-package-import"></i>Receive All</button>`:''}
 </div>`);
+}
+
+function paymentTermsLabel(term) {
+  const labels = {
+    on_account: 'On Account (Credit)',
+    cod: 'Cash on Delivery (COD)',
+    cod_check: 'COD — Check',
+    prepaid: 'Prepaid / Advance',
+    net15: 'Net 15 Days',
+    net30: 'Net 30 Days',
+    net60: 'Net 60 Days',
+  };
+  return labels[term] || term || 'On Account';
 }
 
 function renderPOViewLines(po, canReceive) {
@@ -7767,6 +7806,8 @@ function printPO(id) {
   <div><div class="mk">Order Date</div><div class="mv">${po.date}</div></div>
   <div><div class="mk">Expected Delivery</div><div class="mv">${po.deliveryDate||'—'}</div></div>
   <div><div class="mk">Prepared By</div><div class="mv">${po.preparedBy||'—'}</div></div>
+  <div><div class="mk">Payment Terms</div><div class="mv" style="color:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'#27ae60':'#2c3e50'}">${paymentTermsLabel(po.paymentTerms||'on_account')}</div></div>
+  ${po.dueDate&&po.paymentTerms&&po.paymentTerms!=='cod'&&po.paymentTerms!=='cod_check'?`<div><div class="mk">Payment Due Date</div><div class="mv" style="color:#e67e22">${po.dueDate}</div></div>`:''}
 </div>
 <div class="supplier-box">
   <div class="mk" style="margin-bottom:6px">Supplier / Vendor</div>
