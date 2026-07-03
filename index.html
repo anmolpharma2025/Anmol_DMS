@@ -832,58 +832,20 @@ function canAccess(page) {
   return allowed.length === 0 || allowed.includes(page);
 }
 
-// ── PASSWORD HASHING (SHA-256 via Web Crypto API) ─────────────────────────────
-async function hashPassword(password) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + 'anmol_pharma_salt_2025'); // salted
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-async function verifyPassword(inputPassword, storedHash) {
-  // Support both plain-text (legacy) and hashed passwords during migration
-  if(storedHash && storedHash.length === 64 && /^[0-9a-f]+$/.test(storedHash)) {
-    // Looks like a SHA-256 hash — verify by hashing the input
-    const inputHash = await hashPassword(inputPassword);
-    return inputHash === storedHash;
-  }
-  // Legacy plain-text comparison (will be migrated on next save)
-  return inputPassword === storedHash;
-}
-
-function isPasswordHashed(pw) {
-  return pw && pw.length === 64 && /^[0-9a-f]+$/.test(pw);
-}
-
-// Hash all un-hashed passwords in the user list (migration)
-async function migratePasswords(users) {
-  let changed = false;
-  for(const u of users) {
-    if(u.password && !isPasswordHashed(u.password)) {
-      u.password = await hashPassword(u.password);
-      changed = true;
-    }
-  }
-  return changed;
-}
-
 function login(username, password) {
-  // Async login — returns a Promise
-  return _loginAsync(username, password);
-}
-
-async function _loginAsync(username, password) {
   const users = getUsers();
   const u = users.find(u => u.username === username && u.active);
   if(!u) return false;
-  const match = await verifyPassword(password, u.password);
-  if(!match) return false;
-  // If password was plain-text, hash it now (migration)
-  if(!isPasswordHashed(u.password)) {
-    u.password = await hashPassword(password);
+  // Support both plain-text and previously hashed passwords (migration back)
+  const storedPw = u.password || '';
+  const match = storedPw === password || (storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw));
+  // If stored as hash (legacy), allow login but convert back to plain text
+  if(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw)) {
+    // Can't reverse hash — reset to typed password on login
+    u.password = password;
     try { localStorage.setItem('anmolpharma_users', JSON.stringify(users)); } catch(e) {}
   }
+  if(storedPw !== password && !(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw))) return false;
   setSession(u);
   currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
   return true;
@@ -917,13 +879,6 @@ function showLoginScreen() {
           const localRoles  = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
           const merged = { ...localRoles, ...doc.data().customRoles };
           try { localStorage.setItem('anmolpharma_custom_roles', JSON.stringify(merged)); } catch(e) {}
-        }
-        // Migrate any plain-text passwords to SHA-256 hashes
-        const usersToMigrate = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
-        if(usersToMigrate.some(u=>u.password && !isPasswordHashed(u.password))) {
-          migratePasswords(usersToMigrate).then(changed => {
-            if(changed) try { localStorage.setItem('anmolpharma_users', JSON.stringify(usersToMigrate)); } catch(e) {}
-          });
         }
       }
     }).catch(() => {}); // silent fail — use local users if offline
@@ -977,24 +932,13 @@ function showAppScreen() {
   render();
 }
 
-async function doLogin() {
+function doLogin() {
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
-  const btn = document.querySelector('#login-screen button[onclick="doLogin()"]') || document.querySelector('#login-screen .btn-primary');
-  const errEl = document.getElementById('login-error');
-  if(btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
-  errEl.textContent = '';
-  try {
-    const ok = await login(u, p);
-    if(ok) {
-      showAppScreen();
-    } else {
-      errEl.textContent = 'Incorrect username or password.';
-    }
-  } catch(e) {
-    errEl.textContent = 'Login error: ' + e.message;
-  } finally {
-    if(btn) { btn.disabled = false; btn.textContent = 'Sign In'; }
+  if(login(u, p)) {
+    showAppScreen();
+  } else {
+    document.getElementById('login-error').textContent = 'Incorrect username or password.';
   }
 }
 
@@ -1176,8 +1120,9 @@ ${users.map(u => {
       <div>
         <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);margin-bottom:4px">Password</div>
         <div style="display:flex;align-items:center;gap:4px">
-          <span class="mono" style="font-size:13px;letter-spacing:0.1em;color:var(--text-tertiary)">••••••••••••</span>
-          <span style="font-size:10px;color:var(--green);margin-left:4px"><i class="ti ti-lock"></i> hashed</span>
+          <span class="mono" id="pw-mask-${u.id}" style="font-size:13px;letter-spacing:0.1em;color:var(--text-tertiary)">••••••••••••</span>
+          <span class="mono" id="pw-text-${u.id}" style="font-size:12px;display:none;color:var(--text-primary)">${u.password||''}</span>
+          <button onclick="togglePwVisible('${u.id}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:12px;padding:0 2px" title="Show/hide password"><i class="ti ti-eye" id="pw-icon-${u.id}"></i></button>
         </div>
       </div>
       <div>
@@ -1230,6 +1175,17 @@ function toggleUserCard(id) {
   const isOpen = body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
   if(icon) icon.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+function togglePwVisible(id) {
+  const mask = document.getElementById('pw-mask-'+id);
+  const text = document.getElementById('pw-text-'+id);
+  const icon = document.getElementById('pw-icon-'+id);
+  if(!mask||!text) return;
+  const showing = text.style.display !== 'none';
+  mask.style.display = showing ? '' : 'none';
+  text.style.display = showing ? 'none' : '';
+  if(icon) icon.className = showing ? 'ti ti-eye' : 'ti ti-eye-off';
 }
 
 function resetToRoleDefault(id) {
@@ -1479,7 +1435,7 @@ function showAddUser() {
 </div>`);
 }
 
-async function saveNewUser() {
+function saveNewUser() {
   const name     = document.getElementById('nu-name').value.trim();
   const username = document.getElementById('nu-user').value.trim().toLowerCase();
   const pass     = document.getElementById('nu-pass').value;
@@ -1496,7 +1452,7 @@ async function saveNewUser() {
   const selectedPages = getCheckedPages('nu');
   const roleDefaults = getRolePages(role);
   const isDifferent = role !== 'admin' && JSON.stringify([...selectedPages].sort()) !== JSON.stringify([...roleDefaults].sort());
-  const userObj = { id, username, password: await hashPassword(pass), name, role, active:true };
+  const userObj = { id, username, password: pass, name, role, active:true };
   if(branchId) userObj.branchId = branchId;
   if(isDifferent && selectedPages.length > 0) userObj.customPages = selectedPages;
   users.push(userObj);
@@ -1537,13 +1493,13 @@ function showEditUser(id) {
 </div>`);
 }
 
-async function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
+function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
   u.name = document.getElementById('eu-name').value.trim() || u.name;
   const newPass = document.getElementById('eu-pass').value;
-  if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password = await hashPassword(newPass); }
+  if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password=newPass; }
   u.role = document.getElementById('eu-role').value;
   const branchId = document.getElementById('eu-branch')?.value || '';
   if(branchId) u.branchId = branchId; else delete u.branchId;
