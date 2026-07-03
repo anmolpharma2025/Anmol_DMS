@@ -2309,7 +2309,7 @@ function renderJeLines() {
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
 
   function buildAccSearch(fieldId, selectedId, onchangeFn) {
-    const selectedAcc = state.accounts.find(a=>a.id===selectedId);
+    const selectedAcc = state.accounts.find(a=>String(a.id)===String(selectedId));
     const selectedText = selectedAcc ? `${selectedAcc.id} – ${selectedAcc.name}` : '';
     return `
 <div style="position:relative">
@@ -2321,7 +2321,7 @@ function renderJeLines() {
     onblur="commitJeAccount('${fieldId}','${onchangeFn}')">
   <div id="${fieldId}-drop" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-card);border:1px solid var(--border-mid);border-top:none;border-radius:0 0 var(--radius-md) var(--radius-md);z-index:999;box-shadow:0 4px 12px rgba(0,0,0,0.3)">
     ${state.accounts.map(a=>`<div class="je-acc-opt" data-id="${a.id}" data-text="${a.id} – ${a.name}"
-      onmousedown="pickJeAccount('${fieldId}','${a.id}','${a.id} – ${a.name}','${onchangeFn}')"
+      onmousedown="pickJeAccount('${fieldId}','${a.id}','${a.id} \u2013 ${a.name}','${onchangeFn}')"
       style="padding:6px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border-light)"
       onmouseenter="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''"
       >${a.id} – ${a.name}</div>`).join('')}
@@ -2332,7 +2332,7 @@ function renderJeLines() {
   function buildOpts(selectedId) {
     return `<option value="">— none —</option>` +
       state.accounts.map(a =>
-        `<option value="${a.id}"${a.id === selectedId ? ' selected' : ''}>${a.id} – ${a.name}</option>`
+        `<option value="${a.id}"${String(a.id)===String(selectedId) ? ' selected' : ''}>${a.id} – ${a.name}</option>`
       ).join('');
   }
 
@@ -2421,15 +2421,17 @@ function commitJeAccount(fieldId, onchangeFn) {
     hideJeDropdown(fieldId);
     const q = (input.value||'').toLowerCase().trim();
     if(!q) return;
-    // Find visible (matching) options
     const visible = drop ? Array.from(drop.children).filter(d=>d.style.display!=='none') : [];
-    // Exact match first, then first visible
-    const exact = state.accounts.find(a=>(a.id+' – '+a.name).toLowerCase()===q || a.id.toLowerCase()===q);
-    const pick = exact || (visible.length===1 ? state.accounts.find(a=>a.id===visible[0].dataset.id) : null);
+    const exact = state.accounts.find(a=>{
+      const id = String(a.id||'').toLowerCase();
+      const name = String(a.name||'').toLowerCase();
+      return (id+' – '+name)===q || id===q || name===q;
+    });
+    const pick = exact || (visible.length===1 ? state.accounts.find(a=>String(a.id)===visible[0].dataset.id) : null);
     if(pick && onchangeFn) {
       input.value = `${pick.id} – ${pick.name}`;
       const [field, idx] = onchangeFn.split('|');
-      updateJeLine(parseInt(idx), field, pick.id);
+      updateJeLine(parseInt(idx), field, String(pick.id));
       updateJeTotals();
       updateNetDrawn();
     }
@@ -2455,7 +2457,7 @@ function filterJeAccounts(fieldId, query, onchangeFn) {
   drop.style.display = 'block';
   const q = (query||'').toLowerCase();
   Array.from(drop.children).forEach(div => {
-    const text = (div.dataset.text||'').toLowerCase();
+    const text = String(div.dataset.text||'').toLowerCase();
     div.style.display = (!q || text.includes(q)) ? '' : 'none';
   });
 }
@@ -2464,10 +2466,9 @@ function pickJeAccount(fieldId, accountId, accountText, onchangeFn) {
   const input = document.getElementById(fieldId+'-input');
   if(input) input.value = accountText;
   hideJeDropdown(fieldId);
-  // Parse the onchangeFn string "field|idx"
   if(onchangeFn) {
     const [field, idx] = onchangeFn.split('|');
-    updateJeLine(parseInt(idx), field, accountId);
+    updateJeLine(parseInt(idx), field, String(accountId));
     updateJeTotals();
     updateNetDrawn();
   }
