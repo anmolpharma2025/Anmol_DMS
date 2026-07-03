@@ -2759,22 +2759,31 @@ function showAddInvoice() {
   const custOpts = '<option value="">— Select customer —</option>' + state.customers.map(cu => `<option value="${cu.name}">${cu.name}</option>`).join('');
   const due = new Date(); due.setDate(due.getDate() + 30);
   invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
-  window._invVatType = 'exclusive';
+  window._invVatType = 'inclusive';
   window._invLinkedSO = null;
 
-  // Sales Orders — show all with items regardless of approval status
-  const eligibleSOs = (state.salesOrders||[]).filter(so => so.lines && so.lines.length > 0 && so.status !== 'delivered');
+  // SOs eligible for invoicing:
+  // - has at least one approved item
+  // - not yet invoiced (no invoice with this soRef exists), OR allow multiple invoices per SO
+  // - not delivered
+  const invoicedSOs = new Set((state.invoices||[]).map(i=>i.soRef).filter(Boolean));
+  const eligibleSOs = (state.salesOrders||[]).filter(so =>
+    so.lines && so.lines.some(l=>l.approved) &&
+    so.status !== 'delivered' &&
+    !invoicedSOs.has(so.id)  // exclude already invoiced SOs
+  );
   const soOpts = '<option value="">— none / manual entry —</option>' +
     eligibleSOs.map(so => {
-      const total = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-      return `<option value="${so.id}">${so.id} — ${so.customer} (${so.lines.length} item${so.lines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
+      const approvedLines = so.lines.filter(l=>l.approved);
+      const total = approvedLines.reduce((s,l)=>s+(l.lineTotal||0),0);
+      return `<option value="${so.id}">${so.id} — ${so.customer} (${approvedLines.length} approved item${approvedLines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
     }).join('');
 
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>New Invoice</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:11px 14px;margin-bottom:14px">
-  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (auto-fills all items)</label>
+  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (auto-fills approved items only)</label>
   <select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${soOpts}</select>
 </div>
 <div class="form-row">
@@ -2827,21 +2836,48 @@ function showAddInvoice() {
 }
 
 function loadSOIntoInvoice() {
-  const soId = document.getElementById('inv-so') && document.getElementById('inv-so').value;
-  if(!soId) { invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }]; renderInvLines(); return; }
+  const soId = document.getElementById('inv-so')?.value;
+  if(!soId) {
+    invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
+    renderInvLines();
+    const banner = document.getElementById('so-load-banner');
+    if(banner) banner.style.display = 'none';
+    return;
+  }
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
-  // Set customer
+
+  // Auto-fill customer
   const custSel = document.getElementById('inv-cust');
-  if(custSel) { for(let i=0;i<custSel.options.length;i++) { if(custSel.options[i].value===so.customer){custSel.selectedIndex=i;break;} } }
-  // Load ALL lines regardless of approval status
-  const lines = so.lines || [];
-  if(!lines.length) { alert('This SO has no items.'); document.getElementById('inv-so').value=''; return; }
-  invLines = lines.map(l=>({ desc:l.desc||'', qty:l.qty||1, unitPrice:l.unitPrice||0, itemId:l.itemId||'', lineTotal:l.lineTotal||0, fromSO:soId }));
+  if(custSel && so.customer) {
+    for(let i=0;i<custSel.options.length;i++) {
+      if(custSel.options[i].value===so.customer) { custSel.selectedIndex=i; break; }
+    }
+  }
+
+  // Load APPROVED lines only
+  const approvedLines = so.lines.filter(l=>l.approved);
+  if(!approvedLines.length) {
+    alert('No approved items in this SO.\nPlease approve line items in the Sales Order view first.');
+    document.getElementById('inv-so').value='';
+    return;
+  }
+  invLines = approvedLines.map(l=>({
+    desc: l.desc||'',
+    qty: l.qty||1,
+    unitPrice: l.unitPrice||0,
+    itemId: l.itemId||'',
+    lineTotal: l.lineTotal||0,
+    fromSO: soId
+  }));
   window._invLinkedSO = soId;
   renderInvLines();
+
   const banner = document.getElementById('so-load-banner');
-  if(banner) { banner.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);font-size:12px;color:var(--green);margin-bottom:8px'; banner.innerHTML=`<i class="ti ti-check-all"></i> ${lines.length} item${lines.length!==1?'s':''} from ${soId} loaded (all items including pending approval).`; }
+  if(banner) {
+    banner.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);font-size:12px;color:var(--green);margin-bottom:8px';
+    banner.innerHTML = `<i class="ti ti-check-all"></i> ${approvedLines.length} approved item${approvedLines.length!==1?'s':''} from ${soId} loaded. Customer auto-filled.`;
+  }
 }
 
 function renderInvLines() {
@@ -3248,8 +3284,26 @@ function printDeliveryReceipt(id) {
   if(!inv) return;
   const cp = getCompanyProfile();
   const cust = state.customers.find(c=>c.name===inv.customer)||{};
-  const lines = inv.lines || [];
-  const drNum = 'DR-' + id.replace('INV-','');
+
+  // Use only approved SO items if linked to an SO, else use invoice lines
+  let lines = inv.lines || [];
+  let drNote = '';
+  if(inv.soRef) {
+    const so = (state.salesOrders||[]).find(s=>s.id===inv.soRef);
+    if(so) {
+      const approvedLines = so.lines.filter(l=>l.approved);
+      if(approvedLines.length) {
+        lines = approvedLines;
+        drNote = `Delivery based on approved items from Sales Order <strong>${inv.soRef}</strong>.`;
+      }
+    }
+  }
+
+  // DR number: if multiple invoices exist for same SO, append sequence
+  const relatedInvoices = (state.invoices||[]).filter(i=>i.soRef===inv.soRef && inv.soRef);
+  const drSeq = relatedInvoices.length > 1 ? '-' + (relatedInvoices.findIndex(i=>i.id===id)+1) : '';
+  const drNum = inv.soRef ? `DR-${inv.soRef.replace('SO-','')}${drSeq}` : `DR-${id.replace('INV-','')}`;
+
   const win = window.open('','_blank','width=860,height=780');
   if(!win) { alert('Pop-up blocked. Please allow pop-ups and try again.'); return; }
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Delivery Receipt ${drNum}</title>
@@ -3285,25 +3339,33 @@ tr:last-child td{border-bottom:2px solid #1a1a1a}
     <div class="doc-title">DELIVERY RECEIPT</div>
     <div class="doc-meta">DR No.: <strong>${drNum}</strong></div>
     <div class="doc-meta">Invoice Ref.: <strong>${inv.id}</strong></div>
-    <div class="doc-meta">Date: ${inv.date}</div>
+    ${inv.soRef?`<div class="doc-meta">SO Ref.: <strong>${inv.soRef}</strong></div>`:''}
+    <div class="doc-meta">Date: ${today()}</div>
   </div>
 </div>
 <div class="meta-grid">
   <div class="meta-item"><div class="label">Delivered To</div><div class="val">${inv.customer}</div>${cust.address?`<div style="font-size:11px;color:#555;margin-top:2px">${cust.address}</div>`:''}</div>
   <div class="meta-item"><div class="label">Delivery Date</div><div class="val">${today()}</div></div>
   <div class="meta-item"><div class="label">Invoice Date</div><div class="val">${inv.date}</div></div>
-  <div class="meta-item"><div class="label">Sales Order</div><div class="val">${inv.soRef||'—'}</div></div>
+  <div class="meta-item"><div class="label">Prepared by</div><div class="val">${cp.preparedBy||'___________________'}</div></div>
 </div>
 <table>
-  <thead><tr><th style="width:50%">Item Description</th><th class="r" style="width:15%">Qty</th><th style="width:20%">Unit</th><th class="r" style="width:15%">Condition</th></tr></thead>
+  <thead><tr>
+    <th style="width:8%">#</th>
+    <th style="width:42%">Item Description</th>
+    <th class="r" style="width:15%">Qty</th>
+    <th style="width:20%">Unit</th>
+    <th style="width:15%">Condition</th>
+  </tr></thead>
   <tbody>
-  ${lines.map(l=>{
+  ${lines.map((l,idx)=>{
     const item = state.inventory.find(it=>String(it.id)===String(l.itemId));
     return `<tr>
-      <td>${item?item.name:l.desc||'Item'}</td>
+      <td>${idx+1}</td>
+      <td>${item?item.name:(l.desc||'Item')}</td>
       <td class="r" style="font-weight:600">${l.qty}</td>
       <td>${item?item.unit:''}</td>
-      <td class="r" style="color:#555">Good</td>
+      <td style="color:#555">Good</td>
     </tr>`;
   }).join('')}
   </tbody>
@@ -3312,12 +3374,12 @@ tr:last-child td{border-bottom:2px solid #1a1a1a}
   <div class="received-title">Acknowledgement of Receipt</div>
   <div style="font-size:12px;color:#333">I/We hereby acknowledge receipt of the above-listed items in good order and condition.</div>
   <div class="sig-row">
-    <div class="sig-box">____________________________<br>Delivered by / Date</div>
-    <div class="sig-box">____________________________<br>Checked by / Date</div>
-    <div class="sig-box">____________________________<br>Received by / Customer Signature / Date</div>
+    <div class="sig-box"><br><br>____________________________<br>Delivered by / Date</div>
+    <div class="sig-box"><br><br>____________________________<br>Checked by / Date</div>
+    <div class="sig-box"><br><br>____________________________<br>Received by / Customer Signature<br>Date: _______________</div>
   </div>
 </div>
-${inv.soRef?`<div class="note">This delivery is made in connection with Sales Order <strong>${inv.soRef}</strong> and Invoice <strong>${inv.id}</strong>. Goods are subject to our standard terms and conditions.</div>`:''}
+${drNote?`<div class="note">${drNote} Invoice: <strong>${inv.id}</strong>. Goods subject to standard terms and conditions.</div>`:''}
 <div style="margin-top:16px;text-align:right">
   <button onclick="window.print()" style="padding:8px 20px;background:#1a1a1a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button>
 </div>
