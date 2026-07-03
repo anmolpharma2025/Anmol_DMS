@@ -2725,6 +2725,7 @@ function renderInvoices(c, ta) {
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
+        <button class="btn" style="padding:3px 9px;font-size:11px" title="Print Delivery Receipt" onclick="printDeliveryReceipt('${inv.id}')"><i class="ti ti-truck-delivery"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -2761,19 +2762,19 @@ function showAddInvoice() {
   window._invVatType = 'exclusive';
   window._invLinkedSO = null;
 
-  // Sales Orders with at least one approved item
-  const eligibleSOs = (state.salesOrders||[]).filter(so => so.lines.some(l=>l.approved) && so.status !== 'delivered');
+  // Sales Orders — show all with items regardless of approval status
+  const eligibleSOs = (state.salesOrders||[]).filter(so => so.lines && so.lines.length > 0 && so.status !== 'delivered');
   const soOpts = '<option value="">— none / manual entry —</option>' +
     eligibleSOs.map(so => {
-      const ac = so.lines.filter(l=>l.approved).length;
-      return `<option value="${so.id}">${so.id} — ${so.customer} (${ac} item${ac!==1?'s':''} approved)</option>`;
+      const total = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+      return `<option value="${so.id}">${so.id} — ${so.customer} (${so.lines.length} item${so.lines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
     }).join('');
 
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>New Invoice</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:11px 14px;margin-bottom:14px">
-  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (auto-fills approved items)</label>
+  <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (auto-fills all items)</label>
   <select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${soOpts}</select>
 </div>
 <div class="form-row">
@@ -2833,15 +2834,14 @@ function loadSOIntoInvoice() {
   // Set customer
   const custSel = document.getElementById('inv-cust');
   if(custSel) { for(let i=0;i<custSel.options.length;i++) { if(custSel.options[i].value===so.customer){custSel.selectedIndex=i;break;} } }
-  // Load approved lines
-  const approved = so.lines.filter(l=>l.approved);
-  if(!approved.length) { alert('No approved items in this SO. Approve items in the Sales Order view first.'); document.getElementById('inv-so').value=''; return; }
-  invLines = approved.map(l=>({ desc:l.desc||'', qty:l.qty||1, unitPrice:l.unitPrice||0, itemId:l.itemId||'', lineTotal:l.lineTotal||0, fromSO:soId }));
+  // Load ALL lines regardless of approval status
+  const lines = so.lines || [];
+  if(!lines.length) { alert('This SO has no items.'); document.getElementById('inv-so').value=''; return; }
+  invLines = lines.map(l=>({ desc:l.desc||'', qty:l.qty||1, unitPrice:l.unitPrice||0, itemId:l.itemId||'', lineTotal:l.lineTotal||0, fromSO:soId }));
   window._invLinkedSO = soId;
   renderInvLines();
-  // Show banner
   const banner = document.getElementById('so-load-banner');
-  if(banner) { banner.style.display='flex'; banner.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);font-size:12px;color:var(--green);margin-bottom:8px'; banner.innerHTML=`<i class="ti ti-check-all"></i> ${approved.length} approved item${approved.length!==1?'s':''} from ${soId} loaded into invoice.`; }
+  if(banner) { banner.style.cssText='display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);font-size:12px;color:var(--green);margin-bottom:8px'; banner.innerHTML=`<i class="ti ti-check-all"></i> ${lines.length} item${lines.length!==1?'s':''} from ${soId} loaded (all items including pending approval).`; }
 }
 
 function renderInvLines() {
@@ -3102,7 +3102,8 @@ ${(state.collections||[]).filter(r=>r.invoice===inv.id).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i>Edit #</button>
-  <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print</button>
+  <button class="btn" onclick="closeModal();printDeliveryReceipt('${inv.id}')"><i class="ti ti-truck-delivery"></i>Delivery Receipt</button>
+  <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print Invoice</button>
 </div>`);
 }
 
@@ -3236,6 +3237,89 @@ function printInvoice(id) {
 <div class="footer">
   <span>Thank you for your business!</span>
   <span>Generated ${new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</span>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+function printDeliveryReceipt(id) {
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  const cp = getCompanyProfile();
+  const cust = state.customers.find(c=>c.name===inv.customer)||{};
+  const lines = inv.lines || [];
+  const drNum = 'DR-' + id.replace('INV-','');
+  const win = window.open('','_blank','width=860,height=780');
+  if(!win) { alert('Pop-up blocked. Please allow pop-ups and try again.'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Delivery Receipt ${drNum}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;color:#1a1a1a;padding:32px 40px;background:#fff}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;border-bottom:2px solid #1a1a1a;padding-bottom:14px}
+.co-name{font-size:18px;font-weight:700}.co-sub{font-size:11px;color:#555;margin-top:2px}
+.doc-title{font-size:20px;font-weight:700;color:#1a1a1a;text-align:right}
+.doc-meta{font-size:12px;color:#555;text-align:right;margin-top:4px}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;border:1px solid #ccc;padding:12px;border-radius:4px}
+.meta-item .label{font-size:9px;text-transform:uppercase;letter-spacing:0.06em;color:#888;margin-bottom:2px}
+.meta-item .val{font-size:12px;font-weight:600}
+table{width:100%;border-collapse:collapse;margin-bottom:24px}
+th{background:#1a1a1a;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:600}
+th.r,td.r{text-align:right}
+td{padding:7px 10px;border-bottom:1px solid #e5e5e5;font-size:12px}
+tr:last-child td{border-bottom:2px solid #1a1a1a}
+.received{margin-top:32px;border:1px solid #ccc;padding:14px;border-radius:4px}
+.received-title{font-size:11px;text-transform:uppercase;font-weight:700;color:#888;margin-bottom:12px;letter-spacing:0.06em}
+.sig-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:16px}
+.sig-box{border-top:1px solid #333;padding-top:5px;text-align:center;font-size:10px;color:#555}
+.note{margin-top:16px;padding:10px;background:#f9f9f9;border:1px solid #e5e5e5;border-radius:4px;font-size:11px;color:#555}
+@media print{body{padding:20px 24px}button{display:none!important}}
+</style></head><body>
+<div class="hdr">
+  <div>
+    <div class="co-name">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div class="co-sub">${cp.address||''}</div>
+    <div class="co-sub">TIN: ${cp.tin||'___-___-___-___'}</div>
+  </div>
+  <div>
+    <div class="doc-title">DELIVERY RECEIPT</div>
+    <div class="doc-meta">DR No.: <strong>${drNum}</strong></div>
+    <div class="doc-meta">Invoice Ref.: <strong>${inv.id}</strong></div>
+    <div class="doc-meta">Date: ${inv.date}</div>
+  </div>
+</div>
+<div class="meta-grid">
+  <div class="meta-item"><div class="label">Delivered To</div><div class="val">${inv.customer}</div>${cust.address?`<div style="font-size:11px;color:#555;margin-top:2px">${cust.address}</div>`:''}</div>
+  <div class="meta-item"><div class="label">Delivery Date</div><div class="val">${today()}</div></div>
+  <div class="meta-item"><div class="label">Invoice Date</div><div class="val">${inv.date}</div></div>
+  <div class="meta-item"><div class="label">Sales Order</div><div class="val">${inv.soRef||'—'}</div></div>
+</div>
+<table>
+  <thead><tr><th style="width:50%">Item Description</th><th class="r" style="width:15%">Qty</th><th style="width:20%">Unit</th><th class="r" style="width:15%">Condition</th></tr></thead>
+  <tbody>
+  ${lines.map(l=>{
+    const item = state.inventory.find(it=>String(it.id)===String(l.itemId));
+    return `<tr>
+      <td>${item?item.name:l.desc||'Item'}</td>
+      <td class="r" style="font-weight:600">${l.qty}</td>
+      <td>${item?item.unit:''}</td>
+      <td class="r" style="color:#555">Good</td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>
+<div class="received">
+  <div class="received-title">Acknowledgement of Receipt</div>
+  <div style="font-size:12px;color:#333">I/We hereby acknowledge receipt of the above-listed items in good order and condition.</div>
+  <div class="sig-row">
+    <div class="sig-box">____________________________<br>Delivered by / Date</div>
+    <div class="sig-box">____________________________<br>Checked by / Date</div>
+    <div class="sig-box">____________________________<br>Received by / Customer Signature / Date</div>
+  </div>
+</div>
+${inv.soRef?`<div class="note">This delivery is made in connection with Sales Order <strong>${inv.soRef}</strong> and Invoice <strong>${inv.id}</strong>. Goods are subject to our standard terms and conditions.</div>`:''}
+<div style="margin-top:16px;text-align:right">
+  <button onclick="window.print()" style="padding:8px 20px;background:#1a1a1a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button>
 </div>
 <script>window.onload=()=>{window.print();}<\/script>
 </body></html>`);
@@ -7890,7 +7974,9 @@ function renderPurchaseOrders(c, ta) {
     const poTotal=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     return `<tr>
       <td class="mono">${po.id}</td><td>${po.date}</td><td>${po.deliveryDate||'—'}</td>
-      <td style="font-weight:500">${po.supplier}</td>
+      <td style="font-weight:500">${po.supplier}
+        ${po.purchaseType?`<div style="font-size:10px;color:${po.purchaseType==='merchandise'?'var(--accent)':'var(--text-tertiary)'};margin-top:2px">${po.purchaseType==='merchandise'?'📦 Merchandise':'📋 General'} ${po.category?'· '+po.category:''}</div>`:''}
+      </td>
       <td style="text-align:right;font-weight:500">${fmt(poTotal)}</td>
       <td>
         <span class="badge" style="background:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green-bg)':'var(--accent-bg)'};color:${po.paymentTerms==='cod'||po.paymentTerms==='cod_check'?'var(--green)':'var(--accent)'};font-size:11px">
@@ -7951,6 +8037,25 @@ function showAddPO() {
   <div class="form-group"><label>Expected Delivery</label><input type="date" id="po-del" value="${due.toISOString().split('T')[0]}"></div>
 </div>
 <div class="form-row">
+  <div class="form-group"><label>Purchase Type</label>
+    <select id="po-purchase-type" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="merchandise">📦 Merchandise Inventory — goods for resale</option>
+      <option value="general">📋 General Purchase — supplies / expenses / assets</option>
+    </select>
+  </div>
+  <div class="form-group"><label>Category</label>
+    <select id="po-category" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="Goods for Resale">Goods for Resale</option>
+      <option value="Office Supplies">Office Supplies</option>
+      <option value="Equipment">Equipment</option>
+      <option value="Freight &amp; Delivery">Freight &amp; Delivery</option>
+      <option value="Utilities">Utilities</option>
+      <option value="Repairs &amp; Maintenance">Repairs &amp; Maintenance</option>
+      <option value="Other">Other</option>
+    </select>
+  </div>
+</div>
+<div class="form-row">
   <div class="form-group"><label>Payment Terms</label>
     <select id="po-payment-terms">
       <option value="on_account">On Account (Credit)</option>
@@ -7989,11 +8094,13 @@ function savePO() {
   const preparedBy   = document.getElementById('po-by').value;
   const paymentTerms = document.getElementById('po-payment-terms').value;
   const dueDate      = document.getElementById('po-due').value;
+  const purchaseType = document.getElementById('po-purchase-type')?.value || 'merchandise';
+  const category     = document.getElementById('po-category')?.value || 'Goods for Resale';
   const lines = window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id = 'PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
   if(!state.purchaseOrders) state.purchaseOrders = [];
-  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, status:'pending' });
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, status:'pending' });
   save(); closeModal(); render();
 }
 
