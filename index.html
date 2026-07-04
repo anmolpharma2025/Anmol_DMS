@@ -2295,7 +2295,7 @@ ${disbFields}
     <span style="font-size:12px;color:var(--text-secondary)">${isDisbursement ? 'Expense / Debit lines' : 'Journal lines'}</span>
     <div style="display:flex;gap:6px">
       ${!isDisbursement?`<button class="btn" style="padding:3px 10px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="addCWT2307GJ()" title="Add CWT/2307 withholding entry"><i class="ti ti-receipt-tax"></i>CWT/2307</button>`:''}
-      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="isDisbursement?addDisbLine('debit'):addJeLine()"><i class="ti ti-plus"></i>Add line</button>
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="window._jeIsDisbursement?addDisbLine('debit'):addJeLine()"><i class="ti ti-plus"></i>Add line</button>
     </div>
   </div>
   <table class="je-lines">
