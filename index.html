@@ -1917,7 +1917,12 @@ function buildDisbursementRows(entries) {
       <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
       <td>${g.date}</td>
       <td class="mono">${g.ref}</td>
-      <td>${g.desc}${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}</td>
+      <td>
+        ${g.desc}
+        ${g.lines[0]?.payee?`<div style="font-size:11px;color:var(--text-primary);margin-top:2px"><i class="ti ti-user" style="font-size:10px"></i> <strong>Payee:</strong> ${g.lines[0].payee}</div>`:''}
+        ${g.lines[0]?.checkNo?`<div style="font-size:11px;color:var(--text-secondary);margin-top:1px"><i class="ti ti-file-invoice" style="font-size:10px"></i> Ref/Check: <span class="mono">${g.lines[0].checkNo}</span></div>`:''}
+        ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
+      </td>
       <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
       <td style="text-align:right;font-weight:600;color:${isCancelled?'var(--text-tertiary)':'var(--red)'}">${fmt(totalDisb)}</td>
       <td class="no-print">
@@ -1935,7 +1940,7 @@ function buildDisbursementRows(entries) {
   }).join('');
   return `<table>
     <thead><tr>
-      <th>Entry #</th><th>Date</th><th>Reference</th><th>Description</th>
+      <th>Entry #</th><th>Date</th><th>Reference</th><th>Payee / Description</th>
       <th>Drawn From</th>
       <th style="text-align:right">Amount Disbursed</th>
       <th class="no-print">Actions</th>
@@ -2027,7 +2032,9 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
   <div class="meta-item"><div class="meta-label">Entry #</div><strong>${first.group||first.id}</strong></div>
   <div class="meta-item"><div class="meta-label">Date</div>${first.date}</div>
   <div class="meta-item"><div class="meta-label">Reference</div>${first.ref||'—'}</div>
-  <div class="meta-item" style="grid-column:span 2"><div class="meta-label">Description / Particulars</div>${first.desc||'—'}</div>
+  ${first.payee?`<div class="meta-item"><div class="meta-label">Payee</div><strong>${first.payee}</strong></div>`:''}
+  ${first.checkNo?`<div class="meta-item"><div class="meta-label">Check / Ref No.</div><strong class="meta-label" style="font-family:monospace;color:#1a3a6b">${first.checkNo}</strong></div>`:''}
+  <div class="meta-item" style="grid-column:span ${first.payee||first.checkNo?1:2}"><div class="meta-label">Description / Particulars</div>${first.desc||'—'}</div>
   <div class="meta-item"><div class="meta-label">Linked PO</div>${first.poRef?`<span style="color:#1a3a6b;font-weight:600">${first.poRef}</span>`:'—'}</div>
 </div>
 <table>
@@ -2220,7 +2227,7 @@ function editJournalEntry(groupId, type) {
   const first = lines[0];
   state.journal = state.journal.filter(j=>(j.group||j.id)!==groupId);
   save();
-  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', poRef:first.poRef||'', lines });
+  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', poRef:first.poRef||'', payee:first.payee||'', checkNo:first.checkNo||'', lines });
 }
 
 function cancelJournalEntry(groupId) {
@@ -2277,6 +2284,14 @@ function showAddJournal(type, prefill) {
   const linkedPOsForEdit = prefill?.poRef ? `<option value="${prefill.poRef}" selected>${prefill.poRef}</option>` : '';
 
   const disbFields = isDisbursement ? `
+<div class="form-row">
+  <div class="form-group"><label>Payee <span style="font-size:10px;color:var(--text-tertiary)">(to whom payment is made)</span></label>
+    <input type="text" id="je-payee" placeholder="e.g. ABC Supplies Co., BIR, MERALCO" value="${prefill?.payee||''}">
+  </div>
+  <div class="form-group"><label>Check / Reference No.</label>
+    <input type="text" id="je-checkno" placeholder="e.g. BPI Check #123456, Bank Ref #7890" value="${prefill?.checkNo||''}">
+  </div>
+</div>
 <div class="form-group">
   <label>Drawn from (Credit Account)</label>
   <select id="je-drawn-from" onchange="applyDrawnFrom()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
@@ -2721,7 +2736,9 @@ function saveJournal() {
   const desc = document.getElementById('je-desc').value || 'Journal entry';
   const preparedBy = document.getElementById('je-prepared')?.value || currentUser?.name || '';
   const approvedBy = document.getElementById('je-approved')?.value || '';
-  const poRef = document.getElementById('je-po-ref')?.value || '';
+  const poRef  = document.getElementById('je-po-ref')?.value || '';
+  const payee  = document.getElementById('je-payee')?.value || '';
+  const checkNo= document.getElementById('je-checkno')?.value || '';
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
 
@@ -2737,17 +2754,17 @@ function saveJournal() {
     let lineIdx = 0;
     // Debit lines
     debitLines.forEach(l => {
-      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
+      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
       lineIdx++;
     });
     // Other credit lines (withholding tax, VAT payable, etc.)
     creditLines.forEach(l => {
-      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
+      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
       lineIdx++;
     });
     // Auto-calculated drawn-from credit line (net amount)
     if(netDrawn > 0) {
-      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
+      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
     }
     save(); closeModal(); render();
     return;
