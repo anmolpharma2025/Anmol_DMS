@@ -2792,10 +2792,10 @@ function renderInvoices(c, ta) {
   }).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-secondary);font-weight:500">
-    <td colspan="4" style="padding:8px 10px">Totals</td>
-    <td style="text-align:right;padding:8px 10px">${fmt(totalBase)}</td>
+    <td colspan="5" style="padding:8px 10px">Totals</td>
+    <td style="text-align:right;padding:8px 10px;color:var(--text-secondary)">${fmt(totalBase)}</td>
     <td style="text-align:right;padding:8px 10px;color:var(--accent)">${fmt(totalVAT)}</td>
-    <td style="text-align:right;padding:8px 10px">${fmt(totalGross)}</td>
+    <td style="text-align:right;padding:8px 10px;font-weight:700">${fmt(totalGross)}</td>
     <td colspan="2"></td>
   </tr></tfoot>
 </table>`;
