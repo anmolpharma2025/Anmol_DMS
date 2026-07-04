@@ -4417,11 +4417,15 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const accounts = state.accounts || [];
     const journal = (state.journal||[]).filter(j=>inPeriod(j.date));
     const html = accounts.map(acc => {
-      const lines = journal.filter(j=>j.debit===acc.id||j.credit===acc.id).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      const accId = String(acc.id);
+      const lines = journal.filter(j=>
+        !j.cancelled &&
+        (String(j.debit||'')===accId || String(j.credit||'')===accId)
+      ).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
       if(!lines.length) return '';
       let balance = acc.balance || 0;
       const rows = lines.map(j => {
-        const isDebit = j.debit===acc.id;
+        const isDebit = String(j.debit||'')===accId;
         if(isDebit) balance += (j.amount||0);
         else balance -= (j.amount||0);
         return `<tr>
