@@ -3785,7 +3785,49 @@ function showAssetSchedule(id) {
 // ── EXPENSES ──────────────────────────────────────────────────────────────────
 function renderExpenses(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddExpense()"><i class="ti ti-plus"></i>Log Expense</button>`;
-  const allExp   = state.expenses || [];
+
+  // Pull expense-type debit lines from journal entries (disbursement + general)
+  const expenseAccounts = (state.accounts||[]).filter(a => a.type==='Expense' || String(a.type||'').toLowerCase()==='expense');
+  const expAccIds = new Set(expenseAccounts.map(a=>String(a.id)));
+
+  // Group journal lines by group ID to find disbursement/general entries with expense debits
+  const journalGroups = {};
+  (state.journal||[]).filter(j=>!j.cancelled).forEach(j => {
+    const gid = j.group||j.id;
+    if(!journalGroups[gid]) journalGroups[gid] = { id:gid, date:j.date, ref:j.ref, desc:j.desc, type:j.type, preparedBy:j.preparedBy||'', poRef:j.poRef||'', lines:[] };
+    journalGroups[gid].lines.push(j);
+  });
+
+  // Build journal-derived expense records — one per expense debit line
+  const journalExpenses = [];
+  Object.values(journalGroups).forEach(g => {
+    g.lines.filter(l => l.debit && expAccIds.has(String(l.debit))).forEach(l => {
+      const acc = expenseAccounts.find(a=>String(a.id)===String(l.debit));
+      journalExpenses.push({
+        id: l.id||g.id,
+        date: g.date,
+        vendor: g.desc||g.ref||'—',
+        category: acc?.name || String(l.debit),
+        amount: l.amount||0,
+        vat: 0,
+        vatBase: l.amount||0,
+        status: g.lines[0]?.approved ? 'paid' : 'pending',
+        expType: categorizeExpType(acc?.name||''),
+        source: g.type==='disbursement' ? 'Disbursement Journal' : 'General Journal',
+        sourceRef: g.id,
+        poRef: g.poRef||'',
+      });
+    });
+  });
+
+  function categorizeExpType(accName) {
+    const n = accName.toLowerCase();
+    if(n.includes('salary')||n.includes('payroll')||n.includes('rent')||n.includes('utilities')||n.includes('insurance')||n.includes('depreciation')||n.includes('office')) return 'admin';
+    return 'operating';
+  }
+
+  const manualExp = state.expenses || [];
+  const allExp = [...manualExp, ...journalExpenses];
   const admin    = allExp.filter(e=>e.expType==='admin'||!e.expType);
   const operating= allExp.filter(e=>e.expType==='operating');
   const totalGross= allExp.reduce((s,e)=>s+(e.amount||0),0);
@@ -3796,25 +3838,29 @@ function renderExpenses(c, ta) {
 
   const expTable = (rows) => rows.length===0 ? '<p style="padding:16px;color:var(--text-tertiary);font-size:13px">No entries.</p>' : `
 <table>
-  <thead><tr><th>ID</th><th>Date</th><th>Vendor</th><th>Category</th><th>Type</th><th style="text-align:right">VAT Base</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Total</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Date</th><th>Vendor / Description</th><th>Category (Account)</th><th>Type</th><th style="text-align:right">Amount</th><th>Status</th><th>Source</th><th class="no-print">Actions</th></tr></thead>
   <tbody>
   ${rows.map(e=>{
-    const base=e.vatBase!=null?e.vatBase:e.amount||0;
-    const vat=e.vat||0;
     const typeLabel=e.expType==='operating'?'Operating':'Admin';
     const typeBg=e.expType==='operating'?'var(--amber-bg)':'var(--accent-bg)';
     const typeColor=e.expType==='operating'?'var(--amber)':'var(--accent)';
+    const isJournal = !!e.source;
     return `<tr>
-      <td class="mono">${e.id}</td><td>${e.date}</td><td>${e.vendor}</td><td>${e.category}</td>
-      <td><span class="badge" style="background:${typeBg};color:${typeColor}">${typeLabel}</span></td>
-      <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
-      <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
+      <td class="mono" style="font-size:11px">${e.id}</td>
+      <td>${e.date}</td>
+      <td>${e.vendor||'—'}${e.poRef?`<div style="font-size:10px;color:var(--accent)"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${e.poRef}</div>`:''}</td>
+      <td style="font-size:12px">${e.category}</td>
+      <td><span class="badge" style="background:${typeBg};color:${typeColor};font-size:10px">${typeLabel}</span></td>
       <td style="text-align:right;font-weight:500">${fmt(e.amount||0)}</td>
-      <td><span class="badge ${e.status}">${e.status}</span></td>
-      ${lastUpdatedCell(e)}
-      <td><div class="action-btns">
-        ${e.status==='pending'?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markExpPaid('${e.id}')">Mark paid</button>`:''}
-        <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteExp('${e.id}')"><i class="ti ti-trash"></i></button>
+      <td><span class="badge ${e.status}" style="font-size:10px">${e.status}</span></td>
+      <td style="font-size:11px;color:var(--text-tertiary)">
+        ${isJournal
+          ? `<span style="color:var(--accent)"><i class="ti ti-book" style="font-size:10px"></i> ${e.source}</span><div style="font-size:10px" class="mono">${e.sourceRef}</div>`
+          : '<span style="color:var(--text-tertiary)">Manual</span>'}
+      </td>
+      <td class="no-print"><div class="action-btns">
+        ${!isJournal&&e.status==='pending'?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="markExpPaid('${e.id}')">Mark paid</button>`:''}
+        ${!isJournal?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteExp('${e.id}')"><i class="ti ti-trash"></i></button>`:'<span style="font-size:10px;color:var(--text-tertiary)">Via journal</span>'}
       </div></td>
     </tr>`;
   }).join('')}
@@ -3822,53 +3868,23 @@ function renderExpenses(c, ta) {
 </table>`;
 
   c.innerHTML = `
-<div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);border:0.5px solid var(--border-light);font-size:13px;color:var(--text-secondary)">
-  <i class="ti ti-info-circle" style="font-size:15px;vertical-align:-2px;margin-right:6px"></i>
-  These are <strong style="color:var(--text-primary)">period expenses</strong> charged to the income statement — not part of product cost. Includes admin overhead and operating / selling expenses.
+<div style="margin-bottom:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);border:0.5px solid var(--border-light);font-size:12px;color:var(--text-secondary)">
+  <i class="ti ti-info-circle" style="font-size:14px;vertical-align:-2px;margin-right:6px"></i>
+  Shows <strong style="color:var(--text-primary)">all expense entries</strong> — manual entries plus expense-account debit lines automatically pulled from <strong>Disbursement Journal</strong> and <strong>General Journal</strong>.
 </div>
-<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
   <div class="kpi"><div class="kpi-label">Total Expenses</div><div class="kpi-value neg">${fmt(totalGross)}</div></div>
   <div class="kpi"><div class="kpi-label">Admin &amp; General</div><div class="kpi-value" style="color:var(--accent)">${fmt(adminTotal)}</div></div>
   <div class="kpi"><div class="kpi-label">Operating / Selling</div><div class="kpi-value" style="color:var(--amber)">${fmt(opTotal)}</div></div>
-  <div class="kpi"><div class="kpi-label">Input VAT</div><div class="kpi-value">${fmt(totalVAT)}</div></div>
+  <div class="kpi"><div class="kpi-label">Manual Entries</div><div class="kpi-value">${manualExp.length}</div></div>
+  <div class="kpi"><div class="kpi-label">From Journal</div><div class="kpi-value" style="color:var(--green)">${journalExpenses.length}</div></div>
 </div>
 
-<div class="tabs" id="exp-tabs" style="margin-bottom:16px">
-  <div class="tab active" onclick="expTab('all',this)">All (${allExp.length})</div>
-  <div class="tab" onclick="expTab('admin',this)">Admin &amp; General (${admin.length})</div>
-  <div class="tab" onclick="expTab('operating',this)">Operating / Selling (${operating.length})</div>
+<div style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
+  <div style="font-size:13px;font-weight:600;color:var(--text-primary)">All Expenses</div>
+  <div style="font-size:11px;color:var(--text-tertiary)">${allExp.length} total records</div>
 </div>
-<div id="exp-body">${expTable(allExp)}</div>
-
-<div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
-  <div style="background:var(--accent-bg);border-radius:var(--radius-md);padding:12px 16px;border:0.5px solid var(--accent)">
-    <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.06em;color:var(--accent);margin-bottom:8px">Admin &amp; General Expenses</div>
-    <table style="font-size:12px">
-      ${Object.entries(admin.reduce((g,e)=>{g[e.category]=(g[e.category]||0)+(e.amount||0);return g},{})).map(([cat,tot])=>`<tr><td style="padding:3px 0;color:var(--text-secondary)">${cat}</td><td style="text-align:right;padding:3px 0;font-weight:500">${fmt(tot)}</td></tr>`).join('')}
-      <tr style="border-top:0.5px solid var(--border-mid)"><td style="padding:6px 0;font-weight:500">Total</td><td style="text-align:right;padding:6px 0;font-weight:500">${fmt(adminTotal)}</td></tr>
-    </table>
-  </div>
-  <div style="background:var(--amber-bg);border-radius:var(--radius-md);padding:12px 16px;border:0.5px solid var(--amber)">
-    <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.06em;color:var(--amber);margin-bottom:8px">Operating / Selling Expenses</div>
-    ${operating.length===0?'<p style="font-size:12px;color:var(--text-tertiary)">No entries yet.</p>':`<table style="font-size:12px">
-      ${Object.entries(operating.reduce((g,e)=>{g[e.category]=(g[e.category]||0)+(e.amount||0);return g},{})).map(([cat,tot])=>`<tr><td style="padding:3px 0;color:var(--text-secondary)">${cat}</td><td style="text-align:right;padding:3px 0;font-weight:500">${fmt(tot)}</td></tr>`).join('')}
-      <tr style="border-top:0.5px solid var(--border-mid)"><td style="padding:6px 0;font-weight:500">Total</td><td style="text-align:right;padding:6px 0;font-weight:500">${fmt(opTotal)}</td></tr>
-    </table>`}
-  </div>
-</div>`;
-
-  window._expAllRows = allExp;
-  window._expAdminRows = admin;
-  window._expOpRows = operating;
-  window._expTableFn = expTable;
-}
-
-function expTab(type, el) {
-  document.querySelectorAll('#exp-tabs .tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  const rows = type==='admin' ? window._expAdminRows : type==='operating' ? window._expOpRows : window._expAllRows;
-  const body = document.getElementById('exp-body');
-  if(body) body.innerHTML = window._expTableFn(rows);
+${expTable(allExp)}`;
 }
 
 function markExpPaid(id) { if(!requireAdmin("update expense status")) return; const e=(state.expenses||[]).find(e=>e.id===id); if(e){ e.status='paid'; stampUpdate(e); } save(); render(); }
