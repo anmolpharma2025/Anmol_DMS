@@ -2735,7 +2735,6 @@ function renderInvoices(c, ta) {
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
-        <button class="btn" style="padding:3px 9px;font-size:11px" title="Print Delivery Receipt" onclick="printDeliveryReceipt('${inv.id}')"><i class="ti ti-truck-delivery"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -3143,7 +3142,6 @@ ${(state.collections||[]).filter(r=>r.invoice===inv.id).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i>Edit #</button>
-  <button class="btn" onclick="closeModal();printDeliveryReceipt('${inv.id}')"><i class="ti ti-truck-delivery"></i>Delivery Receipt</button>
   <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print Invoice</button>
 </div>`);
 }
@@ -3195,10 +3193,12 @@ function saveInvoiceNumber(oldId) {
 function printInvoice(id) {
   const inv = state.invoices.find(i=>i.id===id);
   if(!inv) return;
+  const cp  = getCompanyProfile();
   const cust = state.customers.find(c=>c.name===inv.customer)||{};
   const lines = inv.lines || [{ desc:'Services / Goods', qty:1, unitPrice:inv.vatBase||inv.amount||0, lineTotal:inv.vatBase||inv.amount||0 }];
   const vatLabel = inv.vatType==='exempt' ? 'VAT-Exempt' : inv.vatType==='inclusive' ? 'VAT-Inclusive' : 'VAT-Exclusive';
   const win = window.open('','_blank','width=860,height=780');
+  if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice ${inv.id}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -3236,9 +3236,10 @@ function printInvoice(id) {
 <div class="status-stamp">${inv.status.toUpperCase()}</div>
 <div class="hdr">
   <div>
-    <div class="co-name">ANMOL PHARMACEUTICALS US CORP. Company</div>
-    <div class="co-sub">TIN: 000-000-000-000 &nbsp;·&nbsp; VAT Registered</div>
-    <div class="co-sub">123 Business Ave, Quezon City, Metro Manila</div>
+    <div class="co-name">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div class="co-sub">TIN: ${cp.tin||'___-___-___-___'} &nbsp;·&nbsp; VAT Registered</div>
+    <div class="co-sub">${cp.address||''}</div>
+    ${cp.phone?`<div class="co-sub">Tel: ${cp.phone}</div>`:''}
   </div>
   <div class="inv-label">
     <h1>INVOICE</h1>
@@ -3248,9 +3249,16 @@ function printInvoice(id) {
 <div class="meta">
   <div class="meta-block">
     <h4>Bill to</h4>
-    <p>${inv.customer}<br>
-    <span class="sub">${cust.email||''}</span><br>
-    <span class="sub">${cust.phone||''}</span></p>
+    <p>${inv.customer}
+    ${cust.tin?`<br><span class="sub">TIN: ${cust.tin}</span>`:''}
+    ${cust.address?`<br><span class="sub">${cust.address}</span>`:''}
+    ${cust.email?`<br><span class="sub">${cust.email}</span>`:''}
+    ${cust.phone?`<br><span class="sub">Tel: ${cust.phone}</span>`:''}
+    </p>
+  </div>
+  <div class="meta-block" style="text-align:right">
+    <h4>Invoice details</h4>
+    <p class="sub">${inv.soRef?`SO Ref: ${inv.soRef}<br>`:''}</p>
   </div>
 </div>
 <div class="dates">
