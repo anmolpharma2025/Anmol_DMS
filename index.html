@@ -287,6 +287,7 @@
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
     <div class="nav-item" title="Purchase Orders" data-page="purchaseorders"><i class="ti ti-truck-delivery"></i><span>Purchase Orders</span></div>
     <div class="nav-item" title="Expenses" data-page="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></div>
+    <div class="nav-item" title="Lapsing Schedule" data-page="lapsing"><i class="ti ti-calendar-stats"></i><span>Lapsing Schedule</span></div>
 
     <div class="nav-section">Accounting</div>
     <div class="nav-item" title="Chart of Accounts" data-page="coa"><i class="ti ti-list-tree"></i><span>Chart of Accounts</span></div>
@@ -953,6 +954,7 @@ const ALL_PAGES = [
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
   { id:'purchaseorders',label:'Purchase Orders',     section:'Transactions' },
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
+  { id:'lapsing',     label:'Lapsing Schedule',      section:'Transactions' },
   { id:'coa',         label:'Chart of Accounts',     section:'Accounting' },
   { id:'reports',     label:'Reports',               section:'Accounting' },
   { id:'collections', label:'Collections',           section:'Management' },
@@ -1689,7 +1691,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -1960,8 +1962,8 @@ function buildDisbursementRows(entries) {
     const cashAcc = cashLine ? state.accounts.find(a=>String(a.id)===String(cashLine.credit)) : null;
     const totalDisb = crLines.reduce((s,l)=>s+(l.amount||0),0) || (cashLine?.amount||0);
     const isCancelled = g.lines[0]?.cancelled;
-    return `<tr style="${isCancelled?'opacity:0.5;text-decoration:line-through;background:var(--bg-secondary)':''}">
-      <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;text-decoration:none">CANCELLED</span>`:''}</td>
+    return `<tr style="${isCancelled?'opacity:0.55;background:var(--bg-secondary)':''}">
+      <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
       <td>${g.date}</td>
       <td class="mono">${g.ref}</td>
       <td>${g.desc}</td>
@@ -2952,12 +2954,17 @@ function renderInvLines() {
 
 function matchInvItem(i, val) {
   const items = state.inventory||[];
-  const match = items.find(it=>it.name.toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
+  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
   if(match) {
     invLines[i].itemId = match.id;
     invLines[i].desc = match.name;
     if(!invLines[i].unitPrice || invLines[i].unitPrice===0) invLines[i].unitPrice = match.salePrice||0;
     invLines[i].lineTotal = (invLines[i].qty||1)*invLines[i].unitPrice;
+    // Stock check
+    const branchId = currentUser?.branchId;
+    const availQty = branchId ? (getBranchStock(branchId)[match.id]||0) : (match.qty||0);
+    if(availQty === 0) setTimeout(()=>alert(`⚠ Out of Stock: "${match.name}" has 0 units available.`), 100);
+    else if((invLines[i].qty||1) > availQty) setTimeout(()=>alert(`⚠ Low Stock: "${match.name}" — ordered ${invLines[i].qty||1}, only ${availQty} available.`), 100);
     // Update price cell without re-render
     const tbody = document.getElementById('inv-lines-body');
     if(tbody) {
@@ -3542,6 +3549,196 @@ function savePurchase() {
 }
 
 // ── EXPENSES (OPERATING & ADMIN) ──────────────────────────────────────────────
+// ── LAPSING SCHEDULE ─────────────────────────────────────────────────────────
+
+function renderLapsingSchedule(c, ta) {
+  if(!state.fixedAssets) state.fixedAssets = [];
+  ta.innerHTML = `
+    <button class="btn primary" onclick="showAddAsset()"><i class="ti ti-plus"></i>Add Asset</button>
+    <button class="btn no-print" onclick="window.print()"><i class="ti ti-printer"></i>Print Schedule</button>`;
+  const assets = state.fixedAssets;
+  if(!assets.length) {
+    c.innerHTML = `<div style="text-align:center;padding:60px 0;color:var(--text-tertiary)">
+      <i class="ti ti-calendar-stats" style="font-size:48px;display:block;margin-bottom:12px"></i>
+      <div style="font-size:15px;font-weight:500;margin-bottom:6px">No fixed assets yet</div>
+      <div style="font-size:13px">Add capitalizable expenditures to generate a lapsing (depreciation) schedule</div>
+    </div>`; return;
+  }
+  const now = new Date();
+  const rows = assets.map(a => {
+    const acquired = new Date(a.acquiredDate);
+    const monthsUsed = Math.max(0,(now.getFullYear()-acquired.getFullYear())*12+(now.getMonth()-acquired.getMonth()));
+    const usefulMonths = (a.usefulLife||5)*12;
+    const monthly = (a.cost-(a.salvage||0))/usefulMonths;
+    const accumulated = Math.min(monthly*monthsUsed, a.cost-(a.salvage||0));
+    const bookValue = Math.max(a.cost-accumulated, a.salvage||0);
+    const pct = Math.min(100, accumulated/(a.cost-(a.salvage||0))*100)||0;
+    const isFullyDep = bookValue<=(a.salvage||0)+0.01;
+    const remainingMonths = Math.max(0, usefulMonths-monthsUsed);
+    const endDate = new Date(acquired); endDate.setMonth(endDate.getMonth()+usefulMonths);
+    return `<tr>
+      <td style="font-weight:500">${a.name}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${a.category||'—'}</td>
+      <td>${a.acquiredDate}</td>
+      <td style="text-align:right">${fmt(a.cost)}</td>
+      <td style="text-align:right;color:var(--text-secondary)">${fmt(a.salvage||0)}</td>
+      <td style="text-align:center">${a.usefulLife||5} yrs</td>
+      <td style="text-align:center;font-size:11px">${a.method==='double-declining'?'DDB':'SL'}</td>
+      <td style="text-align:right;color:var(--accent)">${fmt(monthly)}/mo</td>
+      <td style="text-align:right;color:var(--amber)">${fmt(accumulated)}</td>
+      <td style="text-align:right;font-weight:600;color:${isFullyDep?'var(--text-tertiary)':'var(--green)'}">${fmt(bookValue)}</td>
+      <td>
+        <div style="background:var(--bg-secondary);border-radius:4px;height:6px;min-width:60px;overflow:hidden">
+          <div style="background:${isFullyDep?'var(--text-tertiary)':'var(--accent)'};width:${pct}%;height:100%;border-radius:4px"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${isFullyDep?'Fully depreciated':`${remainingMonths}mo left · ends ${endDate.toISOString().split('T')[0]}`}</div>
+      </td>
+      <td class="no-print"><div class="action-btns">
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showAssetSchedule('${a.id}')"><i class="ti ti-table"></i></button>
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditAsset('${a.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="deleteAsset('${a.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+  const totalCost=assets.reduce((s,a)=>s+a.cost,0);
+  const totalBook=assets.reduce((sum,a)=>{
+    const acq=new Date(a.acquiredDate),ml=Math.max(0,(now.getFullYear()-acq.getFullYear())*12+(now.getMonth()-acq.getMonth()));
+    const md=(a.cost-(a.salvage||0))/((a.usefulLife||5)*12);
+    return sum+Math.max(a.cost-Math.min(md*ml,a.cost-(a.salvage||0)),a.salvage||0);
+  },0);
+  const totalMonthly=assets.reduce((s,a)=>s+(a.cost-(a.salvage||0))/((a.usefulLife||5)*12),0);
+  c.innerHTML=`
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label">Total Assets</div><div class="kpi-value">${assets.length}</div></div>
+  <div class="kpi"><div class="kpi-label">Total Cost</div><div class="kpi-value pos">${fmt(totalCost)}</div></div>
+  <div class="kpi"><div class="kpi-label">Book Value</div><div class="kpi-value" style="color:var(--green)">${fmt(totalBook)}</div></div>
+  <div class="kpi"><div class="kpi-label">Monthly Depreciation</div><div class="kpi-value" style="color:var(--amber)">${fmt(totalMonthly)}</div></div>
+</div>
+<table>
+  <thead><tr>
+    <th>Asset Name</th><th>Category</th><th>Acquired</th>
+    <th style="text-align:right">Cost</th><th style="text-align:right">Salvage</th>
+    <th style="text-align:center">Life</th><th style="text-align:center">Method</th>
+    <th style="text-align:right">Dep/Mo</th>
+    <th style="text-align:right">Accum. Dep.</th>
+    <th style="text-align:right">Book Value</th>
+    <th>Progress</th><th class="no-print">Actions</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>`;
+}
+
+function showAddAsset(prefill) {
+  const newId='FA-'+String(((state.fixedAssets||[]).length)+1).padStart(3,'0');
+  const id=prefill?.id||newId;
+  showModal(`
+<div class="modal-head"><h3>${prefill?'Edit':'Add'} Fixed Asset</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Asset Name</label><input type="text" id="fa-name" placeholder="e.g. Laptop, Office Furniture" value="${prefill?.name||''}"></div>
+  <div class="form-group"><label>Category</label>
+    <select id="fa-cat">
+      ${['Equipment','Furniture & Fixtures','Motor Vehicle','Building','Land Improvement','Computer & Software','Leasehold Improvement','Other'].map(opt=>`<option${opt===(prefill?.category||'')?'selected':''}>${opt}</option>`).join('')}
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Acquired</label><input type="date" id="fa-date" value="${prefill?.acquiredDate||today()}"></div>
+  <div class="form-group"><label>Acquisition Cost (₱)</label><input type="number" id="fa-cost" placeholder="0.00" min="0" step="0.01" value="${prefill?.cost||''}" oninput="previewDepreciation()"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Salvage / Residual Value (₱)</label><input type="number" id="fa-salvage" placeholder="0.00" min="0" step="0.01" value="${prefill?.salvage||0}" oninput="previewDepreciation()"></div>
+  <div class="form-group"><label>Useful Life (years)</label><input type="number" id="fa-life" placeholder="5" min="1" max="50" value="${prefill?.usefulLife||5}" oninput="previewDepreciation()"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Depreciation Method</label>
+    <select id="fa-method" onchange="previewDepreciation()">
+      <option value="straight-line"${(prefill?.method||'straight-line')==='straight-line'?' selected':''}>Straight-Line (SL)</option>
+      <option value="double-declining"${prefill?.method==='double-declining'?' selected':''}>Double Declining Balance (DDB)</option>
+    </select>
+  </div>
+  <div class="form-group"><label>Notes</label><input type="text" id="fa-notes" placeholder="PO ref, location, etc." value="${prefill?.notes||''}"></div>
+</div>
+<div style="padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);font-size:12px;color:var(--text-secondary);margin-bottom:14px" id="fa-preview">Fill in cost and useful life to preview depreciation.</div>
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveAsset('${id}','${prefill?'edit':'new'}')"><i class="ti ti-device-floppy"></i>Save</button>
+</div>`);
+  setTimeout(previewDepreciation, 80);
+}
+
+function previewDepreciation() {
+  const cost=parseFloat(document.getElementById('fa-cost')?.value)||0;
+  const salvage=parseFloat(document.getElementById('fa-salvage')?.value)||0;
+  const life=parseInt(document.getElementById('fa-life')?.value)||5;
+  const el=document.getElementById('fa-preview');
+  if(!el||!cost) return;
+  const dep=cost-salvage, monthly=dep/(life*12), annual=dep/life;
+  el.innerHTML=`<strong>Preview:</strong> &nbsp; Depreciable: <strong>${fmt(dep)}</strong> &nbsp;·&nbsp; Monthly: <strong style="color:var(--accent)">${fmt(monthly)}</strong> &nbsp;·&nbsp; Annual: <strong>${fmt(annual)}</strong> &nbsp;·&nbsp; Life: ${life} yrs (${life*12} months)`;
+}
+
+function saveAsset(id, mode) {
+  const name=document.getElementById('fa-name')?.value.trim();
+  const category=document.getElementById('fa-cat')?.value;
+  const acquiredDate=document.getElementById('fa-date')?.value;
+  const cost=parseFloat(document.getElementById('fa-cost')?.value)||0;
+  const salvage=parseFloat(document.getElementById('fa-salvage')?.value)||0;
+  const usefulLife=parseInt(document.getElementById('fa-life')?.value)||5;
+  const method=document.getElementById('fa-method')?.value||'straight-line';
+  const notes=document.getElementById('fa-notes')?.value||'';
+  if(!name||!cost||!acquiredDate){alert('Asset name, cost, and acquisition date are required.');return;}
+  if(salvage>=cost){alert('Salvage value must be less than acquisition cost.');return;}
+  if(!state.fixedAssets) state.fixedAssets=[];
+  const rec={id,name,category,acquiredDate,cost,salvage,usefulLife,method,notes};
+  if(mode==='edit'){const idx=state.fixedAssets.findIndex(a=>a.id===id);if(idx>=0)state.fixedAssets[idx]=rec;}
+  else state.fixedAssets.push(rec);
+  save();closeModal();render();
+}
+
+function showEditAsset(id){const a=(state.fixedAssets||[]).find(a=>a.id===id);if(a)showAddAsset(a);}
+function deleteAsset(id){if(!confirm('Delete this asset?'))return;state.fixedAssets=(state.fixedAssets||[]).filter(a=>a.id!==id);save();render();}
+
+function showAssetSchedule(id) {
+  const a=(state.fixedAssets||[]).find(a=>a.id===id);if(!a)return;
+  const dep=a.cost-(a.salvage||0), months=(a.usefulLife||5)*12, monthly=dep/months;
+  const acq=new Date(a.acquiredDate);
+  let accum=0, rows='';
+  for(let m=0;m<months;m++){
+    const d=new Date(acq);d.setMonth(d.getMonth()+m);
+    const depAmt=Math.min(monthly,dep-accum);accum=Math.min(accum+depAmt,dep);
+    const bv=a.cost-accum;
+    const yr=Math.floor(m/12)+1;
+    const isYearEnd=m%12===11||m===months-1;
+    if(m===0||m===months-1||isYearEnd||m%12===0){
+      rows+=`<tr style="${isYearEnd?'font-weight:600;background:var(--bg-secondary)':''}">
+        <td style="font-size:11px">${d.toISOString().slice(0,7)}</td>
+        <td style="text-align:center;font-size:11px">Yr ${yr}, Mo ${(m%12)+1}</td>
+        <td style="text-align:right">${fmt(depAmt)}</td>
+        <td style="text-align:right;color:var(--amber)">${fmt(accum)}</td>
+        <td style="text-align:right;color:var(--green)">${fmt(bv)}</td>
+      </tr>`;
+    }
+  }
+  showModal(`
+<div class="modal-head"><h3>📅 ${a.name} — Depreciation Schedule</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;font-size:12px">
+  <div style="padding:8px;background:var(--bg-secondary);border-radius:var(--radius-md)"><div style="font-size:10px;color:var(--text-tertiary)">Cost</div><strong>${fmt(a.cost)}</strong></div>
+  <div style="padding:8px;background:var(--bg-secondary);border-radius:var(--radius-md)"><div style="font-size:10px;color:var(--text-tertiary)">Salvage</div><strong>${fmt(a.salvage||0)}</strong></div>
+  <div style="padding:8px;background:var(--bg-secondary);border-radius:var(--radius-md)"><div style="font-size:10px;color:var(--text-tertiary)">Monthly Dep.</div><strong style="color:var(--accent)">${fmt(monthly)}</strong></div>
+  <div style="padding:8px;background:var(--bg-secondary);border-radius:var(--radius-md)"><div style="font-size:10px;color:var(--text-tertiary)">Annual Dep.</div><strong>${fmt(monthly*12)}</strong></div>
+</div>
+<div style="max-height:420px;overflow-y:auto">
+  <table class="je-lines" style="font-size:12px">
+    <thead><tr><th>Period</th><th style="text-align:center">Yr/Mo</th><th style="text-align:right">Dep. Expense</th><th style="text-align:right">Accum. Dep.</th><th style="text-align:right">Book Value</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+<div style="display:flex;justify-content:flex-end;margin-top:12px;gap:8px">
+  <button class="btn" onclick="closeModal()">Close</button>
+  <button class="btn" onclick="window.print()"><i class="ti ti-printer"></i>Print</button>
+</div>`);
+}
+
+// ── EXPENSES ──────────────────────────────────────────────────────────────────
 function renderExpenses(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddExpense()"><i class="ti ti-plus"></i>Log Expense</button>`;
   const allExp   = state.expenses || [];
@@ -8183,7 +8380,7 @@ function autoDueDateInv() {
 function matchOrderItem(prefix, i, val) {
   const isSOLine = prefix === 'so' || prefix === 'inv';
   const items = state.inventory||[];
-  const match = items.find(it=>it.name.toLowerCase()===val.toLowerCase() || it.id.toLowerCase()===val.toLowerCase());
+  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase() || String(it.id).toLowerCase()===val.toLowerCase());
   const lines = getOrderLines(prefix);
   if(match) {
     lines[i].itemId = match.id;
@@ -8193,6 +8390,16 @@ function matchOrderItem(prefix, i, val) {
       lines[i].unitPrice = isSOLine ? (match.salePrice||0) : (match.costPrice||0);
     }
     lines[i].lineTotal = (lines[i].qty||1) * lines[i].unitPrice;
+    // Stock check for SO/Invoice (outgoing items)
+    if(isSOLine) {
+      const branchId = currentUser?.branchId;
+      const availQty = branchId ? (getBranchStock(branchId)[match.id]||0) : (match.qty||0);
+      if(availQty === 0) {
+        setTimeout(()=>alert(`⚠ Out of Stock: "${match.name}" has 0 units available.`), 100);
+      } else if((lines[i].qty||1) > availQty) {
+        setTimeout(()=>alert(`⚠ Low Stock: "${match.name}" — ordered ${lines[i].qty||1}, only ${availQty} available.`), 100);
+      }
+    }
     // Update price and total cells without re-rendering
     const tbody = document.getElementById(`${prefix}-lines-body`);
     if(tbody) {
@@ -8227,6 +8434,33 @@ function updateOrderLine(prefix, i, field, val) {
   lines[i][field]=val;
   const qty=parseFloat(lines[i].qty)||0, price=parseFloat(lines[i].unitPrice)||0;
   lines[i].lineTotal=qty*price;
+  // Stock check when qty changes for SO/Invoice
+  if(field==='qty' && (prefix==='so'||prefix==='inv') && lines[i].itemId) {
+    const item = (state.inventory||[]).find(it=>String(it.id)===String(lines[i].itemId));
+    if(item) {
+      const branchId = currentUser?.branchId;
+      const availQty = branchId ? (getBranchStock(branchId)[item.id]||0) : (item.qty||0);
+      if(qty > availQty) {
+        const inp = document.getElementById(`${prefix}-item-${i}`);
+        if(inp) inp.style.border = '1.5px solid var(--red)';
+        // Show inline warning
+        const tb = document.getElementById(`${prefix}-lines-body`);
+        if(tb) {
+          const row = tb.querySelectorAll('tr')[i];
+          if(row) {
+            let warn = row.querySelector('.stock-warn');
+            if(!warn) { warn = document.createElement('div'); warn.className='stock-warn'; warn.style.cssText='font-size:10px;color:var(--red);margin-top:2px'; row.cells[0].appendChild(warn); }
+            warn.textContent = availQty===0 ? `⚠ Out of stock` : `⚠ Only ${availQty} available`;
+          }
+        }
+      } else {
+        const inp = document.getElementById(`${prefix}-item-${i}`);
+        if(inp) inp.style.border='';
+        const tb = document.getElementById(`${prefix}-lines-body`);
+        if(tb) { const row=tb.querySelectorAll('tr')[i]; if(row){ const warn=row.querySelector('.stock-warn'); if(warn) warn.remove(); } }
+      }
+    }
+  }
   const tb=document.getElementById(`${prefix}-lines-body`);
   if(tb){ const rows=tb.querySelectorAll('tr'); if(rows[i]){ const cells=rows[i].querySelectorAll('td'); if(cells[3]) cells[3].textContent=fmt(qty*price); } }
 }
