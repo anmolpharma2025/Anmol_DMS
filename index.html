@@ -2283,10 +2283,18 @@ function showAddJournal(type, prefill) {
   // Also show already-linked POs for reference if editing
   const linkedPOsForEdit = prefill?.poRef ? `<option value="${prefill.poRef}" selected>${prefill.poRef}</option>` : '';
 
+  const supOpts = `<option value="">— select supplier or type below —</option>` + (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
   const disbFields = isDisbursement ? `
 <div class="form-row">
-  <div class="form-group"><label>Payee <span style="font-size:10px;color:var(--text-tertiary)">(to whom payment is made)</span></label>
-    <input type="text" id="je-payee" placeholder="e.g. ABC Supplies Co., BIR, MERALCO" value="${prefill?.payee||''}">
+  <div class="form-group">
+    <label>Payee <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-bolt" style="font-size:10px"></i> auto-fills from PO</span></label>
+    <select id="je-payee-sel" onchange="document.getElementById('je-payee').value=this.value;this.style.display='none';document.getElementById('je-payee').style.display=''"
+      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);margin-bottom:4px">
+      ${supOpts}
+    </select>
+    <input type="text" id="je-payee" placeholder="Or type payee name (BIR, MERALCO, etc.)"
+      value="${prefill?.payee||''}"
+      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
   </div>
   <div class="form-group"><label>Check / Reference No.</label>
     <input type="text" id="je-checkno" placeholder="e.g. BPI Check #123456, Bank Ref #7890" value="${prefill?.checkNo||''}">
@@ -2362,6 +2370,17 @@ ${disbFields}
   window._jeOpts = opts;
   window._jeIsDisbursement = isDisbursement;
   renderJeLines();
+  // Pre-select supplier dropdown if editing/prefill has payee
+  if(isDisbursement && prefill?.payee) {
+    setTimeout(() => {
+      const sel = document.getElementById('je-payee-sel');
+      if(sel) {
+        for(let i=0; i<sel.options.length; i++) {
+          if(sel.options[i].value === prefill.payee) { sel.selectedIndex = i; break; }
+        }
+      }
+    }, 50);
+  }
 }
 
 // When "Drawn from" changes, auto-fill credit side on all lines
@@ -2376,11 +2395,24 @@ function loadPOIntoJournal() {
   const total = (po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
   const isDisbursement = window._jeIsDisbursement;
 
-  // Auto-fill Reference and Description
-  const refEl = document.getElementById('je-ref');
-  const descEl = document.getElementById('je-desc');
+  // Auto-fill Reference, Description, and Payee from PO
+  const refEl   = document.getElementById('je-ref');
+  const descEl  = document.getElementById('je-desc');
+  const payeeEl = document.getElementById('je-payee');
+  const payeeSelEl = document.getElementById('je-payee-sel');
   if(refEl && !refEl.value) refEl.value = poId;
   if(descEl && !descEl.value) descEl.value = `Payment — ${po.supplier} (${poId})`;
+  // Always auto-fill payee from PO supplier
+  if(payeeEl) payeeEl.value = po.supplier || '';
+  // Sync the dropdown too if supplier exists in list
+  if(payeeSelEl && po.supplier) {
+    for(let i=0; i<payeeSelEl.options.length; i++) {
+      if(payeeSelEl.options[i].value === po.supplier) {
+        payeeSelEl.selectedIndex = i;
+        break;
+      }
+    }
+  }
 
   if(isDisbursement) {
     // DISBURSEMENT: Debit = Inventory/Expense account, Credit = Cash/Bank (auto from drawn-from)
