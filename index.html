@@ -2353,7 +2353,11 @@ ${poSection}
 </div>
 <div class="form-group"><label>Description / Memo</label><input type="text" id="je-desc" placeholder="Transaction description" value="${prefill?.desc||''}"></div>
 <div class="form-row">
-  <div class="form-group"><label>Prepared By</label>${empDropdown('je-prepared', prefill?.preparedBy||currentUser?.name||'')}</div>
+  <div class="form-group">
+    <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
+    <input type="text" id="je-prepared" value="${prefill?.preparedBy||currentUser?.name||''}" readonly
+      style="background:var(--bg-secondary);color:var(--text-secondary);cursor:not-allowed;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);width:100%;font-family:var(--font);font-size:13px">
+  </div>
   <div class="form-group"><label>Approved By <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>${empDropdown('je-approved', prefill?.approvedBy||'')}</div>
 </div>
 ${disbFields}
@@ -5157,7 +5161,11 @@ function showAddCollection() {
 <div class="modal-head"><h3>Record Collection</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
   <div class="form-group"><label>Date Received</label><input type="date" id="col-date" value="${today()}"></div>
-  <div class="form-group"><label>Received by</label>${empDropdown('col-by', currentUser?.name||'')}</div>
+  <div class="form-group">
+    <label>Received By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
+    <input type="text" id="col-by" value="${currentUser?.name||''}" readonly
+      style="background:var(--bg-secondary);color:var(--text-secondary);cursor:not-allowed;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);width:100%;font-family:var(--font);font-size:13px">
+  </div></div>
 </div>
 <div class="form-group"><label>Customer</label><select id="col-cust">${custOpts}</select></div>
 <div class="form-group"><label>Invoice</label><select id="col-inv"><option value="">— select invoice —</option>${invOpts}</select></div>
@@ -6370,6 +6378,7 @@ function buildInventoryItems() {
       return `<tr>
         <td class="mono">${it.id}</td>
         <td style="font-weight:500">${it.name}</td>
+        <td style="font-size:12px;color:var(--text-secondary)">${it.brand||'—'}</td>
         <td style="font-size:11px;color:var(--text-secondary)">
           ${it.batchNo?`<div>Batch: <span class="mono">${it.batchNo}</span></div>`:''}
           ${it.lotNo?`<div>Lot: <span class="mono">${it.lotNo}</span></div>`:''}
@@ -6404,7 +6413,7 @@ function buildInventoryItems() {
 
   return branchLabel + `<table>
     <thead><tr>
-      <th>Item ID</th><th>Name</th><th>Batch / Lot</th><th>Unit</th>
+      <th>Item ID</th><th>Name</th><th>Brand</th><th>Batch / Lot</th><th>Unit</th>
       <th style="text-align:right">Cost Price</th>
       <th style="text-align:right">Sale Price</th>
       <th style="text-align:right">${myBranchId ? myBranch?.name+' Stock' : 'Qty on Hand'}</th>
@@ -6453,18 +6462,21 @@ function showEditItem(id) {
 </div>
 <div class="form-group"><label>Item Name</label><input type="text" id="eitm-name" value="${it.name||''}"></div>
 <div class="form-row">
+  <div class="form-group"><label>Brand / Manufacturer</label><input type="text" id="eitm-brand" value="${it.brand||''}" placeholder="e.g. Pfizer, Unilab"></div>
+  <div class="form-group"><label>Expiry Date</label><input type="date" id="eitm-expiry" value="${it.expiryDate||''}"></div>
+</div>
+<div class="form-row">
   <div class="form-group"><label>Batch Number</label><input type="text" id="eitm-batch" value="${it.batchNo||''}" placeholder="e.g. B-2026-001"></div>
   <div class="form-group"><label>Lot Number</label><input type="text" id="eitm-lot" value="${it.lotNo||''}" placeholder="e.g. LOT-4521"></div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Unit</label><input type="text" id="eitm-unit" value="${it.unit||''}"></div>
-  <div class="form-group"><label>Expiry Date</label><input type="date" id="eitm-expiry" value="${it.expiryDate||''}"></div>
+  <div class="form-group"><label>Reorder Level</label><input type="number" id="eitm-reorder" value="${it.reorderLevel||5}" min="0" step="1"></div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Cost Price (₱)</label><input type="number" id="eitm-cost" value="${it.costPrice||0}" min="0" step="0.01"></div>
   <div class="form-group"><label>Sale Price (₱)</label><input type="number" id="eitm-sale" value="${it.salePrice||0}" min="0" step="0.01"></div>
 </div>
-<div class="form-group"><label>Reorder Level</label><input type="number" id="eitm-reorder" value="${it.reorderLevel||5}" min="0" step="1"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveEditItem('${id}')"><i class="ti ti-check"></i>Save Changes</button>
@@ -6476,12 +6488,13 @@ function saveEditItem(id) {
   if(!it) return;
   it.name = document.getElementById('eitm-name').value.trim() || it.name;
   it.category = document.getElementById('eitm-cat').value.trim() || it.category;
+  it.brand = document.getElementById('eitm-brand')?.value.trim()||it.brand||'';
   it.batchNo = document.getElementById('eitm-batch').value.trim();
   it.lotNo = document.getElementById('eitm-lot').value.trim();
-  it.expiryDate = document.getElementById('eitm-expiry').value;
+  it.expiryDate = document.getElementById('eitm-expiry')?.value||it.expiryDate||'';
   it.unit = document.getElementById('eitm-unit').value.trim() || it.unit;
-  it.costPrice = parseFloat(document.getElementById('eitm-cost').value)||0;
-  it.salePrice = parseFloat(document.getElementById('eitm-sale').value)||0;
+  it.costPrice = parseFloat(document.getElementById('eitm-cost')?.value)||0;
+  it.salePrice = parseFloat(document.getElementById('eitm-sale')?.value)||0;
   it.reorderLevel = parseInt(document.getElementById('eitm-reorder').value)||5;
   save(); closeModal(); render();
 }
@@ -6659,6 +6672,10 @@ ${branchBanner}
 </div>
 <div class="form-group"><label>Item Name</label><input type="text" id="itm-name" placeholder="Full item name"></div>
 <div class="form-row">
+  <div class="form-group"><label>Brand / Manufacturer</label><input type="text" id="itm-brand" placeholder="e.g. Pfizer, Unilab, Generic"></div>
+  <div class="form-group"><label>Expiry Date <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label><input type="date" id="itm-expiry"></div>
+</div>
+<div class="form-row">
   <div class="form-group"><label>Batch Number</label><input type="text" id="itm-batch" placeholder="e.g. B-2026-001"></div>
   <div class="form-group"><label>Lot Number</label><input type="text" id="itm-lot" placeholder="e.g. LOT-4521"></div>
 </div>
@@ -6672,7 +6689,7 @@ ${branchBanner}
 </div>
 <div class="form-row">
   <div class="form-group"><label>Reorder Level</label><input type="number" id="itm-reorder" placeholder="e.g. 5" min="0" step="1" value="5"></div>
-  <div class="form-group"><label>Expiry Date <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label><input type="date" id="itm-expiry"></div>
+  <div class="form-group"></div>
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
@@ -6748,6 +6765,7 @@ function saveItem() {
   const category = document.getElementById('itm-cat').value.trim()||'General';
   const batchNo = document.getElementById('itm-batch')?.value.trim()||'';
   const lotNo = document.getElementById('itm-lot')?.value.trim()||'';
+  const brand = document.getElementById('itm-brand')?.value.trim()||'';
   const expiryDate = document.getElementById('itm-expiry')?.value||'';
   const unit = document.getElementById('itm-unit').value.trim()||'pc';
   const qty = parseInt(document.getElementById('itm-qty').value)||0;
@@ -6764,7 +6782,7 @@ function saveItem() {
 
   if(isMain) {
     // Admin or main branch user — add directly to main inventory
-    state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
+    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
     if(qty > 0) {
       if(!state.inventoryMovements) state.inventoryMovements = [];
       state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
@@ -6772,7 +6790,7 @@ function saveItem() {
   } else {
     // Branch-assigned user — item goes to main with qty:0, then a received
     // transfer adds the opening stock directly to their branch
-    state.inventory.push({ id, name, category, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty:0, reorderLevel });
+    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty:0, reorderLevel });
     if(qty > 0) {
       // Create a pre-received transfer representing the opening stock at this branch
       const txNum = String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
@@ -7642,13 +7660,32 @@ function renderCompanyProfile(c, ta) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
       <div style="padding:12px 14px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:4px">Password Hashing</div>
-        <div style="font-size:13px;font-weight:500;color:var(--green)"><i class="ti ti-check"></i> SHA-256 Enabled</div>
-        <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Passwords are hashed before storage</div>
+        <div style="font-size:13px;font-weight:500;color:var(--green)"><i class="ti ti-check"></i> SHA-256 Disabled (plain text)</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Passwords stored as plain text for admin visibility</div>
       </div>
       <div style="padding:12px 14px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:4px">Firebase Sync</div>
         <div style="font-size:13px;font-weight:500;color:var(--accent)"><i class="ti ti-cloud"></i> Active</div>
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">Real-time sync across devices</div>
+      </div>
+    </div>
+
+    <!-- Google Sheets Backup -->
+    <div style="margin-bottom:16px;padding:14px;background:var(--bg-primary);border:1px solid var(--border-mid);border-radius:var(--radius-md)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg"><path fill="#43A047" d="M37 45H11c-1.7 0-3-1.3-3-3V6c0-1.7 1.3-3 3-3h19l10 10v29c0 1.7-1.3 3-3 3z"/><path fill="#C8E6C9" d="M40 13H30V3z"/><path fill="#E8F5E9" d="M31 23H17v-2h14v2zm0 4H17v-2h14v2zm-4 4h-10v-2h10v2z"/></svg>
+        <div>
+          <div style="font-size:13px;font-weight:600">Google Sheets Backup</div>
+          <div style="font-size:11px;color:var(--text-tertiary)">Export all data to a Google Sheets-compatible CSV file</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">
+        Export each module as a separate CSV sheet. Open in Google Sheets via
+        <em>File → Import → Upload</em>, or use the Google Sheets web app to import directly.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" onclick="exportToGoogleSheets()" style="font-size:12px"><i class="ti ti-table-export"></i> Export All to CSV (Sheets-ready)</button>
+        <button class="btn" onclick="showGSheetsInstructions()" style="font-size:12px"><i class="ti ti-help"></i> How to import to Google Sheets</button>
       </div>
     </div>
 
@@ -7947,6 +7984,83 @@ async function getDecryptedSig(userName) {
   if(!u || !u.encryptedSig) return null;
   const password = 'ANMOLPHARMA_SIG_' + (getCompanyProfile().tin||'CORP') + '_' + u.id;
   return await aesDecrypt(u.encryptedSig, password);
+}
+
+function exportToGoogleSheets() {
+  // Build a ZIP-like multi-sheet export: one CSV per module, combined in a single download
+  // Since browsers can't create .xlsx easily without a library, we export as multiple CSVs
+  // wrapped in a single multi-tab format readable by Google Sheets via Import
+
+  const toCSV = (rows) => rows.map(row =>
+    Object.values(row).map(v => {
+      const s = String(v==null?'':v).replace(/"/g,'""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+    }).join(',')
+  ).join('\n');
+
+  const sheets = {
+    'Invoices': (state.invoices||[]).map(i=>({ ID:i.id, Date:i.date, Due:i.due, Terms:i.terms||'', Customer:i.customer, Amount:i.amount, VAT:i.vat, VATBase:i.vatBase, Status:i.status, SORef:i.soRef||'' })),
+    'Sales Orders': (state.salesOrders||[]).map(s=>({ ID:s.id, Date:s.date, Customer:s.customer, Status:s.status, Total:(s.lines||[]).reduce((a,l)=>a+(l.lineTotal||0),0) })),
+    'Purchase Orders': (state.purchaseOrders||[]).map(p=>({ ID:p.id, Date:p.date, Supplier:p.supplier, PurchaseType:p.purchaseType||'', PaymentTerms:p.paymentTerms||'', DueDate:p.dueDate||'', Status:p.status, Total:(p.lines||[]).reduce((a,l)=>a+(l.lineTotal||0),0) })),
+    'Collections': (state.collections||[]).map(c=>({ ID:c.id, Date:c.date, Customer:c.customer, Invoice:c.invoice, Amount:c.amount, CWT:c.cwtAmount||'', NetCash:c.netCash||c.amount, Mode:c.mode, Reference:c.reference, ReceivedBy:c.receivedBy })),
+    'Expenses': (state.expenses||[]).map(e=>({ ID:e.id, Date:e.date, Description:e.description, Amount:e.amount, Category:e.category, Vendor:e.vendor||'' })),
+    'Inventory': (state.inventory||[]).map(i=>({ ID:i.id, Name:i.name, Brand:i.brand||'', Category:i.category, Unit:i.unit, Qty:i.qty, CostPrice:i.costPrice, SalePrice:i.salePrice, ReorderLevel:i.reorderLevel, BatchNo:i.batchNo||'', LotNo:i.lotNo||'', Expiry:i.expiryDate||'' })),
+    'Customers': (state.customers||[]).map(c=>({ ID:c.id, Name:c.name, TIN:c.tin||'', Address:c.address||'', Email:c.email||'', Phone:c.phone||'' })),
+    'Suppliers': (state.suppliers||[]).map(s=>({ ID:s.id, Name:s.name, TIN:s.tin||'', Address:s.address||'', Email:s.email||'', Phone:s.phone||'' })),
+    'Employees': (state.employees||[]).map(e=>({ ID:e.id, Name:e.name, Position:e.position||'', Department:e.department||'', Rate:e.rate||0, Status:e.status||'' })),
+    'Chart of Accounts': (state.accounts||[]).map(a=>({ ID:a.id, Name:a.name, Type:a.type, Balance:a.balance||0 })),
+    'Journal': (state.journal||[]).map(j=>({ ID:j.id, Group:j.group||'', Date:j.date, Ref:j.ref||'', Desc:j.desc||'', Debit:j.debit||'', Credit:j.credit||'', Amount:j.amount||0, Type:j.type||'', PORef:j.poRef||'', PreparedBy:j.preparedBy||'', ApprovedBy:j.approvedBy||'', Cancelled:j.cancelled?'YES':'', Approved:j.approved?'YES':'' })),
+    'Fixed Assets': (state.fixedAssets||[]).map(a=>({ ID:a.id, Name:a.name, Category:a.category||'', AcquiredDate:a.acquiredDate, Cost:a.cost, Salvage:a.salvage||0, UsefulLife:a.usefulLife||5, Method:a.method||'straight-line' })),
+  };
+
+  // Export as a single Excel-compatible file using XLSX library if available, else CSV zip
+  if(window.XLSX) {
+    const wb = XLSX.utils.book_new();
+    Object.entries(sheets).forEach(([name, data]) => {
+      if(!data.length) return;
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, name.slice(0,31));
+    });
+    const date = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `ANMOL_GoogleSheets_${date}.xlsx`);
+    alert('✅ Excel file downloaded!\n\nTo import to Google Sheets:\n1. Open Google Sheets (sheets.google.com)\n2. File → Import → Upload\n3. Select the downloaded file\n4. Choose "Insert new sheet(s)" → Import\n\nEach module will be a separate tab.');
+  } else {
+    // Fallback: download as separate CSV files
+    Object.entries(sheets).forEach(([name, data]) => {
+      if(!data.length) return;
+      const headers = Object.keys(data[0]).join(',');
+      const csv = headers + '\n' + toCSV(data);
+      const blob = new Blob([csv], {type:'text/csv'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `ANMOL_${name.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+    });
+  }
+}
+
+function showGSheetsInstructions() {
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-brand-google" style="margin-right:6px"></i>Import to Google Sheets</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:13px;line-height:1.8;color:var(--text-primary)">
+  <div style="font-weight:600;margin-bottom:8px">Step-by-step import instructions:</div>
+  <ol style="padding-left:20px;display:flex;flex-direction:column;gap:8px">
+    <li>Click <strong>"Export All to CSV (Sheets-ready)"</strong> — this downloads an Excel (.xlsx) file with all modules as separate sheets</li>
+    <li>Go to <a href="https://sheets.google.com" target="_blank" style="color:var(--accent)">sheets.google.com</a> → create a new spreadsheet</li>
+    <li>Click <strong>File → Import</strong></li>
+    <li>Click <strong>Upload</strong> → select the downloaded file</li>
+    <li>Select <strong>"Insert new sheet(s)"</strong> as the import location</li>
+    <li>Click <strong>Import data</strong></li>
+    <li>Each module (Invoices, Inventory, Journal, etc.) becomes its own tab</li>
+  </ol>
+  <div style="margin-top:14px;padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);font-size:12px;color:var(--accent)">
+    <i class="ti ti-info-circle" style="margin-right:5px"></i>
+    <strong>Auto-backup tip:</strong> You can schedule regular exports and upload to Google Drive for a running backup history. Google Sheets also has a built-in revision history.
+  </div>
+</div>
+<div style="display:flex;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Close</button>
+</div>`);
 }
 
 function copyFirestoreRules() {
@@ -8370,7 +8484,11 @@ function showAddSO() {
 <div class="modal-head"><h3>New Sales Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
   <div class="form-group"><label>Customer</label><select id="so-cust">${custOpts}</select></div>
-  <div class="form-group"><label>Prepared By</label>${empDropdown('so-by', currentUser?.name||'')}</div>
+  <div class="form-group">
+    <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
+    <input type="text" id="so-by" value="${currentUser?.name||''}" readonly
+      style="background:var(--bg-secondary);color:var(--text-secondary);cursor:not-allowed;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);width:100%;font-family:var(--font);font-size:13px">
+  </div></div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Order Date</label><input type="date" id="so-date" value="${today()}"></div>
@@ -8715,7 +8833,11 @@ function showAddPO() {
 <div class="modal-head"><h3>New Purchase Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
   <div class="form-group"><label>Supplier</label><select id="po-sup">${supOpts}</select></div>
-  <div class="form-group"><label>Prepared By</label>${empDropdown('po-by', currentUser?.name||'')}</div>
+  <div class="form-group">
+    <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
+    <input type="text" id="po-by" value="${currentUser?.name||''}" readonly
+      style="background:var(--bg-secondary);color:var(--text-secondary);cursor:not-allowed;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);width:100%;font-family:var(--font);font-size:13px">
+  </div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Order Date</label><input type="date" id="po-date" value="${today()}"></div>
