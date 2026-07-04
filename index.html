@@ -1525,115 +1525,24 @@ let state = {
     { id:'5040', name:'Utilities Expense', type:'Expense', balance:14400 },
     { id:'5050', name:'Marketing Expense', type:'Expense', balance:22800 },
   ],
-  journal: [
-    { id:'JE-001', date:'2026-06-01', ref:'INV-003', debit:'1020', credit:'4010', amount:45000, desc:'Sales to Reyes Corp' },
-    { id:'JE-002', date:'2026-06-02', ref:'EXP-011', debit:'5030', credit:'2010', amount:18000, desc:'Monthly rent payment' },
-    { id:'JE-003', date:'2026-06-03', ref:'REC-007', debit:'1010', credit:'1020', amount:28000, desc:'Collection from Santos Inc.' },
-    { id:'JE-004', date:'2026-06-05', ref:'INV-004', debit:'1020', credit:'4010', amount:62000, desc:'Sales to Diaz Trading' },
-    { id:'JE-005', date:'2026-06-08', ref:'EXP-012', debit:'5020', credit:'2020', amount:45000, desc:'Bi-monthly payroll' },
-    { id:'JE-006', date:'2026-06-10', ref:'EXP-013', debit:'5040', credit:'2010', amount:8200, desc:'Electricity & internet' },
-  ],
-  invoices: [
-    { id:'INV-001', date:'2026-05-15', due:'2026-06-15', customer:'Santos Inc.', amount:28000, status:'paid' },
-    { id:'INV-002', date:'2026-05-28', due:'2026-06-28', customer:'Flores Enterprises', amount:55000, status:'pending' },
-    { id:'INV-003', date:'2026-06-01', due:'2026-07-01', customer:'Reyes Corp', amount:45000, status:'pending' },
-    { id:'INV-004', date:'2026-06-05', due:'2026-07-05', customer:'Diaz Trading', amount:62000, status:'draft' },
-    { id:'INV-005', date:'2026-04-20', due:'2026-05-20', customer:'Cruz & Co.', amount:19500, status:'overdue' },
-  ],
-  expenses: [
-    { id:'EXP-010', date:'2026-06-01', vendor:'Ace Properties', category:'Rent', amount:18000, status:'paid', expType:'admin' },
-    { id:'EXP-011', date:'2026-06-02', vendor:'Meralco', category:'Utilities', amount:8200, status:'paid', expType:'admin' },
-    { id:'EXP-012', date:'2026-06-08', vendor:'Payroll', category:'Salaries', amount:45000, status:'paid', expType:'admin' },
-    { id:'EXP-013', date:'2026-06-09', vendor:'Meta Ads', category:'Marketing', amount:12500, status:'pending', expType:'operating' },
-    { id:'EXP-014', date:'2026-06-10', vendor:'BPI Insurance', category:'Insurance', amount:6800, status:'pending', expType:'admin' },
-  ],
-  purchases: [
-    { id:'PUR-001', date:'2026-06-01', vendor:'ABC Supplies Co.', category:'Goods for Resale', amount:54000, vatBase:48214.29, vat:5785.71, vatType:'inclusive', status:'paid', notes:'June merchandise batch' },
-    { id:'PUR-002', date:'2026-06-04', vendor:'XYZ Trading Ltd.', category:'Goods for Resale', amount:28000, vatBase:25000, vat:3000, vatType:'exclusive', status:'paid', notes:'Office equipment for resale' },
-    { id:'PUR-003', date:'2026-06-07', vendor:'FastFreight PH', category:'Freight & Delivery', amount:4480, vatBase:4000, vat:480, vatType:'exclusive', status:'paid', notes:'Delivery charges for purchased goods' },
-    { id:'PUR-004', date:'2026-06-11', vendor:'Global Goods Inc.', category:'Goods for Resale', amount:67200, vatBase:60000, vat:7200, vatType:'exclusive', status:'pending', notes:'Electronics inventory purchase' },
-  ],
-  customers: [
-    { id:'C001', name:'Santos Inc.', email:'ar@santos.com.ph', phone:'+63 912 345 6789', balance:0 },
-    { id:'C002', name:'Flores Enterprises', email:'finance@flores.ph', phone:'+63 917 234 5678', balance:55000 },
-    { id:'C003', name:'Reyes Corp', email:'ap@reyescorp.ph', phone:'+63 918 123 4567', balance:45000 },
-    { id:'C004', name:'Diaz Trading', email:'accounts@diaztrading.ph', phone:'+63 919 012 3456', balance:62000 },
-    { id:'C005', name:'Cruz & Co.', email:'cfo@cruzco.ph', phone:'+63 920 901 2345', balance:19500 },
-  ],
-  suppliers: [
-    { id:'SUP-001', name:'ABC Supplies Co.', tin:'123-456-789-000', contactPerson:'Ramon Cruz', email:'purchasing@abcsupplies.ph', phone:'+63 2 8123 4567', address:'123 Rizal Ave., Quezon City, Metro Manila', category:'Goods & Merchandise', terms:'Net 30', status:'active', notes:'Primary dry goods supplier' },
-    { id:'SUP-002', name:'XYZ Trading Ltd.', tin:'234-567-890-000', contactPerson:'Elena Santos', email:'elena@xyztrading.ph', phone:'+63 917 345 6789', address:'456 Bonifacio St., Makati City, Metro Manila', category:'Goods & Merchandise', terms:'Net 15', status:'active', notes:'Office equipment and electronics' },
-    { id:'SUP-003', name:'FastFreight PH', tin:'345-678-901-000', contactPerson:'Marco Reyes', email:'ops@fastfreight.ph', phone:'+63 2 8234 5678', address:'789 Logistics Hub, Pasig City, Metro Manila', category:'Freight & Logistics', terms:'COD', status:'active', notes:'Third-party logistics provider' },
-    { id:'SUP-004', name:'Global Goods Inc.', tin:'456-789-012-000', contactPerson:'Sophia Tan', email:'sophia@globalgoods.ph', phone:'+63 918 456 7890', address:'321 Commercial Blvd., Cebu City, Cebu', category:'Goods & Merchandise', terms:'Net 30', status:'active', notes:'Electronics and consumer goods importer' },
-    { id:'SUP-005', name:'Ace Properties', tin:'567-890-123-000', contactPerson:'Jose Mendoza', email:'leasing@aceproperties.ph', phone:'+63 2 8345 6789', address:'654 Ayala Ave., Makati City, Metro Manila', category:'Rent & Utilities', terms:'Monthly', status:'active', notes:'Office space landlord' },
-  ],
-  vouchers: [
-    { id:'DV-001', date:'2026-06-02', payee:'Ace Properties', purpose:'Monthly office rent — June 2026', amount:18000, account:'5030', preparedBy:'M. Reyes', approvedBy:'J. Santos', status:'approved' },
-    { id:'DV-002', date:'2026-06-08', payee:'Payroll — June 2026', purpose:'Bi-monthly salaries of regular employees', amount:45000, account:'5020', preparedBy:'M. Reyes', approvedBy:'J. Santos', status:'approved' },
-    { id:'DV-003', date:'2026-06-09', payee:'Meta Ads Philippines', purpose:'Digital marketing — June campaign', amount:12500, account:'5050', preparedBy:'M. Reyes', approvedBy:'', status:'pending' },
-  ],
-  collections: [
-    { id:'OR-001', date:'2026-06-03', customer:'Santos Inc.', invoice:'INV-001', amount:28000, mode:'Bank Transfer', reference:'BPI-20260603-001', receivedBy:'M. Reyes' },
-    { id:'OR-002', date:'2026-06-05', customer:'Cruz & Co.', invoice:'INV-005', amount:9750, mode:'Check', reference:'PNB Check #001234', receivedBy:'M. Reyes' },
-    { id:'OR-003', date:'2026-06-09', customer:'Flores Enterprises', invoice:'INV-002', amount:27500, mode:'Bank Transfer', reference:'BDO-20260609-441', receivedBy:'J. Santos' },
-  ],
-  salesOrders: [
-    { id:'SO-001', date:'2026-06-01', deliveryDate:'2026-06-08', customer:'Santos Inc.', status:'delivered', lines:[{itemId:'ITM-001',desc:'Office Chair',qty:2,unitPrice:6800,lineTotal:13600},{itemId:'ITM-004',desc:'Computer Mouse',qty:5,unitPrice:950,lineTotal:4750}], notes:'Rush delivery requested', preparedBy:'M. Reyes' },
-    { id:'SO-002', date:'2026-06-05', deliveryDate:'2026-06-12', customer:'Diaz Trading', status:'approved', lines:[{itemId:'ITM-007',desc:'HDMI Cable 2m',qty:10,unitPrice:420,lineTotal:4200}], notes:'', preparedBy:'M. Reyes' },
-    { id:'SO-003', date:'2026-06-10', deliveryDate:'2026-06-17', customer:'Reyes Corp', status:'pending', lines:[{itemId:'ITM-006',desc:'Filing Cabinet',qty:2,unitPrice:11500,lineTotal:23000},{itemId:'ITM-002',desc:'A4 Bond Paper (500s)',qty:10,unitPrice:310,lineTotal:3100}], notes:'Confirm delivery address before dispatch', preparedBy:'J. Santos' },
-  ],
-  purchaseOrders: [
-    { id:'PO-001', date:'2026-06-01', deliveryDate:'2026-06-05', supplier:'ABC Supplies Co.', status:'received', lines:[{itemId:'ITM-002',desc:'A4 Bond Paper (500s)',qty:50,unitPrice:220,lineTotal:11000}], notes:'Standing monthly order', preparedBy:'M. Reyes' },
-    { id:'PO-002', date:'2026-06-10', deliveryDate:'2026-06-15', supplier:'Global Goods Inc.', status:'approved', lines:[{itemId:'ITM-007',desc:'HDMI Cable 2m',qty:20,unitPrice:290,lineTotal:5800},{itemId:'ITM-004',desc:'Computer Mouse',qty:10,unitPrice:650,lineTotal:6500}], notes:'', preparedBy:'J. Santos' },
-    { id:'PO-003', date:'2026-06-11', deliveryDate:'2026-06-18', supplier:'XYZ Trading Ltd.', status:'pending', lines:[{itemId:'ITM-001',desc:'Office Chair',qty:5,unitPrice:4500,lineTotal:22500}], notes:'New stock replenishment', preparedBy:'M. Reyes' },
-  ],
-  inventory: [
-    { id:'ITM-001', name:'Office Chair', category:'Furniture', unit:'pc', costPrice:4500, salePrice:6800, qty:12, reorderLevel:3 },
-    { id:'ITM-002', name:'A4 Bond Paper (500s)', category:'Office Supplies', unit:'ream', costPrice:220, salePrice:310, qty:85, reorderLevel:20 },
-    { id:'ITM-003', name:'Printer Ink (Black)', category:'Office Supplies', unit:'bottle', costPrice:380, salePrice:520, qty:4, reorderLevel:5 },
-    { id:'ITM-004', name:'Computer Mouse', category:'Electronics', unit:'pc', costPrice:650, salePrice:950, qty:18, reorderLevel:5 },
-    { id:'ITM-005', name:'Whiteboard Marker', category:'Office Supplies', unit:'box', costPrice:180, salePrice:260, qty:22, reorderLevel:8 },
-    { id:'ITM-006', name:'Filing Cabinet', category:'Furniture', unit:'pc', costPrice:8200, salePrice:11500, qty:6, reorderLevel:2 },
-    { id:'ITM-007', name:'HDMI Cable 2m', category:'Electronics', unit:'pc', costPrice:290, salePrice:420, qty:30, reorderLevel:10 },
-  ],
-  inventoryMovements: [
-    { id:'MOV-001', date:'2026-06-01', item:'ITM-002', type:'in', qty:50, ref:'PO-201', note:'Purchase order delivery' },
-    { id:'MOV-002', date:'2026-06-03', item:'ITM-001', type:'out', qty:2, ref:'SO-088', note:'Sold to Reyes Corp' },
-    { id:'MOV-003', date:'2026-06-05', item:'ITM-004', type:'out', qty:5, ref:'SO-089', note:'Sold to Diaz Trading' },
-    { id:'MOV-004', date:'2026-06-08', item:'ITM-003', type:'out', qty:3, ref:'SO-090', note:'Internal use' },
-    { id:'MOV-005', date:'2026-06-10', item:'ITM-007', type:'in', qty:20, ref:'PO-202', note:'Restocked from supplier' },
-  ],
-  salesReturns: [
-    { id:'SR-001', date:'2026-06-05', customer:'Santos Inc.', invoiceRef:'INV-001', reason:'Damaged goods', lines:[{ itemId:'ITM-001', desc:'Office Chair', qty:1, unitPrice:6800, lineTotal:6800 }], status:'approved', restocked:true, notes:'Chair arrived with broken armrest' },
-  ],
+  journal: [],
+  invoices: [],
+  expenses: [],
+  purchases: [],
+  customers: [],
+  suppliers: [],
+  vouchers: [],
+  collections: [],
+  salesOrders: [],
+  purchaseOrders: [],
+  inventory: [],
+  inventoryMovements: [],
+  salesReturns: [],
   inventoryTransfers: [],
   consignedItems: [],
-  employees: [
-    { id:'EMP-001', name:'Maria Santos', email:'maria.santos@anmolpharma.ph', position:'Sales Manager', department:'Sales', basicSalary:35000, sssNo:'01-234567-8', philhealthNo:'012345678901', pagibigNo:'1234567890', tinNo:'123-456-789', status:'active', startDate:'2024-01-15' },
-    { id:'EMP-002', name:'Juan Dela Cruz', email:'juan.delacruz@anmolpharma.ph', position:'Accountant', department:'Finance', basicSalary:28000, sssNo:'02-345678-9', philhealthNo:'023456789012', pagibigNo:'2345678901', tinNo:'234-567-890', status:'active', startDate:'2023-06-01' },
-    { id:'EMP-003', name:'Ana Reyes', email:'ana.reyes@anmolpharma.ph', position:'Warehouse Staff', department:'Operations', basicSalary:20000, sssNo:'03-456789-0', philhealthNo:'034567890123', pagibigNo:'3456789012', tinNo:'345-678-901', status:'active', startDate:'2024-03-10' },
-    { id:'EMP-004', name:'Carlos Flores', email:'carlos.flores@anmolpharma.ph', position:'Delivery Driver', department:'Operations', basicSalary:18000, sssNo:'04-567890-1', philhealthNo:'045678901234', pagibigNo:'4567890123', tinNo:'456-789-012', status:'active', startDate:'2025-01-05' },
-    { id:'EMP-005', name:'Rosa Mendoza', email:'rosa.mendoza@anmolpharma.ph', position:'Admin Assistant', department:'Administration', basicSalary:22000, sssNo:'05-678901-2', philhealthNo:'056789012345', pagibigNo:'5678901234', tinNo:'567-890-123', status:'active', startDate:'2023-09-20' },
-  ],
-  payrolls: [
-    { id:'PR-001', period:'2026-06-01 to 2026-06-15', payDate:'2026-06-15', empId:'EMP-001', basicPay:17500, overtime:2500, allowance:1500, grossPay:21500, sss:581.30, philhealth:437.50, pagibig:100, withholdingTax:1875, totalDeductions:2993.80, netPay:18506.20, status:'released' },
-    { id:'PR-002', period:'2026-06-01 to 2026-06-15', payDate:'2026-06-15', empId:'EMP-002', basicPay:14000, overtime:0, allowance:1000, grossPay:15000, sss:581.30, philhealth:350, pagibig:100, withholdingTax:875, totalDeductions:1906.30, netPay:13093.70, status:'released' },
-    { id:'PR-003', period:'2026-06-01 to 2026-06-15', payDate:'2026-06-15', empId:'EMP-003', basicPay:10000, overtime:1500, allowance:500, grossPay:12000, sss:400, philhealth:250, pagibig:100, withholdingTax:0, totalDeductions:750, netPay:11250, status:'released' },
-    { id:'PR-004', period:'2026-06-01 to 2026-06-15', payDate:'2026-06-15', empId:'EMP-004', basicPay:9000, overtime:0, allowance:500, grossPay:9500, sss:350, philhealth:225, pagibig:100, withholdingTax:0, totalDeductions:675, netPay:8825, status:'pending' },
-    { id:'PR-005', period:'2026-06-01 to 2026-06-15', payDate:'2026-06-15', empId:'EMP-005', basicPay:11000, overtime:800, allowance:800, grossPay:12600, sss:450, philhealth:275, pagibig:100, withholdingTax:260, totalDeductions:1085, netPay:11515, status:'pending' },
-  ],
-  attendance: [
-    { id:'ATT-001', empId:'EMP-001', date:'2026-06-09', timeIn:'08:02', timeOut:'17:05', status:'present', hoursWorked:9.05, overtimeHours:1.05, notes:'' },
-    { id:'ATT-002', empId:'EMP-002', date:'2026-06-09', timeIn:'08:15', timeOut:'17:00', status:'present', hoursWorked:8.75, overtimeHours:0, notes:'Late 15 min' },
-    { id:'ATT-003', empId:'EMP-003', date:'2026-06-09', timeIn:'', timeOut:'', status:'absent', hoursWorked:0, overtimeHours:0, notes:'Sick leave' },
-    { id:'ATT-004', empId:'EMP-004', date:'2026-06-09', timeIn:'07:55', timeOut:'18:30', status:'present', hoursWorked:10.58, overtimeHours:2.58, notes:'' },
-    { id:'ATT-005', empId:'EMP-005', date:'2026-06-09', timeIn:'08:00', timeOut:'17:00', status:'present', hoursWorked:9, overtimeHours:1, notes:'' },
-    { id:'ATT-006', empId:'EMP-001', date:'2026-06-10', timeIn:'08:00', timeOut:'17:00', status:'present', hoursWorked:9, overtimeHours:1, notes:'' },
-    { id:'ATT-007', empId:'EMP-002', date:'2026-06-10', timeIn:'08:00', timeOut:'17:00', status:'present', hoursWorked:9, overtimeHours:1, notes:'' },
-    { id:'ATT-008', empId:'EMP-003', date:'2026-06-10', timeIn:'08:10', timeOut:'17:00', status:'present', hoursWorked:8.83, overtimeHours:0.83, notes:'' },
-    { id:'ATT-009', empId:'EMP-004', date:'2026-06-10', timeIn:'', timeOut:'', status:'leave', hoursWorked:0, overtimeHours:0, notes:'Vacation leave' },
-    { id:'ATT-010', empId:'EMP-005', date:'2026-06-10', timeIn:'08:00', timeOut:'17:30', status:'present', hoursWorked:9.5, overtimeHours:1.5, notes:'' },
-  ],
+  employees: [],
+  payrolls: [],
+  attendance: [],
 };
 
 // Persist to localStorage
@@ -1707,11 +1616,30 @@ function renderDashboard(c, ta) {
   const ar = state.invoices.filter(i=>i.status!=='paid').reduce((s,i)=>s+(i.amount||0),0);
   const ap = (state.purchases||[]).filter(p=>p.status==='pending').reduce((s,p)=>s+(p.amount||0),0)
            + (state.expenses||[]).filter(e=>e.status==='pending').reduce((s,e)=>s+(e.amount||0),0);
-  const months = ['Jan','Feb','Mar','Apr','May','Jun'];
-  const revData = [210000,245000,198000,320000,289000,Math.round(totalRev)];
-  const purData = [90000,110000,88000,145000,122000,Math.round(totalPur)];
-  const expData = [88000,91000,77000,133000,132000,Math.round(totalExp)];
-  const maxVal = Math.max(...revData,...purData.map((p,i)=>p+expData[i]));
+  // ── Real monthly data from actual records ──
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // Only show months up to current month
+  const monthCount = now.getMonth() + 1;
+  const months = monthLabels.slice(0, monthCount);
+
+  function sumByMonth(records, amtField='amount') {
+    const totals = Array(monthCount).fill(0);
+    records.forEach(r => {
+      const d = r.date||r.payrollDate||'';
+      if(!d) return;
+      const yr = parseInt(d.slice(0,4)), mo = parseInt(d.slice(5,7))-1;
+      if(yr === currentYear && mo >= 0 && mo < monthCount) totals[mo] += (parseFloat(r[amtField])||0);
+    });
+    return totals;
+  }
+
+  const revData = sumByMonth(state.invoices.filter(i=>i.status!=='draft'));
+  const purData = sumByMonth(state.purchases||[]);
+  const expData = sumByMonth(state.expenses||[]);
+  const colData = sumByMonth(state.collections||[]);
+  const maxVal = Math.max(...revData, ...purData.map((p,i)=>p+(expData[i]||0)), 1);
 
   // ── Top 5 selling items — from invoice lines ──
   const itemSales = {};
@@ -1785,19 +1713,20 @@ function renderDashboard(c, ta) {
 
 <div class="two-col">
   <div>
-    <div class="section-head"><span class="section-title">Revenue vs Purchases vs Expenses (2026)</span></div>
-    ${months.map((m,i) => {
-      const total = purData[i]+expData[i];
-      return `<div class="chart-bar-row">
+    <div class="section-head"><span class="section-title">Revenue vs Purchases vs Expenses (${currentYear})</span></div>
+    ${months.length===0 ? `<div style="text-align:center;padding:24px;color:var(--text-tertiary);font-size:12px">No data for ${currentYear} yet.</div>` :
+    months.map((m,i) => {
+      const rev=revData[i]||0, pur=purData[i]||0, exp=expData[i]||0;
+      return `<div class="chart-bar-row" style="${rev===0&&pur===0&&exp===0?'opacity:0.3':''}">
         <div class="chart-bar-label">${m}</div>
         <div style="flex:1">
-          <div class="chart-bar-wrap" style="margin-bottom:3px"><div class="chart-bar-fill" style="width:${(revData[i]/maxVal*100).toFixed(1)}%;background:var(--green)"></div></div>
-          <div class="chart-bar-wrap" style="margin-bottom:3px;display:flex">
-            <div style="width:${(purData[i]/maxVal*100).toFixed(1)}%;background:var(--accent);height:10px;border-radius:2px 0 0 2px"></div>
-            <div style="width:${(expData[i]/maxVal*100).toFixed(1)}%;background:#f05c6e;height:10px;border-radius:0 2px 2px 0"></div>
+          <div class="chart-bar-wrap" style="margin-bottom:3px" title="Revenue: ${fmt(rev)}"><div class="chart-bar-fill" style="width:${maxVal>0?(rev/maxVal*100).toFixed(1):0}%;background:var(--green)"></div></div>
+          <div class="chart-bar-wrap" style="margin-bottom:3px;display:flex" title="Pur: ${fmt(pur)} + Exp: ${fmt(exp)}">
+            <div style="width:${maxVal>0?(pur/maxVal*100).toFixed(1):0}%;background:var(--accent);height:10px;border-radius:2px 0 0 2px"></div>
+            <div style="width:${maxVal>0?(exp/maxVal*100).toFixed(1):0}%;background:#f05c6e;height:10px;border-radius:0 2px 2px 0"></div>
           </div>
         </div>
-        <div class="chart-bar-val">${(revData[i]/1000).toFixed(0)}k</div>
+        <div class="chart-bar-val">${rev>=1000?(rev/1000).toFixed(0)+'k':rev>0?fmt(rev):'—'}</div>
       </div>`;
     }).join('')}
     <div style="display:flex;gap:14px;margin-top:10px;font-size:11px">
