@@ -1843,6 +1843,11 @@ function buildGeneralJournalRows(entries) {
     if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[] };
     groups[gid].lines.push(j);
   });
+  // Derive approved/cancelled from lines after all lines collected
+  Object.values(groups).forEach(g => {
+    g.approved  = g.lines.some(l=>l.approved);
+    g.cancelled = g.lines.some(l=>l.cancelled);
+  });
   if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No General Journal entries yet.</div>`;
   const rows = Object.values(groups).map(g => {
     return g.lines.map((l,idx) => {
@@ -1895,6 +1900,11 @@ function buildDisbursementRows(entries) {
     const gid = j.group||j.id;
     if(!groups[gid]) groups[gid]={ id:gid, date:j.date, ref:j.ref, desc:j.desc, lines:[] };
     groups[gid].lines.push(j);
+  });
+  // Derive approved/cancelled from lines after all lines are collected
+  Object.values(groups).forEach(g => {
+    g.approved  = g.lines.some(l=>l.approved);
+    g.cancelled = g.lines.some(l=>l.cancelled);
   });
   if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-cash-banknote" style="font-size:36px;display:block;margin-bottom:12px"></i>No Disbursement Journal entries yet.</div>`;
   const rows = Object.values(groups).map(g => {
@@ -3797,6 +3807,10 @@ function renderExpenses(c, ta) {
     if(!journalGroups[gid]) journalGroups[gid] = { id:gid, date:j.date, ref:j.ref, desc:j.desc, type:j.type, preparedBy:j.preparedBy||'', poRef:j.poRef||'', lines:[] };
     journalGroups[gid].lines.push(j);
   });
+  // Derive approved after all lines are collected
+  Object.values(journalGroups).forEach(g => {
+    g.approved = g.lines.some(l=>l.approved);
+  });
 
   // Build journal-derived expense records — one per expense debit line
   const journalExpenses = [];
@@ -3811,7 +3825,7 @@ function renderExpenses(c, ta) {
         amount: l.amount||0,
         vat: 0,
         vatBase: l.amount||0,
-        status: g.lines[0]?.approved ? 'paid' : 'pending',
+        status: g.approved ? 'paid' : 'pending',
         expType: categorizeExpType(acc?.name||''),
         source: g.type==='disbursement' ? 'Disbursement Journal' : 'General Journal',
         sourceRef: g.id,
