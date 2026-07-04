@@ -1923,11 +1923,11 @@ function buildDisbursementRows(entries) {
       <td class="no-print">
         <div class="action-btns">
           <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
-          ${!g.approved&&!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','disbursement')"><i class="ti ti-edit"></i></button>`:''}
+          ${(!g.approved||isAdmin())&&!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','disbursement')"><i class="ti ti-edit"></i></button>`:''}
           ${!g.approved&&!isCancelled?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:''}
           ${g.approved&&!isCancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
           ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>`:''}
-          ${!g.approved&&!isCancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+          ${(!g.approved||isAdmin())&&!isCancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
           ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--amber)"><i class="ti ti-ban"></i>Cancelled</span>`}
         </div>
       </td>
@@ -2210,13 +2210,17 @@ function approveJournalEntry(groupId) {
 function editJournalEntry(groupId, type) {
   const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
   if(!lines.length) return;
-  if(lines[0].approved) { alert('This entry has been approved and cannot be edited.'); return; }
+  const isApproved = lines.some(l=>l.approved);
+  if(isApproved && !isAdmin()) { alert('This entry has been approved and cannot be edited.\nOnly an Admin can edit approved entries.'); return; }
+  if(isApproved && isAdmin()) {
+    if(!confirm('⚠ This entry is APPROVED. Editing will un-approve it and require re-approval.\n\nProceed?')) return;
+    // Un-approve before editing
+    lines.forEach(l => { l.approved = false; delete l.approvedBy; delete l.approvedAt; });
+  }
   const first = lines[0];
-  // Remove old lines
   state.journal = state.journal.filter(j=>(j.group||j.id)!==groupId);
   save();
-  // Re-open the journal entry form with pre-filled data
-  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', lines });
+  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', poRef:first.poRef||'', lines });
 }
 
 function cancelJournalEntry(groupId) {
@@ -2300,7 +2304,9 @@ function showAddJournal(type, prefill) {
 ${poSection}
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${prefill?.date||today()}"></div>
-  <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. DV-001" value="${prefill?.ref||''}"></div>
+  <div class="form-group"><label>Reference <span style="font-size:10px;color:var(--accent)">(auto-assigned)</span></label>
+    <input type="text" id="je-ref" value="${prefill?.ref || (isDisbursement ? nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'),'group') : nextRefNum('JV', state.journal.filter(j=>j.type==='general'),'group'))}" placeholder="e.g. DV260001">
+  </div>
 </div>
 <div class="form-group"><label>Description / Memo</label><input type="text" id="je-desc" placeholder="Transaction description" value="${prefill?.desc||''}"></div>
 <div class="form-row">
@@ -2682,6 +2688,16 @@ function updateJeTotals() {
   if(cEl) { cEl.textContent=fmt(tc); cEl.style.color = Math.abs(td-tc)<0.01?'var(--green)':'var(--red)'; }
 }
 
+function nextRefNum(prefix, collection, field='id') {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const existing = (collection||[])
+    .map(r => String(r[field]||''))
+    .filter(id => id.startsWith(prefix+yy))
+    .map(id => parseInt(id.slice(prefix.length+2))||0);
+  const next = existing.length ? Math.max(...existing)+1 : 1;
+  return prefix + yy + String(next).padStart(4,'0');
+}
+
 function saveJournal() {
   // Synchronously read all account search inputs into jeLines before processing
   jeLines.forEach((l, i) => {
@@ -2717,7 +2733,7 @@ function saveJournal() {
     const totalOtherC = creditLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
     const netDrawn    = totalDebit - totalOtherC;
     if(netDrawn < 0) { alert('Other credits cannot exceed total debits.'); return; }
-    const groupId = 'JE-' + String(state.journal.length + 1).padStart(3,'0');
+    const groupId = prefill?.groupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
     let lineIdx = 0;
     // Debit lines
     debitLines.forEach(l => {
@@ -2745,7 +2761,8 @@ function saveJournal() {
   const cashKeywords = ['cash','bank','petty','drawing'];
   const hasCashCredit = jeLines.some(l=>l.credit && state.accounts.find(a=>a.id===l.credit && cashKeywords.some(k=>a.name.toLowerCase().includes(k))));
   const entryType = hasCashCredit ? 'disbursement' : 'general';
-  const groupId = 'JE-' + String(state.journal.length + 1).padStart(3,'0');
+  const entryPrefix = entryType==='disbursement' ? 'DV' : 'JV';
+  const groupId = prefill?.groupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
@@ -4978,13 +4995,13 @@ function saveVoucher() {
   const preparedBy = document.getElementById('dv-prepared').value.trim();
   const approvedBy = document.getElementById('dv-approved').value.trim();
   if (!payee || !amount) { alert('Payee and amount are required.'); return; }
-  const id = 'DV-' + String(state.vouchers.length + 1).padStart(3,'0');
+  const id = nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
   const status = approvedBy ? 'approved' : 'pending';
   state.vouchers.push({ id, date, payee, purpose, amount, account, cashAccount, preparedBy, approvedBy, status });
 
   // Auto-create journal entry: DR expense account / CR cash account
   if(account && cashAccount) {
-    const groupId = 'JE-' + String(state.journal.length + 1).padStart(3,'0');
+    const groupId = nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
     const expAcc  = state.accounts.find(a=>a.id===account);
     const cashAcc = state.accounts.find(a=>a.id===cashAccount);
     const desc    = `Disbursement — ${purpose||payee} (${id})`;
@@ -8738,7 +8755,7 @@ function saveSO() {
   const preparedBy=document.getElementById('so-by').value;
   const lines=window._soLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
   if(!lines.length){ alert('Add at least one line item.'); return; }
-  const id='SO-'+String((state.salesOrders||[]).length+1).padStart(3,'0');
+  const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
   state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending'});
   save(); closeModal(); render();
@@ -8934,7 +8951,7 @@ function savePO() {
   const category     = document.getElementById('po-category')?.value || 'Goods for Resale';
   const lines = window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
   if(!lines.length){ alert('Add at least one line item.'); return; }
-  const id = 'PO-'+String((state.purchaseOrders||[]).length+1).padStart(3,'0');
+  const id = nextRefNum('PO', state.purchaseOrders||[]);
   if(!state.purchaseOrders) state.purchaseOrders = [];
   state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, status:'pending' });
   save(); closeModal(); render();
