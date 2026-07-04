@@ -1913,7 +1913,7 @@ function buildGeneralJournalRows(entries) {
         <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}</td>
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
         <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.ref}</td>
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.desc}</td>` : '';
+        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.desc}${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}</td>` : '';
       const actions = isFirst ? `
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
           <div class="action-btns">
@@ -1966,7 +1966,7 @@ function buildDisbursementRows(entries) {
       <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
       <td>${g.date}</td>
       <td class="mono">${g.ref}</td>
-      <td>${g.desc}</td>
+      <td>${g.desc}${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
       <td style="text-align:right;font-weight:600;color:${isCancelled?'var(--text-tertiary)':'var(--red)'}">${fmt(totalDisb)}</td>
       <td class="no-print">
@@ -2076,7 +2076,8 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
   <div class="meta-item"><div class="meta-label">Entry #</div><strong>${first.group||first.id}</strong></div>
   <div class="meta-item"><div class="meta-label">Date</div>${first.date}</div>
   <div class="meta-item"><div class="meta-label">Reference</div>${first.ref||'—'}</div>
-  <div class="meta-item" style="grid-column:span 3"><div class="meta-label">Description / Particulars</div>${first.desc||'—'}</div>
+  <div class="meta-item" style="grid-column:span 2"><div class="meta-label">Description / Particulars</div>${first.desc||'—'}</div>
+  <div class="meta-item"><div class="meta-label">Linked PO</div>${first.poRef?`<span style="color:#1a3a6b;font-weight:600">${first.poRef}</span>`:'—'}</div>
 </div>
 <table>
   <thead><tr>
@@ -2306,6 +2307,20 @@ function showAddJournal(type, prefill) {
   const fundOpts = `<option value="">— Select source fund —</option>` +
     fundAccs.map(a=>`<option value="${a.id}">${a.id} – ${a.name}</option>`).join('');
 
+  // PO dropdown — unpaid/pending POs for linking
+  const linkedPOs = new Set((state.journal||[]).map(j=>j.poRef).filter(Boolean));
+  const openPOs = (state.purchaseOrders||[]).filter(po=>
+    po.status !== 'cancelled' && !linkedPOs.has(po.id)
+  );
+  const poOpts = `<option value="">— None / not linked to PO —</option>` +
+    openPOs.map(po => {
+      const total = (po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+      return `<option value="${po.id}">${po.id} — ${po.supplier} — ${fmt(total)} [${po.status}]</option>`;
+    }).join('');
+
+  // Also show already-linked POs for reference if editing
+  const linkedPOsForEdit = prefill?.poRef ? `<option value="${prefill.poRef}" selected>${prefill.poRef}</option>` : '';
+
   const disbFields = isDisbursement ? `
 <div class="form-group">
   <label>Drawn from (Credit Account)</label>
@@ -2315,9 +2330,23 @@ function showAddJournal(type, prefill) {
   <div style="font-size:11px;color:var(--accent);margin-top:4px"><i class="ti ti-info-circle" style="margin-right:4px"></i>This account will be auto-filled as the <strong>credit</strong> on all lines below.</div>
 </div>` : '';
 
+  // PO link section banner for both types
+  const poSection = `
+<div style="background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:var(--radius-md);padding:12px 14px;margin-bottom:12px">
+  <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">
+    <i class="ti ti-truck-delivery" style="margin-right:5px;color:var(--accent)"></i>
+    Link to Purchase Order ${isDisbursement?'(payment)':'(accounts payable setup)'}
+  </div>
+  <select id="je-po-ref" onchange="loadPOIntoJournal()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);margin-bottom:6px">
+    ${prefill?.poRef ? linkedPOsForEdit : poOpts}
+  </select>
+  <div id="je-po-banner" style="display:none;font-size:12px;color:var(--accent);padding:6px 10px;background:var(--accent-bg);border-radius:var(--radius-sm)"></div>
+</div>`;
+
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>${prefill?'Edit':'New'} ${isDisbursement ? 'Disbursement Entry' : 'Journal Entry'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+${poSection}
 <div class="form-row">
   <div class="form-group"><label>Date</label><input type="date" id="je-date" value="${prefill?.date||today()}"></div>
   <div class="form-group"><label>Reference</label><input type="text" id="je-ref" placeholder="e.g. DV-001" value="${prefill?.ref||''}"></div>
@@ -2333,7 +2362,7 @@ ${disbFields}
     <span style="font-size:12px;color:var(--text-secondary)">${isDisbursement ? 'Expense / Debit lines' : 'Journal lines'}</span>
     <div style="display:flex;gap:6px">
       ${!isDisbursement?`<button class="btn" style="padding:3px 10px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="addCWT2307GJ()" title="Add CWT/2307 withholding entry"><i class="ti ti-receipt-tax"></i>CWT/2307</button>`:''}
-      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addJeLine()"><i class="ti ti-plus"></i>Add line</button>
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="isDisbursement?addDisbLine('debit'):addJeLine()"><i class="ti ti-plus"></i>Add line</button>
     </div>
   </div>
   <table class="je-lines">
@@ -2360,6 +2389,76 @@ ${disbFields}
 }
 
 // When "Drawn from" changes, auto-fill credit side on all lines
+function loadPOIntoJournal() {
+  const poId = document.getElementById('je-po-ref')?.value;
+  const banner = document.getElementById('je-po-banner');
+  if(!poId) { if(banner) banner.style.display='none'; return; }
+
+  const po = (state.purchaseOrders||[]).find(p=>p.id===poId);
+  if(!po) return;
+
+  const total = (po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const isDisbursement = window._jeIsDisbursement;
+
+  // Auto-fill Reference and Description
+  const refEl = document.getElementById('je-ref');
+  const descEl = document.getElementById('je-desc');
+  if(refEl && !refEl.value) refEl.value = poId;
+  if(descEl && !descEl.value) descEl.value = `Payment — ${po.supplier} (${poId})`;
+
+  if(isDisbursement) {
+    // DISBURSEMENT: Debit = Inventory/Expense account, Credit = Cash/Bank (auto from drawn-from)
+    // Find best debit account based on purchase type
+    const isInventory = po.purchaseType === 'merchandise' || !po.purchaseType;
+    const debitAcc = state.accounts.find(a => {
+      const n = a.name.toLowerCase();
+      return isInventory
+        ? (n.includes('inventory') || n.includes('merchandise') || n.includes('goods'))
+        : (n.includes('expense') || n.includes('supplies') || n.includes('equipment'));
+    });
+    jeLines = [{ type:'debit', debit: debitAcc?String(debitAcc.id):'', credit:'', amount: total }];
+    renderJeLines();
+    if(banner) {
+      banner.style.display = 'block';
+      banner.innerHTML = `<i class="ti ti-truck-delivery" style="margin-right:5px"></i>
+        <strong>${poId}</strong> — ${po.supplier} — Total: <strong>${fmt(total)}</strong> —
+        <span style="color:var(--amber)">${po.purchaseType==='merchandise'?'📦 Merchandise Inventory':'📋 General Purchase'}</span> —
+        ${po.paymentTerms?paymentTermsLabel(po.paymentTerms):'On Account'}
+        ${isInventory?'<br><small style="color:var(--text-tertiary)">Debit: Merchandise Inventory · Credit: Fund account selected above</small>':
+          '<br><small style="color:var(--text-tertiary)">Debit: Expense/Asset account · Credit: Fund account selected above</small>'}`;
+    }
+  } else {
+    // GENERAL JOURNAL: Setup Accounts Payable
+    // Debit = Inventory/Expense, Credit = Accounts Payable
+    const isInventory = po.purchaseType === 'merchandise' || !po.purchaseType;
+    const debitAcc = state.accounts.find(a => {
+      const n = a.name.toLowerCase();
+      return isInventory
+        ? (n.includes('inventory') || n.includes('merchandise') || n.includes('goods'))
+        : (n.includes('expense') || n.includes('supplies') || n.includes('equipment'));
+    });
+    const apAcc = state.accounts.find(a => {
+      const n = a.name.toLowerCase();
+      return n.includes('accounts payable') || n.includes('trade payable') || (n.includes('payable') && !n.includes('tax') && !n.includes('withholding'));
+    });
+    jeLines = [{
+      debit: debitAcc ? String(debitAcc.id) : '',
+      credit: apAcc ? String(apAcc.id) : '',
+      amount: total
+    }];
+    renderJeLines();
+    if(banner) {
+      banner.style.display = 'block';
+      banner.innerHTML = `<i class="ti ti-truck-delivery" style="margin-right:5px"></i>
+        <strong>${poId}</strong> — ${po.supplier} — Total: <strong>${fmt(total)}</strong>
+        <br><small style="color:var(--text-tertiary)">
+          Debit: ${debitAcc?debitAcc.name:'[Inventory/Expense — select account]'} &nbsp;|&nbsp;
+          Credit: ${apAcc?apAcc.name:'[Accounts Payable — select account]'}
+        </small>`;
+    }
+  }
+}
+
 function applyDrawnFrom() {
   const sel = document.getElementById('je-drawn-from');
   if(!sel || !sel.value) return;
@@ -2651,6 +2750,7 @@ function saveJournal() {
   const desc = document.getElementById('je-desc').value || 'Journal entry';
   const preparedBy = document.getElementById('je-prepared')?.value || currentUser?.name || '';
   const approvedBy = document.getElementById('je-approved')?.value || '';
+  const poRef = document.getElementById('je-po-ref')?.value || '';
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
 
@@ -2666,17 +2766,17 @@ function saveJournal() {
     let lineIdx = 0;
     // Debit lines
     debitLines.forEach(l => {
-      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy });
+      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
       lineIdx++;
     });
     // Other credit lines (withholding tax, VAT payable, etc.)
     creditLines.forEach(l => {
-      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy });
+      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
       lineIdx++;
     });
     // Auto-calculated drawn-from credit line (net amount)
     if(netDrawn > 0) {
-      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy });
+      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'' });
     }
     save(); closeModal(); render();
     return;
@@ -2695,7 +2795,7 @@ function saveJournal() {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
-    state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy });
+    state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy, poRef:poRef||'' });
   });
   save(); closeModal(); render();
 }
