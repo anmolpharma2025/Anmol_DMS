@@ -2718,14 +2718,19 @@ function renderInvoices(c, ta) {
   <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value neg">${fmt(outstanding)}</div></div>
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${state.invoices.map(inv => {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
     const vat  = inv.vat    != null ? inv.vat    : 0;
     const gross= inv.amount || 0;
     return `<tr>
-      <td class="mono">${inv.id}</td><td>${inv.date}</td><td>${inv.due}</td><td>${inv.customer}</td>
+      <td class="mono">${inv.id}</td><td>${inv.date}</td>
+      <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
+      <td style="${inv.due&&inv.due<today()&&inv.status!=='paid'?'color:var(--red);font-weight:500':''}">
+        ${inv.due||'—'}${inv.due&&inv.due<today()&&inv.status!=='paid'?' <span style="font-size:10px">⚠</span>':''}
+      </td>
+      <td>${inv.customer}</td>
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
@@ -2800,11 +2805,25 @@ function showAddInvoice() {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Status</label><select id="inv-status"><option value="draft">Draft</option><option value="pending">Pending</option></select></div>
-  <div class="form-group"><label>Invoice Date</label><input type="date" id="inv-date" value="${today()}"></div>
+  <div class="form-group"><label>Invoice Date</label><input type="date" id="inv-date" value="${today()}" onchange="autoDueDateInv()"></div>
 </div>
 <div class="form-row">
-  <div class="form-group"><label>Due Date</label><input type="date" id="inv-due" value="${due.toISOString().split('T')[0]}"></div>
-  <div class="form-group"></div>
+  <div class="form-group"><label>Payment Terms</label>
+    <select id="inv-terms" onchange="autoDueDateInv()">
+      <option value="cod">COD — Cash on Delivery (Due on delivery)</option>
+      <option value="net15">Net 15 Days</option>
+      <option value="net30" selected>Net 30 Days</option>
+      <option value="net45">Net 45 Days</option>
+      <option value="net60">Net 60 Days</option>
+      <option value="net90">Net 90 Days</option>
+      <option value="on_account">On Account (Credit)</option>
+      <option value="custom">Custom due date</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Due Date <span id="inv-due-hint" style="font-size:10px;color:var(--accent)"></span></label>
+    <input type="date" id="inv-due" value="${due.toISOString().split('T')[0]}">
+  </div>
 </div>
 <div class="form-group"><label>VAT Treatment</label>
   <select id="inv-vat-type" onchange="window._invVatType=this.value; calcInvLines()">
@@ -3028,6 +3047,7 @@ function saveInvoice() {
   const customer = document.getElementById('inv-cust').value;
   const date     = document.getElementById('inv-date').value;
   const due      = document.getElementById('inv-due').value;
+  const terms    = document.getElementById('inv-terms')?.value || 'net30';
   const vatType  = document.getElementById('inv-vat-type').value;
   const status   = document.getElementById('inv-status').value;
   const id       = (document.getElementById('inv-number')?.value || '').trim();
@@ -3041,7 +3061,7 @@ function saveInvoice() {
   else                           { vatBase=subtotal; vat=0; amount=subtotal; }
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
   const soRef = window._invLinkedSO || '';
-  state.invoices.push({ id, date, due, customer, vatBase, vat, amount, vatType, status, lines, soRef });
+  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef });
   // ── Deduct inventory for each linked item (stock out on sale) ──
   lines.forEach(l => {
     if(!l.itemId) return;
@@ -3263,7 +3283,8 @@ function printInvoice(id) {
 </div>
 <div class="dates">
   <div class="date-item"><span>Invoice date</span><strong>${inv.date}</strong></div>
-  <div class="date-item"><span>Due date</span><strong>${inv.due}</strong></div>
+  <div class="date-item"><span>Payment terms</span><strong>${inv.terms?paymentTermsLabel(inv.terms):'Net 30 Days'}</strong></div>
+  <div class="date-item"><span>Due date</span><strong>${inv.due||'—'}</strong></div>
 </div>
 <table>
   <thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Unit Price</th><th class="r">Amount</th></tr></thead>
@@ -8116,6 +8137,49 @@ function renderOrderLines(prefix) {
   </tr>`;}).join('');
 }
 
+function termsTodays(term) {
+  const map = { cod:0, cod_check:0, prepaid:0, on_account:30, net15:15, net30:30, net45:45, net60:60, net90:90 };
+  return map[term] ?? null;
+}
+
+function autoDueDatePO(term) {
+  const dateEl = document.getElementById('po-date');
+  const dueEl  = document.getElementById('po-due');
+  const hint   = document.getElementById('po-due-hint');
+  const wrap   = document.getElementById('po-due-wrap');
+  if(!dueEl) return;
+  const isCOD = term==='cod'||term==='cod_check';
+  const days  = termsTodays(term);
+  if(wrap) wrap.style.opacity = isCOD ? '0.4' : '1';
+  if(hint) hint.textContent = isCOD ? '(not applicable for COD)' : days!==null ? `(auto: +${days} days)` : '';
+  if(isCOD) { dueEl.value=''; return; }
+  if(days === null) return;
+  const base = dateEl?.value ? new Date(dateEl.value) : new Date();
+  base.setDate(base.getDate() + days);
+  dueEl.value = base.toISOString().split('T')[0];
+}
+
+function autoDueDateInv() {
+  const termsEl = document.getElementById('inv-terms');
+  const dateEl  = document.getElementById('inv-date');
+  const dueEl   = document.getElementById('inv-due');
+  const hint    = document.getElementById('inv-due-hint');
+  if(!termsEl||!dueEl) return;
+  const term = termsEl.value;
+  const days = termsTodays(term);
+  if(term==='custom') { if(hint) hint.textContent=''; return; }
+  if(term==='cod') {
+    dueEl.value = dateEl?.value || today();
+    if(hint) hint.textContent = '(due on delivery)';
+    return;
+  }
+  if(days===null) { if(hint) hint.textContent=''; return; }
+  const base = dateEl?.value ? new Date(dateEl.value) : new Date();
+  base.setDate(base.getDate() + days);
+  dueEl.value = base.toISOString().split('T')[0];
+  if(hint) hint.textContent = `(+${days} days from invoice date)`;
+}
+
 function matchOrderItem(prefix, i, val) {
   const isSOLine = prefix === 'so' || prefix === 'inv';
   const items = state.inventory||[];
@@ -8344,17 +8408,20 @@ function showAddPO() {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Payment Terms</label>
-    <select id="po-payment-terms">
-      <option value="on_account">On Account (Credit)</option>
-      <option value="cod">Cash on Delivery (COD)</option>
-      <option value="cod_check">COD — Check</option>
+    <select id="po-payment-terms" onchange="autoDueDatePO(this.value)">
+      <option value="cod">Cash on Delivery (COD) — no due date</option>
+      <option value="cod_check">COD — Check — no due date</option>
       <option value="prepaid">Prepaid / Advance Payment</option>
+      <option value="on_account">On Account (Credit) — 30 days</option>
       <option value="net15">Net 15 Days</option>
       <option value="net30">Net 30 Days</option>
+      <option value="net45">Net 45 Days</option>
       <option value="net60">Net 60 Days</option>
+      <option value="net90">Net 90 Days</option>
     </select>
   </div>
-  <div class="form-group"><label>Due Date <span style="font-size:10px;color:var(--text-tertiary)">(for on-account)</span></label>
+  <div class="form-group" id="po-due-wrap">
+    <label>Due Date <span id="po-due-hint" style="font-size:10px;color:var(--accent)"></span></label>
     <input type="date" id="po-due" value="${due.toISOString().split('T')[0]}">
   </div>
 </div>
@@ -8445,14 +8512,17 @@ ${canReceive && (po.status==='approved'||po.status==='partial')?`<div style="pad
 function paymentTermsLabel(term) {
   const labels = {
     on_account: 'On Account (Credit)',
-    cod: 'Cash on Delivery (COD)',
+    cod: 'COD',
     cod_check: 'COD — Check',
     prepaid: 'Prepaid / Advance',
     net15: 'Net 15 Days',
     net30: 'Net 30 Days',
+    net45: 'Net 45 Days',
     net60: 'Net 60 Days',
+    net90: 'Net 90 Days',
+    custom: 'Custom',
   };
-  return labels[term] || term || 'On Account';
+  return labels[term] || term || 'Net 30 Days';
 }
 
 function renderPOViewLines(po, canReceive) {
