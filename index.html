@@ -2283,18 +2283,19 @@ function showAddJournal(type, prefill) {
   // Also show already-linked POs for reference if editing
   const linkedPOsForEdit = prefill?.poRef ? `<option value="${prefill.poRef}" selected>${prefill.poRef}</option>` : '';
 
-  const supOpts = `<option value="">— select supplier or type below —</option>` + (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+  const supOpts = `<option value="">— Select Payee / Supplier —</option>` +
+    (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
+    `<option value="__add_new__">➕ Payee not in list — Add new supplier…</option>`;
+
   const disbFields = isDisbursement ? `
 <div class="form-row">
   <div class="form-group">
     <label>Payee <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-bolt" style="font-size:10px"></i> auto-fills from PO</span></label>
-    <select id="je-payee-sel" onchange="document.getElementById('je-payee').value=this.value;this.style.display='none';document.getElementById('je-payee').style.display=''"
-      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);margin-bottom:4px">
+    <select id="je-payee-sel" onchange="handlePayeeSel(this)"
+      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
       ${supOpts}
     </select>
-    <input type="text" id="je-payee" placeholder="Or type payee name (BIR, MERALCO, etc.)"
-      value="${prefill?.payee||''}"
-      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <input type="hidden" id="je-payee" value="${prefill?.payee||''}">
   </div>
   <div class="form-group"><label>Check / Reference No.</label>
     <input type="text" id="je-checkno" placeholder="e.g. BPI Check #123456, Bank Ref #7890" value="${prefill?.checkNo||''}">
@@ -2370,10 +2371,12 @@ ${disbFields}
   window._jeOpts = opts;
   window._jeIsDisbursement = isDisbursement;
   renderJeLines();
-  // Pre-select supplier dropdown if editing/prefill has payee
+  // Pre-select payee dropdown if editing/prefill has payee
   if(isDisbursement && prefill?.payee) {
     setTimeout(() => {
       const sel = document.getElementById('je-payee-sel');
+      const hid = document.getElementById('je-payee');
+      if(hid) hid.value = prefill.payee;
       if(sel) {
         for(let i=0; i<sel.options.length; i++) {
           if(sel.options[i].value === prefill.payee) { sel.selectedIndex = i; break; }
@@ -2384,6 +2387,23 @@ ${disbFields}
 }
 
 // When "Drawn from" changes, auto-fill credit side on all lines
+function handlePayeeSel(sel) {
+  const val = sel.value;
+  if(val === '__add_new__') {
+    sel.value = '';
+    document.getElementById('je-payee').value = '';
+    if(confirm('Payee not in supplier list.\n\nWould you like to add them as a new supplier now?\n\nThe disbursement form will close and re-open after saving.')) {
+      // Store current form state to restore later
+      window._pendingDisbursement = true;
+      closeModal();
+      // Open add supplier modal then re-open disbursement
+      showAddSupplier();
+    }
+    return;
+  }
+  document.getElementById('je-payee').value = val;
+}
+
 function loadPOIntoJournal() {
   const poId = document.getElementById('je-po-ref')?.value;
   const banner = document.getElementById('je-po-banner');
@@ -2769,7 +2789,8 @@ function saveJournal() {
   const preparedBy = document.getElementById('je-prepared')?.value || currentUser?.name || '';
   const approvedBy = document.getElementById('je-approved')?.value || '';
   const poRef  = document.getElementById('je-po-ref')?.value || '';
-  const payee  = document.getElementById('je-payee')?.value || '';
+  const payee  = document.getElementById('je-payee')?.value ||
+                 (() => { const s = document.getElementById('je-payee-sel'); return s&&s.value!=='__add_new__'?s.value:''; })() || '';
   const checkNo= document.getElementById('je-checkno')?.value || '';
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
@@ -4610,6 +4631,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
         <td class="mono">${p.id}</td>
         <td>${sup?.name||p.vendor||'—'}</td>
         <td class="mono" style="font-size:11px">${sup?.tin||p.tin||'—'}</td>
+        <td style="font-size:11px;color:var(--text-secondary)">${sup?.address||'—'}</td>
         <td style="text-align:right">${fmt(p.amount||0)}</td>
         <td style="text-align:right">${fmt(vatBase)}</td>
         <td style="text-align:right">${fmt(vat)}</td>
@@ -4620,7 +4642,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const totBase = allPur.reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
     const totVAT = allPur.reduce((s,p)=>s+(p.vat||0),0);
     rb.innerHTML = `
-<div class="report-section" style="max-width:900px">
+<div class="report-section" style="max-width:1000px">
   <div style="text-align:center;margin-bottom:12px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
@@ -4629,15 +4651,15 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   </div>
   <table class="report-table" style="font-size:12px">
     <thead><tr>
-      <th>Date</th><th>Invoice No.</th><th>Supplier Name</th><th>TIN</th>
+      <th>Date</th><th>Invoice No.</th><th>Supplier Name</th><th>TIN</th><th>Address</th>
       <th style="text-align:right">Gross Amount</th>
       <th style="text-align:right">VAT Purchases</th>
       <th style="text-align:right">Input VAT</th>
       <th>Category</th>
     </tr></thead>
-    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tbody>${rows||'<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;background:var(--bg-card)">
-      <td colspan="4">TOTAL</td>
+      <td colspan="5">TOTAL</td>
       <td style="text-align:right">${fmt(totAmt)}</td>
       <td style="text-align:right">${fmt(totBase)}</td>
       <td style="text-align:right">${fmt(totVAT)}</td>
@@ -4835,7 +4857,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     invInPeriod.forEach(inv => {
       const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
       const key = cust?.tin || inv.customer || 'N/A';
-      if(!salesBySupplier[key]) salesBySupplier[key]={tin:cust?.tin||'N/A',name:cust?.name||inv.customer||'N/A',taxable:0,vat:0,gross:0};
+      if(!salesBySupplier[key]) salesBySupplier[key]={tin:cust?.tin||'N/A',name:cust?.name||inv.customer||'N/A',address:cust?.address||'—',taxable:0,vat:0,gross:0};
       salesBySupplier[key].taxable += (inv.vatBase??inv.amount??0);
       salesBySupplier[key].vat += (inv.vat||0);
       salesBySupplier[key].gross += (inv.amount||0);
@@ -4845,19 +4867,23 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     [...purInPeriod,...expInPeriod].forEach(p => {
       const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
       const key = sup?.tin || p.vendor || 'N/A';
-      if(!purBySupplier[key]) purBySupplier[key]={tin:sup?.tin||'N/A',name:sup?.name||p.vendor||'N/A',taxable:0,vat:0,gross:0};
+      if(!purBySupplier[key]) purBySupplier[key]={tin:sup?.tin||'N/A',name:sup?.name||p.vendor||'N/A',address:sup?.address||'—',taxable:0,vat:0,gross:0};
       purBySupplier[key].taxable += (p.vatBase??p.amount??0);
       purBySupplier[key].vat += (p.vat||0);
       purBySupplier[key].gross += (p.amount||0);
     });
     const salesRows = Object.values(salesBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
-      <td class="mono" style="font-size:11px">${r.tin}</td><td>${r.name}</td>
+      <td class="mono" style="font-size:11px">${r.tin}</td>
+      <td>${r.name}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${r.address}</td>
       <td style="text-align:right">${fmt(r.taxable)}</td>
       <td style="text-align:right">${fmt(r.vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
     </tr>`).join('');
     const purRows = Object.values(purBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
-      <td class="mono" style="font-size:11px">${r.tin}</td><td>${r.name}</td>
+      <td class="mono" style="font-size:11px">${r.tin}</td>
+      <td>${r.name}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${r.address}</td>
       <td style="text-align:right">${fmt(r.taxable)}</td>
       <td style="text-align:right">${fmt(r.vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
@@ -4877,18 +4903,18 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     SCHEDULE 1 — Summary List of Sales (SLS)
   </div>
   <table class="report-table" style="font-size:12px">
-    <thead><tr><th>TIN</th><th>Customer Name</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Output VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
-    <tbody>${salesRows||'<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
-    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totSales.taxable)}</td><td style="text-align:right">${fmt(totSales.vat)}</td><td style="text-align:right">${fmt(totSales.gross)}</td></tr></tfoot>
+    <thead><tr><th>TIN</th><th>Customer Name</th><th>Address</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Output VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
+    <tbody>${salesRows||'<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="3">TOTAL</td><td style="text-align:right">${fmt(totSales.taxable)}</td><td style="text-align:right">${fmt(totSales.vat)}</td><td style="text-align:right">${fmt(totSales.gross)}</td></tr></tfoot>
   </table>
 
   <div style="font-weight:700;font-size:13px;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-top:24px">
     SCHEDULE 2 — Summary List of Purchases (SLP)
   </div>
   <table class="report-table" style="font-size:12px">
-    <thead><tr><th>TIN</th><th>Supplier Name</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
-    <tbody>${purRows||'<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
-    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totPur.taxable)}</td><td style="text-align:right">${fmt(totPur.vat)}</td><td style="text-align:right">${fmt(totPur.gross)}</td></tr></tfoot>
+    <thead><tr><th>TIN</th><th>Supplier Name</th><th>Address</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
+    <tbody>${purRows||'<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="3">TOTAL</td><td style="text-align:right">${fmt(totPur.taxable)}</td><td style="text-align:right">${fmt(totPur.vat)}</td><td style="text-align:right">${fmt(totPur.gross)}</td></tr></tfoot>
   </table>
 
   <div style="margin-top:16px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);font-size:12px">
