@@ -8570,6 +8570,7 @@ function printPO(id) {
   const logo=localStorage.getItem(LOGO_KEY)||'';
   const total=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
   const sup=(state.suppliers||[]).find(s=>s.name===po.supplier)||{};
+  const users=getUsers();
   const statusColor={pending:'#BA7517',approved:'#3C3489',received:'#0F6E56',cancelled:'#A32D2D'};
   const win=window.open('','_blank','width=860,height=760');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Purchase Order ${po.id}</title>
