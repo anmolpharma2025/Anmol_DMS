@@ -1959,20 +1959,23 @@ function buildDisbursementRows(entries) {
     const cashLine = crLines[0] || g.lines.find(l=>l.credit);
     const cashAcc = cashLine ? state.accounts.find(a=>String(a.id)===String(cashLine.credit)) : null;
     const totalDisb = crLines.reduce((s,l)=>s+(l.amount||0),0) || (cashLine?.amount||0);
-    return `<tr>
-      <td class="mono">${g.id}</td>
+    const isCancelled = g.lines[0]?.cancelled;
+    return `<tr style="${isCancelled?'opacity:0.5;text-decoration:line-through;background:var(--bg-secondary)':''}">
+      <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;text-decoration:none">CANCELLED</span>`:''}</td>
       <td>${g.date}</td>
       <td class="mono">${g.ref}</td>
       <td>${g.desc}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
-      <td style="text-align:right;font-weight:600;color:var(--red)">${fmt(totalDisb)}</td>
+      <td style="text-align:right;font-weight:600;color:${isCancelled?'var(--text-tertiary)':'var(--red)'}">${fmt(totalDisb)}</td>
       <td class="no-print">
         <div class="action-btns">
           <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
-          ${!g.approved?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','disbursement')"><i class="ti ti-edit"></i></button>`:''}
-          ${!g.approved?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`}
-          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>
-          ${!g.approved?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+          ${!g.approved&&!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','disbursement')"><i class="ti ti-edit"></i></button>`:''}
+          ${!g.approved&&!isCancelled?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:''}
+          ${g.approved&&!isCancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
+          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>`:''}
+          ${!g.approved&&!isCancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--amber)"><i class="ti ti-ban"></i>Cancelled</span>`}
         </div>
       </td>
     </tr>`;
@@ -2260,6 +2263,13 @@ function editJournalEntry(groupId, type) {
   save();
   // Re-open the journal entry form with pre-filled data
   showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', lines });
+}
+
+function cancelJournalEntry(groupId) {
+  if(!confirm('Cancel this journal entry? It will remain visible but marked as CANCELLED and excluded from reports. This cannot be undone.')) return;
+  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
+  lines.forEach(l => { l.cancelled = true; l.cancelledBy = currentUser.name; l.cancelledAt = today(); });
+  save(); render();
 }
 
 function deleteJournalGroup(groupId) {
@@ -4318,8 +4328,8 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const cp = getCompanyProfile();
     const cashKeywords = ['cash','bank','petty','drawing'];
     function isCashAcc(id) { const a=state.accounts.find(a=>String(a.id)===String(id)); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
-    // Get all disbursement journal entries grouped
     const disbJournal = state.journal.filter(j => {
+      if(j.cancelled) return false;
       if(j.type==='disbursement') return true;
       if(j.type==='general') return false;
       const gid=j.group||j.id;
@@ -4332,24 +4342,41 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
       groups[gid].lines.push(j);
     });
     const filtered = Object.values(groups).filter(g=>inPeriod(g.date)).sort((a,b)=>a.date.localeCompare(b.date));
+
+    // Build rows: one sub-row per journal line (debit or credit)
+    let totalDebit = 0, totalCredit = 0;
     const rows = filtered.map(g => {
       const crLine = g.lines.find(l=>l.credit&&isCashAcc(l.credit));
-      const cashAcc = crLine ? state.accounts.find(a=>a.id===crLine.credit) : null;
-      const totalPaid = g.lines.filter(l=>l.credit&&isCashAcc(l.credit)).reduce((s,l)=>s+(l.amount||0),0);
-      const debitLines = g.lines.filter(l=>l.debit).map(l=>{const a=state.accounts.find(ac=>ac.id===l.debit);return(a?.name||l.debit)+': '+fmt(l.amount);}).join(', ');
-      return `<tr>
-        <td>${g.date}</td>
-        <td class="mono">${g.id}</td>
-        <td class="mono">${g.ref||'—'}</td>
-        <td>${g.desc||'—'}</td>
-        <td style="font-size:11px;color:var(--text-secondary)">${cashAcc?.name||'—'}</td>
-        <td style="font-size:11px;color:var(--text-secondary);max-width:200px">${debitLines}</td>
-        <td style="text-align:right;font-weight:500;color:var(--red)">${fmt(totalPaid)}</td>
-      </tr>`;
+      const cashAcc = crLine ? state.accounts.find(a=>String(a.id)===String(crLine.credit)) : null;
+      const lineCount = g.lines.length;
+      // Build sub-rows for each account line
+      const subRows = g.lines.map((l, li) => {
+        const da = state.accounts.find(a=>String(a.id)===String(l.debit));
+        const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
+        const accName = l.debit ? (da?.name||l.debit) : (ca?.name||l.credit);
+        const isCredit = !l.debit && l.credit;
+        const isDebitLine = !!l.debit;
+        if(isDebitLine) totalDebit += (l.amount||0);
+        else totalCredit += (l.amount||0);
+        const firstCells = li===0 ? `
+          <td rowspan="${lineCount}" style="vertical-align:top;padding:6px 8px">${g.date}</td>
+          <td rowspan="${lineCount}" class="mono" style="vertical-align:top;padding:6px 8px">${g.id}</td>
+          <td rowspan="${lineCount}" class="mono" style="vertical-align:top;padding:6px 8px">${g.ref||'—'}</td>
+          <td rowspan="${lineCount}" style="vertical-align:top;padding:6px 8px">${g.desc||'—'}</td>
+          <td rowspan="${lineCount}" style="vertical-align:top;padding:6px 8px;color:var(--text-secondary);font-size:11px">${cashAcc?.name||'—'}</td>
+        ` : '';
+        return `<tr${li===0?` style="border-top:1.5px solid var(--border-mid)"`:''}>
+          ${firstCells}
+          <td style="padding:5px 8px;padding-left:${isDebitLine?'8px':'24px'};font-size:12px;color:${isDebitLine?'var(--text-primary)':'var(--text-secondary)'}">${accName}</td>
+          <td style="text-align:right;padding:5px 8px;font-weight:${isDebitLine?'500':'400'};color:${isDebitLine?'var(--text-primary)':'var(--text-tertiary)'}">${isDebitLine?fmt(l.amount||0):'—'}</td>
+          <td style="text-align:right;padding:5px 8px;font-weight:${isCredit?'500':'400'};color:${isCredit?'var(--red)':'var(--text-tertiary)'}">${isCredit?fmt(l.amount||0):'—'}</td>
+        </tr>`;
+      }).join('');
+      return subRows;
     }).join('');
-    const total = filtered.reduce((s,g)=>s+g.lines.filter(l=>l.credit&&isCashAcc(l.credit)).reduce((ss,l)=>ss+(l.amount||0),0),0);
+
     rb.innerHTML = `
-<div class="report-section" style="max-width:960px">
+<div class="report-section" style="max-width:1000px">
   <div style="text-align:center;margin-bottom:12px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
@@ -4357,16 +4384,29 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
   </div>
   <table class="report-table" style="font-size:12px">
-    <thead><tr>
-      <th>Date</th><th>Entry No.</th><th>Voucher Ref.</th><th>Particulars</th>
-      <th>Fund Account</th><th>Accounts Charged</th>
-      <th style="text-align:right">Amount Paid</th>
-    </tr></thead>
-    <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--text-tertiary)">No disbursements in period</td></tr>'}</tbody>
-    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
-      <td colspan="6">TOTAL</td>
-      <td style="text-align:right;color:var(--red)">${fmt(total)}</td>
-    </tr></tfoot>
+    <thead>
+      <tr>
+        <th rowspan="2">Date</th>
+        <th rowspan="2">Entry No.</th>
+        <th rowspan="2">Voucher Ref.</th>
+        <th rowspan="2">Particulars</th>
+        <th rowspan="2">Fund Account (CR)</th>
+        <th rowspan="2">Account Charged</th>
+        <th colspan="2" style="text-align:center;border-bottom:1px solid var(--border-mid)">Amount</th>
+      </tr>
+      <tr>
+        <th style="text-align:right">Debit (₱)</th>
+        <th style="text-align:right">Credit (₱)</th>
+      </tr>
+    </thead>
+    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No disbursements in period</td></tr>'}</tbody>
+    <tfoot>
+      <tr style="font-weight:700;background:var(--bg-card)">
+        <td colspan="6" style="text-align:right">TOTAL</td>
+        <td style="text-align:right">${fmt(totalDebit)}</td>
+        <td style="text-align:right;color:var(--red)">${fmt(totalCredit)}</td>
+      </tr>
+    </tfoot>
   </table>
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
