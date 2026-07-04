@@ -1608,14 +1608,13 @@ function render() {
 function renderDashboard(c, ta) {
   ta.innerHTML = '';
   const totalRev   = state.invoices.reduce((s,i)=>s+(i.amount||0),0);
-  const totalPur   = (state.purchases||[]).reduce((s,p)=>s+(p.amount||0),0);
+  const totalPur   = (state.purchaseOrders||[]).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   const totalExp   = (state.expenses||[]).reduce((s,e)=>s+(e.amount||0),0);
   const totalCost  = totalPur + totalExp;
   const grossProfit= totalRev - totalPur;
   const netIncome  = totalRev - totalCost;
   const ar = state.invoices.filter(i=>i.status!=='paid').reduce((s,i)=>s+(i.amount||0),0);
-  const ap = (state.purchases||[]).filter(p=>p.status==='pending').reduce((s,p)=>s+(p.amount||0),0)
-           + (state.expenses||[]).filter(e=>e.status==='pending').reduce((s,e)=>s+(e.amount||0),0);
+  const ap = (state.purchaseOrders||[]).filter(p=>p.status==='pending'||p.status==='approved').reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   // ── Real monthly data from actual records ──
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -1635,8 +1634,21 @@ function renderDashboard(c, ta) {
     return totals;
   }
 
+  // Purchase orders — sum line totals by month
+  function sumPOByMonth() {
+    const totals = Array(monthCount).fill(0);
+    (state.purchaseOrders||[]).forEach(po => {
+      const d = po.date||''; if(!d) return;
+      const yr = parseInt(d.slice(0,4)), mo = parseInt(d.slice(5,7))-1;
+      if(yr===currentYear && mo>=0 && mo<monthCount) {
+        totals[mo] += (po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+      }
+    });
+    return totals;
+  }
+
   const revData = sumByMonth(state.invoices.filter(i=>i.status!=='draft'));
-  const purData = sumByMonth(state.purchases||[]);
+  const purData = sumPOByMonth();
   const expData = sumByMonth(state.expenses||[]);
   const colData = sumByMonth(state.collections||[]);
   const maxVal = Math.max(...revData, ...purData.map((p,i)=>p+(expData[i]||0)), 1);
@@ -1705,7 +1717,7 @@ function renderDashboard(c, ta) {
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr)">
   <div class="kpi"><div class="kpi-label"><i class="ti ti-trending-up"></i>Total Revenue</div><div class="kpi-value pos">${fmt(totalRev)}</div><div class="kpi-sub">${state.invoices.length} invoices</div></div>
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-shopping-cart"></i>Cost of Purchases</div><div class="kpi-value neg">${fmt(totalPur)}</div><div class="kpi-sub">${(state.purchases||[]).length} purchase records</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-shopping-cart"></i>Purchase Orders</div><div class="kpi-value neg">${fmt(totalPur)}</div><div class="kpi-sub">${(state.purchaseOrders||[]).length} PO records</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-receipt"></i>Operating Expenses</div><div class="kpi-value neg">${fmt(totalExp)}</div><div class="kpi-sub">${(state.expenses||[]).length} expense entries</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-chart-line"></i>Gross Profit</div><div class="kpi-value ${grossProfit>=0?'pos':'neg'}">${fmtS(grossProfit)}</div><div class="kpi-sub">Margin: ${totalRev>0?(grossProfit/totalRev*100).toFixed(1):0}%</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-coin"></i>Net Income</div><div class="kpi-value ${netIncome>=0?'pos':'neg'}">${fmtS(netIncome)}</div><div class="kpi-sub">After all costs</div></div>
@@ -2770,7 +2782,6 @@ function renderInvoices(c, ta) {
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
       <td><span class="badge ${inv.status}">${inv.status}</span></td>
-      ${lastUpdatedCell(inv)}
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
