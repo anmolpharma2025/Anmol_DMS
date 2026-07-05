@@ -306,6 +306,7 @@
 
     <div id="admin-nav" style="display:none">
       <div class="nav-section">Administration</div>
+      <div class="nav-item" title="Team Chat" data-page="chat"><i class="ti ti-messages"></i><span>Team Chat</span><span id="chat-unread-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:1px 6px;min-width:18px;text-align:center"></span></div>
       <div class="nav-item" title="User Accounts" data-page="users"><i class="ti ti-shield-lock"></i><span>User Accounts</span></div>
       <div class="nav-item" title="Company Profile" data-page="company"><i class="ti ti-building"></i><span>Company Profile</span></div>
     </div>
@@ -929,6 +930,8 @@ function showAppScreen() {
   // Admin-only nav section
   const adminNav = document.getElementById('admin-nav');
   if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? '' : 'none';
+  // Start background chat notification listener
+  setTimeout(startBackgroundChatListener, 3000);
   render();
 }
 
@@ -964,6 +967,7 @@ const ALL_PAGES = [
   { id:'employees',   label:'Employees',             section:'HR & Payroll' },
   { id:'attendance',  label:'Attendance',            section:'HR & Payroll' },
   { id:'payroll',     label:'Payroll',               section:'HR & Payroll' },
+  { id:'chat',        label:'Team Chat',             section:'Administration' },
 ];
 
 // ── ACTION PERMISSIONS ────────────────────────────────────────────────────────
@@ -1578,6 +1582,8 @@ document.querySelectorAll('.nav-item').forEach(el => {
   el.addEventListener('click', () => {
     const page = el.dataset.page;
     if (!canAccess(page)) { alert('You do not have permission to access this page.'); return; }
+    // Stop chat listener if navigating away from chat
+    if(state.page === 'chat' && page !== 'chat') stopChatListener();
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     el.classList.add('active');
     state.page = page;
@@ -1593,8 +1599,67 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('toolbar-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat };
   if(pages[page]) pages[page](c, ta);
+}
+
+function startBackgroundChatListener() {
+  if(!db) return;
+  let firstLoad = true;
+  db.collection(CHAT_COLLECTION)
+    .orderBy('ts', 'desc')
+    .limit(1)
+    .onSnapshot(snap => {
+      if(firstLoad) { firstLoad = false; return; } // skip initial load
+      if(state.page === 'chat') return; // already on chat
+      snap.docChanges().forEach(change => {
+        if(change.type === 'added') {
+          const msg = change.doc.data();
+          if(msg.sender === currentUser?.name) return; // own message
+          // Show badge
+          const badge = document.getElementById('chat-unread-badge');
+          if(badge) {
+            const cur = parseInt(badge.textContent)||0;
+            badge.style.display = '';
+            badge.textContent = cur < 9 ? cur+1 : '9+';
+          }
+          // Show toast notification
+          showChatToast(msg.sender, msg.text);
+        }
+      });
+    });
+}
+
+function showChatToast(sender, text) {
+  // Remove existing toast
+  document.getElementById('chat-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'chat-toast';
+  toast.style.cssText = `position:fixed;bottom:80px;right:20px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;max-width:280px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);cursor:pointer;animation:slideIn 0.3s ease`;
+  toast.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <i class="ti ti-messages" style="color:var(--accent);font-size:14px"></i>
+      <strong style="font-size:12px">${escHtml(sender)}</strong>
+      <span style="font-size:10px;color:var(--text-tertiary);margin-left:auto">Team Chat</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((text||'').slice(0,60))}${(text||'').length>60?'…':''}</div>`;
+  toast.onclick = () => {
+    toast.remove();
+    // Navigate to chat
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    document.querySelector('.nav-item[data-page="chat"]')?.classList.add('active');
+    state.page = 'chat';
+    render();
+  };
+  document.body.appendChild(toast);
+  // Add slide-in animation
+  if(!document.getElementById('chat-toast-style')) {
+    const style = document.createElement('style');
+    style.id = 'chat-toast-style';
+    style.textContent = '@keyframes slideIn{from{opacity:0;transform:translateX(100%)}to{opacity:1;transform:translateX(0)}}';
+    document.head.appendChild(style);
+  }
+  setTimeout(() => toast?.remove(), 5000);
 }
 
 function render() {
@@ -1608,7 +1673,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -10212,6 +10277,148 @@ function empDropdown(id, selectedName='', style='') {
   const opts = `<option value="">— Select employee —</option>` +
     emps.map(e=>`<option value="${e.name}"${e.name===selectedName?' selected':''}>${e.name} (${e.position})</option>`).join('');
   return `<select id="${id}" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);${style}">${opts}</select>`;
+}
+
+// ── TEAM CHAT ─────────────────────────────────────────────────────────────────
+const CHAT_COLLECTION = 'companies/anmol/chat';
+let _chatUnsubscribe = null;
+let _chatLastSeen = 0;
+
+function renderChat(c, ta) {
+  ta.innerHTML = '';
+  _chatLastSeen = Date.now();
+  updateChatBadge(0);
+
+  c.innerHTML = `
+<div style="display:flex;flex-direction:column;height:calc(100vh - 120px);max-width:800px;margin:0 auto">
+  <!-- Header -->
+  <div style="padding:12px 16px;background:var(--bg-card);border-radius:var(--radius-md) var(--radius-md) 0 0;border:1px solid var(--border-mid);border-bottom:none;display:flex;align-items:center;gap:10px">
+    <i class="ti ti-messages" style="font-size:20px;color:var(--accent)"></i>
+    <div>
+      <div style="font-weight:700;font-size:15px">Team Chat</div>
+      <div style="font-size:11px;color:var(--text-tertiary)" id="chat-status">Connecting…</div>
+    </div>
+    <div style="margin-left:auto;font-size:11px;color:var(--text-tertiary)">
+      Messages are visible to all users
+    </div>
+  </div>
+  <!-- Messages area -->
+  <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-secondary);border:1px solid var(--border-mid);display:flex;flex-direction:column;gap:10px">
+    <div style="text-align:center;color:var(--text-tertiary);font-size:12px;padding:20px">Loading messages…</div>
+  </div>
+  <!-- Input area -->
+  <div style="padding:12px;background:var(--bg-card);border-radius:0 0 var(--radius-md) var(--radius-md);border:1px solid var(--border-mid);border-top:none;display:flex;gap:8px">
+    <input type="text" id="chat-input" placeholder="Type a message… (Enter to send)"
+      style="flex:1;padding:10px 14px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg()}"
+      maxlength="1000">
+    <button class="btn primary" onclick="sendChatMsg()" style="padding:10px 18px;font-size:13px">
+      <i class="ti ti-send"></i> Send
+    </button>
+  </div>
+</div>`;
+
+  startChatListener();
+  setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
+}
+
+function startChatListener() {
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe=null; }
+  if(!db) {
+    document.getElementById('chat-status').textContent = 'Offline — Firebase not connected';
+    document.getElementById('chat-messages').innerHTML = `<div style="text-align:center;color:var(--amber);font-size:13px;padding:32px"><i class="ti ti-wifi-off" style="display:block;font-size:32px;margin-bottom:8px"></i>Firebase required for real-time chat.<br>Connect to Firebase to use Team Chat.</div>`;
+    return;
+  }
+  try {
+    _chatUnsubscribe = db.collection(CHAT_COLLECTION)
+      .orderBy('ts', 'asc')
+      .limitToLast(100)
+      .onSnapshot(snap => {
+        const statusEl = document.getElementById('chat-status');
+        if(statusEl) statusEl.textContent = `${snap.docs.length} messages · Live`;
+        renderChatMessages(snap.docs.map(d=>({id:d.id, ...d.data()})));
+      }, err => {
+        const statusEl = document.getElementById('chat-status');
+        if(statusEl) statusEl.textContent = 'Connection error';
+        console.error('Chat error:', err);
+      });
+  } catch(e) { console.error('Chat listener error:', e); }
+}
+
+function renderChatMessages(msgs) {
+  const box = document.getElementById('chat-messages');
+  if(!box) return;
+  if(!msgs.length) {
+    box.innerHTML = `<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:32px"><i class="ti ti-message-circle" style="display:block;font-size:40px;margin-bottom:8px;opacity:0.4"></i>No messages yet.<br>Say hello! 👋</div>`;
+    return;
+  }
+  const me = currentUser?.name || 'Me';
+  let lastDate = '';
+  box.innerHTML = msgs.map(m => {
+    const isMe = m.sender === me;
+    const ts = m.ts?.toDate ? m.ts.toDate() : new Date(m.ts||0);
+    const timeStr = ts.toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'});
+    const dateStr = ts.toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'});
+    let dateDivider = '';
+    if(dateStr !== lastDate) {
+      dateDivider = `<div style="text-align:center;margin:8px 0;font-size:11px;color:var(--text-tertiary)"><span style="background:var(--bg-secondary);padding:2px 10px;border-radius:99px;border:1px solid var(--border-light)">${dateStr}</span></div>`;
+      lastDate = dateStr;
+    }
+    const initials = (m.sender||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const hue = [...(m.sender||'')].reduce((h,c)=>h+c.charCodeAt(0),0) % 360;
+    return `${dateDivider}
+<div style="display:flex;gap:8px;align-items:flex-end;${isMe?'flex-direction:row-reverse':''};margin-bottom:2px">
+  <div style="width:30px;height:30px;border-radius:50%;background:hsl(${hue},60%,40%);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
+  <div style="max-width:65%;${isMe?'align-items:flex-end':'align-items:flex-start'};display:flex;flex-direction:column;gap:2px">
+    ${!isMe?`<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:1px">${m.sender||'Unknown'}${m.role?` · <em>${m.role}</em>`:''}</div>`:''}
+    <div style="padding:9px 13px;border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isMe?'var(--accent)':'var(--bg-card)'};color:${isMe?'#fff':'var(--text-primary)'};font-size:13px;line-height:1.5;word-break:break-word;border:${isMe?'none':'1px solid var(--border-light)'}">
+      ${escHtml(m.text||'')}
+    </div>
+    <div style="font-size:10px;color:var(--text-tertiary)">${timeStr}${isMe?'':''}</div>
+  </div>
+</div>`;
+  }).join('');
+  // Scroll to bottom
+  box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+}
+
+function sendChatMsg() {
+  const inp = document.getElementById('chat-input');
+  const text = inp?.value.trim();
+  if(!text) return;
+  if(!db) { alert('Firebase not connected. Cannot send messages.'); return; }
+  inp.value = '';
+  inp.disabled = true;
+
+  db.collection(CHAT_COLLECTION).add({
+    text,
+    sender: currentUser?.name || 'Unknown',
+    role: currentUser?.role || '',
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{
+    inp.disabled = false;
+    inp.focus();
+  }).catch(err=>{
+    inp.disabled = false;
+    alert('Failed to send: ' + err.message);
+    inp.value = text; // restore
+  });
+}
+
+function updateChatBadge(count) {
+  const badge = document.getElementById('chat-unread-badge');
+  if(!badge) return;
+  if(count > 0) { badge.style.display=''; badge.textContent = count > 9 ? '9+' : count; }
+  else badge.style.display = 'none';
+}
+
+// Stop chat listener when navigating away
+function stopChatListener() {
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
 }
 
 // ── EMPLOYEES ─────────────────────────────────────────────────────────────────
