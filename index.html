@@ -374,15 +374,17 @@
     <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:20px;padding:4px;line-height:1">×</button>
   </div>
   <!-- Quick prompts -->
-  <div id="ai-quick" style="padding:12px 14px;border-bottom:1px solid var(--border-light)">
-    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:8px">Quick questions</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      <button class="ai-chip" onclick="aiAsk('Summarize this month financial performance')">📊 Monthly summary</button>
-      <button class="ai-chip" onclick="aiAsk('Which customers have outstanding balances?')">💰 Outstanding balances</button>
-      <button class="ai-chip" onclick="aiAsk('What are the top expenses this month?')">📋 Top expenses</button>
-      <button class="ai-chip" onclick="aiAsk('Are there any low stock items that need reordering?')">📦 Low stock alert</button>
-      <button class="ai-chip" onclick="aiAsk('Show me a summary of pending invoices')">🧾 Pending invoices</button>
-      <button class="ai-chip" onclick="aiAsk('What is the total sales revenue vs expenses?')">📈 P&L overview</button>
+  <div id="ai-quick" style="padding:10px 14px;border-bottom:1px solid var(--border-light)">
+    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-bottom:7px">Quick questions</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">
+      <button class="ai-chip" onclick="aiAsk('Give me a full financial summary for this month including revenue, collections, expenses and net income.')">📊 Monthly summary</button>
+      <button class="ai-chip" onclick="aiAsk('Which customers have outstanding balances? List them with amounts and how long they are overdue.')">💰 Who owes us?</button>
+      <button class="ai-chip" onclick="aiAsk('What items are low in stock or out of stock? Should I reorder anything?')">📦 Stock alerts</button>
+      <button class="ai-chip" onclick="aiAsk('What purchase orders are pending approval or waiting to be received?')">🚚 Pending POs</button>
+      <button class="ai-chip" onclick="aiAsk('Give me a profit and loss overview — revenue vs expenses vs net income.')">📈 P&amp;L overview</button>
+      <button class="ai-chip" onclick="aiAsk('Which invoices are overdue and what should I do to collect them?')">⚠️ Overdue invoices</button>
+      <button class="ai-chip" onclick="aiAsk('What BIR taxes do I need to prepare this month? (VAT, withholding tax, income tax)')">🏛️ BIR taxes due</button>
+      <button class="ai-chip" onclick="aiAsk('Analyze my cash flow — how much came in vs went out this month?')">💸 Cash flow</button>
     </div>
   </div>
   <!-- Messages -->
@@ -390,7 +392,7 @@
     <div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
       <i class="ti ti-sparkles" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
       <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">Hi! I'm Claude, your AI accounting assistant.</div>
-      <div style="font-size:12px;line-height:1.5">I have access to your company's financial data. Ask me anything about your invoices, expenses, inventory, payroll, or accounting.</div>
+      <div style="font-size:12px;line-height:1.6;color:var(--text-tertiary)">I have real-time access to your invoices, POs, inventory, collections, payroll, and more.<br>Ask me anything — in English or Filipino!</div>
     </div>
   </div>
   <!-- Input -->
@@ -9863,212 +9865,151 @@ function saveAIKey() {
   document.getElementById('ai-input')?.focus();
 }
 
+
 function buildAIContext() {
   try {
     const cp = getCompanyProfile();
     const inv = state.invoices || [];
     const exp = state.expenses || [];
-    const pur = state.purchases || [];
     const col = state.collections || [];
     const pay = state.payrolls || [];
     const items = state.inventory || [];
-    const so = state.salesOrders || [];
-    const po = state.purchaseOrders || [];
+    const so   = state.salesOrders || [];
+    const po   = state.purchaseOrders || [];
+    const jrnl = state.journal || [];
+    const custs= state.customers || [];
+    const sups = state.suppliers || [];
+    const emps = state.employees || [];
     const today_str = today();
     const thisMonth = today_str.slice(0, 7);
+    const thisYear  = today_str.slice(0, 4);
 
-    const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+    // Financials
+    const totalRevenue   = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
     const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
-    const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
-    const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
-    const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
-    const lowStock = items.filter(it=>(it.qty||0)<=(it.reorderLevel||5));
-    const monthRevenue = inv.filter(i=>(i.date||'').startsWith(thisMonth)).reduce((s,i)=>s+(i.amount||0),0);
-    const monthExp = exp.filter(e=>(e.date||'').startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
+    const totalPOValue   = po.reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+    const totalExpenses  = exp.reduce((s,e)=>s+(e.amount||0),0);
+    const pendingInvoices= inv.filter(i=>i.status==='pending'||i.status==='overdue');
+    const pendingAR      = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
+    const overdueInvoices= inv.filter(i=>i.due && i.due < today_str && i.status!=='paid');
+    const lowStock       = items.filter(it=>(it.qty||0)<=(it.reorderLevel||5));
+    const outOfStock     = items.filter(it=>(it.qty||0)===0);
+    const monthRevenue   = inv.filter(i=>(i.date||'').startsWith(thisMonth)&&i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+    const monthExp       = exp.filter(e=>(e.date||'').startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
+    const monthCollected = col.filter(c=>(c.date||'').startsWith(thisMonth)).reduce((s,c)=>s+(c.amount||0),0);
+    const netProfit      = monthRevenue - monthExp;
 
-    return `You are an AI accounting assistant for ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}. Answer questions about their financial data concisely. Use Philippine Peso (₱).
+    // Journal summary
+    const approvedJournal = jrnl.filter(j=>j.approved&&!j.cancelled);
+    const disbursements = jrnl.filter(j=>j.type==='disbursement'&&!j.cancelled);
+    const totalDisburse = [...new Set(disbursements.map(j=>j.group||j.id))].length;
 
-COMPANY: ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}
-TODAY: ${today_str}
-Total Revenue: ₱${totalRevenue.toLocaleString()}
-Total Collected: ₱${totalCollected.toLocaleString()}
-Accounts Receivable: ₱${pendingAR.toLocaleString()} (${pendingInvoices.length} invoices)
-Total Expenses: ₱${totalExpenses.toLocaleString()}
-This month revenue: ₱${monthRevenue.toLocaleString()}
-This month expenses: ₱${monthExp.toLocaleString()}
-Net this month: ₱${(monthRevenue-monthExp).toLocaleString()}
-Invoices: ${inv.length} total (${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue)
-Sales Orders: ${so.length} total
-Purchase Orders: ${po.length} total
-Inventory: ${items.length} SKUs, ${lowStock.length} low stock
-Payroll runs: ${pay.length}
-Employees: ${(state.employees||[]).filter(e=>e.status==='active').length} active`;
+    // Top customers by AR
+    const custAR = {};
+    pendingInvoices.forEach(i=>{ custAR[i.customer]=(custAR[i.customer]||0)+(i.amount||0); });
+    const topDebtors = Object.entries(custAR).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+    // Recent invoices
+    const recentInv = [...inv].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,8);
+
+    // Fixed assets
+    const assets = state.fixedAssets || [];
+    const totalAssetCost = assets.reduce((s,a)=>s+(a.cost||0),0);
+
+    return `You are an expert accounting and business assistant embedded inside the accounting system of **${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}**. You have real-time access to all their financial data below. Be specific with numbers, name actual customers/suppliers when relevant, and give actionable advice. Always use Philippine Peso (₱). Today is ${today_str}.
+
+═══ COMPANY ═══
+Name: ${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}
+TIN: ${cp.tin||'N/A'}
+Address: ${cp.address||'N/A'}
+Industry: Pharmaceutical Distribution
+
+═══ THIS MONTH (${thisMonth}) ═══
+Revenue: ₱${fmt(monthRevenue)}
+Collections received: ₱${fmt(monthCollected)}
+Expenses: ₱${fmt(monthExp)}
+Net Income: ₱${fmt(netProfit)} ${netProfit>=0?'✅':'⚠️'}
+
+═══ OVERALL FINANCIALS ═══
+Total Revenue (all invoices): ₱${fmt(totalRevenue)}
+Total Collected: ₱${fmt(totalCollected)}
+Uncollected AR: ₱${fmt(pendingAR)} (${pendingInvoices.length} invoices)
+Overdue invoices: ${overdueInvoices.length} — ₱${fmt(overdueInvoices.reduce((s,i)=>s+(i.amount||0),0))}
+Total Purchase Orders: ₱${fmt(totalPOValue)}
+Total Expenses logged: ₱${fmt(totalExpenses)}
+
+═══ INVOICES (${inv.length} total) ═══
+Paid: ${inv.filter(i=>i.status==='paid').length}
+Pending: ${inv.filter(i=>i.status==='pending').length}
+Overdue: ${overdueInvoices.length}
+Draft: ${inv.filter(i=>i.status==='draft').length}
+Recent invoices: ${recentInv.map(i=>`${i.id}|${i.customer}|₱${fmt(i.amount||0)}|${i.status}|due:${i.due||'—'}`).join('; ')}
+
+═══ TOP DEBTORS (by outstanding AR) ═══
+${topDebtors.length?topDebtors.map(([n,a])=>`${n}: ₱${fmt(a)}`).join('\n'):'None'}
+
+═══ SALES ORDERS (${so.length} total) ═══
+Pending: ${so.filter(s=>s.status==='pending').length}
+Approved: ${so.filter(s=>s.status==='approved').length}
+Delivered: ${so.filter(s=>s.status==='delivered').length}
+Recent SOs: ${so.slice(-5).map(s=>`${s.id}|${s.customer}|${s.status}`).join('; ')}
+
+═══ PURCHASE ORDERS (${po.length} total) ═══
+Pending: ${po.filter(p=>p.status==='pending').length}
+Approved: ${po.filter(p=>p.status==='approved').length}
+Received: ${po.filter(p=>p.status==='received').length}
+Recent POs: ${po.slice(-5).map(p=>`${p.id}|${p.supplier}|${p.status}`).join('; ')}
+
+═══ INVENTORY (${items.length} SKUs) ═══
+Low stock: ${lowStock.length} items — ${lowStock.slice(0,5).map(i=>`${i.name}(${i.qty}${i.unit})`).join(', ')||'None'}
+Out of stock: ${outOfStock.length} — ${outOfStock.slice(0,5).map(i=>i.name).join(', ')||'None'}
+Total inventory value: ₱${fmt(items.reduce((s,i)=>s+(i.qty||0)*(i.costPrice||0),0))}
+
+═══ JOURNAL ═══
+Total entries: ${[...new Set(jrnl.map(j=>j.group||j.id))].length}
+Disbursement vouchers: ${totalDisburse}
+Approved entries: ${[...new Set(approvedJournal.map(j=>j.group||j.id))].length}
+
+═══ CUSTOMERS (${custs.length}) ═══
+${custs.slice(0,10).map(c=>`${c.name}${c.tin?' TIN:'+c.tin:''}${c.branch?' ['+c.branch+']':''}`).join(', ')}
+
+═══ SUPPLIERS (${sups.length}) ═══
+${sups.slice(0,8).map(s=>s.name).join(', ')}
+
+═══ EMPLOYEES (${emps.filter(e=>e.status==='active').length} active) ═══
+Departments: ${[...new Set(emps.map(e=>e.department).filter(Boolean))].join(', ')||'N/A'}
+Total monthly basic payroll: ₱${fmt(emps.filter(e=>e.status==='active').reduce((s,e)=>s+(e.basicSalary||0),0))}
+
+═══ FIXED ASSETS (${assets.length}) ═══
+Total cost: ₱${fmt(totalAssetCost)}
+${assets.slice(0,5).map(a=>`${a.name}(₱${fmt(a.cost)})`).join(', ')||'None'}
+
+Answer all questions based on this data. If asked for advice, give practical Philippines-context business and accounting advice. For BIR-related questions, reference Philippine tax regulations.`;
   } catch(e) {
-    return `You are an AI accounting assistant for ANMOL PHARMACEUTICALS US CORP. Answer accounting questions helpfully. Use Philippine Peso (₱).`;
+    return `You are an AI accounting assistant for ANMOL PHARMACEUTICALS US CORP. Answer accounting and business questions helpfully. Use Philippine Peso (₱).`;
   }
 }
 
 function aiAddMessage(role, content) {
   const container = document.getElementById('ai-messages');
   if(!container) return;
-  if(aiMessages.length === 1 && role === 'user') container.innerHTML = '';
-  const div = document.createElement('div');
-  div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
-  div.innerHTML = content
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-}
-
-function aiShowThinking() {
-  const container = document.getElementById('ai-messages');
-  if(!container) return;
-  const div = document.createElement('div');
-  div.className = 'ai-thinking'; div.id = 'ai-thinking';
-  div.innerHTML = '<span></span><span></span><span></span>';
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-}
-
-function aiHideThinking() { document.getElementById('ai-thinking')?.remove(); }
-
-async function aiSend() {
-  const input = document.getElementById('ai-input');
-  const msg = input?.value.trim();
-  if(!msg) return;
-  input.value = '';
-  await aiAsk(msg);
-}
-
-async function aiAsk(question) {
-  const panel = document.getElementById('ai-panel');
-  if(panel.style.display !== 'flex') panel.style.display = 'flex';
-
-  const apiKey = getAIKey();
-  if(!apiKey) { showAIKeySetup(); return; }
-
-  aiAddMessage('user', question);
-  aiMessages.push({ role: 'user', content: question });
-  aiShowThinking();
-
-  const sendBtn = document.getElementById('ai-send-btn');
-  if(sendBtn) sendBtn.disabled = true;
-
-  try {
-    const body = JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1000,
-      system: buildAIContext(),
-      messages: aiMessages.slice(-10)
-    });
-
-    const headers = {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    };
-
-    const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
-
-    const response = await fetch(WORKER_URL, { method: 'POST', headers, body });
-    const text = await response.text();
-    console.log('Worker response status:', response.status, 'body:', text.slice(0, 200));
-
-    let data;
-    try { data = JSON.parse(text); } catch(e) { throw new Error('Invalid response from server: ' + text.slice(0, 100)); }
-
-    if(!response.ok) {
-      const msg = data?.error?.message || `Server error ${response.status}`;
-      if(response.status === 401) throw new Error('Invalid API key — click the 🔑 icon to update it.');
-      throw new Error(msg);
-    }
-
-    const reply = data.content?.[0]?.text || 'No response received.';
-    aiHideThinking();
-    aiMessages.push({ role: 'assistant', content: reply });
-    aiAddMessage('assistant', reply);
-
-  } catch(err) {
-    aiHideThinking();
-    console.error('Claude AI error:', err);
-    const errMsg = err.message || 'Unknown error';
-    aiMessages.push({ role: 'assistant', content: '⚠️ ' + errMsg });
-    aiAddMessage('assistant', '⚠️ ' + errMsg);
-  } finally {
-    if(sendBtn) sendBtn.disabled = false;
-    document.getElementById('ai-input')?.focus();
-  }
-}
-
-function buildAIContext() {
-  // Build a concise financial snapshot to send as context
-  const cp = getCompanyProfile();
-  const inv = state.invoices || [];
-  const exp = state.expenses || [];
-  const pur = state.purchases || [];
-  const col = state.collections || [];
-  const pay = state.payrolls || [];
-  const items = state.inventory || [];
-  const so = state.salesOrders || [];
-  const po = state.purchaseOrders || [];
-  const today_str = today();
-  const thisMonth = today_str.slice(0, 7);
-
-  const totalRevenue = inv.filter(i=>i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
-  const totalCollected = col.reduce((s,c)=>s+(c.amount||0),0);
-  const totalExpenses = exp.reduce((s,e)=>s+(e.amount||0),0);
-  const totalPurchases = pur.reduce((s,p)=>s+(p.amount||0),0);
-  const pendingInvoices = inv.filter(i=>i.status==='pending'||i.status==='overdue');
-  const pendingAR = pendingInvoices.reduce((s,i)=>s+(i.amount||0),0);
-  const lowStock = items.filter(it=>it.qty<=it.reorderLevel);
-  const outOfStock = items.filter(it=>it.qty===0);
-  const monthInvoices = inv.filter(i=>i.date?.startsWith(thisMonth));
-  const monthRevenue = monthInvoices.reduce((s,i)=>s+(i.amount||0),0);
-  const monthExp = exp.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0);
-
-  return `You are an AI accounting assistant embedded in ${cp.name || 'ANMOL PHARMACEUTICALS US CORP.'}'s accounting system. You have access to their live financial data. Be concise, helpful, and specific with numbers. Use Philippine Peso (₱) for amounts.
-
-COMPANY: ${cp.name || 'ANMOL PHARMACEUTICALS US CORP.'}
-DATE TODAY: ${today_str}
-
-FINANCIAL SNAPSHOT:
-- Total Revenue (all time): ₱${totalRevenue.toLocaleString()}
-- Total Collected: ₱${totalCollected.toLocaleString()}
-- Accounts Receivable (pending): ₱${pendingAR.toLocaleString()} across ${pendingInvoices.length} invoices
-- Total Expenses: ₱${totalExpenses.toLocaleString()}
-- Total Purchases (COS): ₱${totalPurchases.toLocaleString()}
-- This month revenue: ₱${monthRevenue.toLocaleString()}
-- This month expenses: ₱${monthExp.toLocaleString()}
-- Net this month: ₱${(monthRevenue - monthExp).toLocaleString()}
-
-INVOICES: ${inv.length} total — ${inv.filter(i=>i.status==='pending').length} pending, ${inv.filter(i=>i.status==='paid').length} paid, ${inv.filter(i=>i.status==='overdue').length} overdue
-TOP PENDING INVOICES: ${pendingInvoices.slice(0,5).map(i=>`${i.id} (${i.customer}): ₱${(i.amount||0).toLocaleString()}`).join(', ')||'None'}
-
-SALES ORDERS: ${so.length} total — ${so.filter(s=>s.status==='pending').length} pending, ${so.filter(s=>s.status==='approved').length} approved, ${so.filter(s=>s.status==='dispatched').length} dispatched
-PURCHASE ORDERS: ${po.length} total — ${po.filter(p=>p.status==='pending').length} pending, ${po.filter(p=>p.status==='approved').length} approved
-
-INVENTORY: ${items.length} SKUs
-- Low stock items (${lowStock.length}): ${lowStock.slice(0,5).map(i=>`${i.name} (${i.qty} ${i.unit})`).join(', ')||'None'}
-- Out of stock (${outOfStock.length}): ${outOfStock.slice(0,5).map(i=>i.name).join(', ')||'None'}
-
-PAYROLL: ${pay.length} payroll runs — ${pay.filter(p=>p.status==='released').length} released, ${pay.filter(p=>p.status==='pending').length} pending
-EMPLOYEES: ${(state.employees||[]).filter(e=>e.status==='active').length} active
-
-Answer questions about this data helpfully and concisely.`;
-}
-
-function aiAddMessage(role, content) {
-  const container = document.getElementById('ai-messages');
-  if(!container) return;
-  // Remove welcome message on first real message
   if(aiMessages.length === 0) container.innerHTML = '';
   const div = document.createElement('div');
   div.className = role === 'user' ? 'ai-msg-user' : 'ai-msg-ai';
-  // Format markdown-ish: bold, line breaks
-  div.innerHTML = content
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
+  // Render markdown: headers, bold, italic, bullet lists, code, line breaks
+  let html = content
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*\*(.*?)\*\*\*/g,'<strong><em>$1</em></strong>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g,'<em>$1</em>')
+    .replace(/`([^`]+)`/g,'<code style="background:var(--bg-secondary);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:12px">$1</code>')
+    .replace(/^### (.+)$/gm,'<div style="font-weight:700;font-size:13px;margin:10px 0 4px;color:var(--accent)">$1</div>')
+    .replace(/^## (.+)$/gm,'<div style="font-weight:700;font-size:14px;margin:12px 0 5px">$1</div>')
+    .replace(/^# (.+)$/gm,'<div style="font-weight:700;font-size:15px;margin:12px 0 6px">$1</div>')
+    .replace(/^[-•]\s+(.+)$/gm,'<div style="padding:2px 0 2px 14px;position:relative"><span style="position:absolute;left:2px">•</span>$1</div>')
+    .replace(/^\d+\.\s+(.+)$/gm,'<div style="padding:2px 0 2px 16px">$&</div>')
+    .replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
+  div.innerHTML = html;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -10110,19 +10051,35 @@ async function aiAsk(question) {
 
   try {
     const systemPrompt = buildAIContext();
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
+    const apiKey = getAIKey();
+
+    const response = await fetch(WORKER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
+        max_tokens: 1500,
         system: systemPrompt,
-        messages: aiMessages.slice(-10)
+        messages: aiMessages.slice(-12)
       })
     });
 
-    const data = await response.json();
-    const reply = data.content?.[0]?.text || 'Sorry, I could not get a response. Please try again.';
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch(e) { throw new Error('Invalid response: ' + text.slice(0,100)); }
+
+    if(!response.ok) {
+      if(response.status===401) throw new Error('Invalid API key — click 🔑 to update.');
+      if(response.status===429) throw new Error('Rate limit reached. Please wait a moment and try again.');
+      throw new Error(data?.error?.message || `Error ${response.status}`);
+    }
+
+    const reply = data.content?.[0]?.text || 'No response received.';
 
     aiHideThinking();
     aiMessages.push({ role: 'assistant', content: reply });
