@@ -10264,11 +10264,15 @@ function renderChat(c, ta) {
         users.map(u => {
           const initials = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
           const hue = [...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
+          const unread = getDMUnread(u.name);
           return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}')"
-            style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;color:var(--text-primary)" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':''">
-            <div style="width:24px;height:24px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.name}</span>
-            <span id="dm-unread-${u.name.replace(/\s+/g,'_')}" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:9px;font-weight:700;padding:1px 5px"></span>
+            style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;color:var(--text-primary);${unread>0?'background:var(--accent-bg);':''}position:relative" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':${unread>0?'\'var(--accent-bg)\'':'\'\''}">
+            <div style="position:relative">
+              <div style="width:24px;height:24px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
+              ${unread>0?`<div style="position:absolute;top:-4px;right:-4px;width:8px;height:8px;border-radius:50%;background:var(--red);border:1.5px solid var(--bg-secondary)"></div>`:''}
+            </div>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${unread>0?'600':'400'}">${u.name}</span>
+            <span id="dm-unread-${u.name.replace(/\s+/g,'_')}" style="display:${unread>0?'':'none'};margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:9px;font-weight:700;padding:1px 5px;min-width:16px;text-align:center">${unread>0?unread:''}</span>
           </div>`;
         }).join('')}
     </div>
@@ -10332,10 +10336,31 @@ function switchChatChannel(mode, recipient) {
     // Clear DM unread badge for this user
     const dmBadge = document.getElementById(`dm-unread-${key}`);
     if(dmBadge) dmBadge.style.display = 'none';
+    clearDMUnread(recipient);
   }
   startChatListener();
   setTimeout(()=>document.getElementById('chat-input')?.focus(), 50);
 }
+
+// ── DM UNREAD TRACKING ───────────────────────────────────────────────────────
+const _dmUnread = {}; // { senderName: count }
+
+function getDMUnread(name) { return _dmUnread[name] || 0; }
+function setDMUnread(name, count) {
+  if(count <= 0) delete _dmUnread[name];
+  else _dmUnread[name] = count;
+  // Update badge in sidebar if visible
+  const key = name.replace(/\s+/g,'_');
+  const badge = document.getElementById(`dm-unread-${key}`);
+  if(badge) {
+    if(count > 0) { badge.style.display=''; badge.textContent = count > 9 ? '9+' : count; }
+    else badge.style.display = 'none';
+  }
+  // Update nav badge with total unread
+  const total = Object.values(_dmUnread).reduce((s,n)=>s+n,0);
+  updateChatBadge(total);
+}
+function clearDMUnread(name) { setDMUnread(name, 0); }
 
 function getDMChannelId(a, b) {
   // Deterministic channel ID for two users (sorted alphabetically)
@@ -10481,10 +10506,8 @@ function startBackgroundChatListener() {
             const msg = change.doc.data();
             if(msg.sender===currentUser?.name) return;
             if(state.page==='chat'&&_chatRecipient===msg.sender) return;
-            // Show DM badge on sidebar
-            const key = msg.sender.replace(/\s+/g,'_');
-            const navBadge = document.getElementById('chat-unread-badge');
-            if(navBadge&&state.page!=='chat') { navBadge.style.display=''; navBadge.textContent=parseInt(navBadge.textContent||0)<9?(parseInt(navBadge.textContent||0)+1):'9+'; }
+            // Increment DM unread count (updates sidebar badge + nav badge)
+            setDMUnread(msg.sender, getDMUnread(msg.sender) + 1);
             showChatToast(msg.sender, msg.text, 'dm');
           }
         });
