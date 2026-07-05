@@ -370,7 +370,6 @@
         <div style="font-size:11px;color:var(--text-tertiary)">Powered by Anthropic</div>
       </div>
     </div>
-    <button onclick="localStorage.removeItem('anmolpharma_ai_key');aiMessages=[];showAIKeySetup()" title="Change API key" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:14px;padding:4px"><i class="ti ti-key"></i></button>
     <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:20px;padding:4px;line-height:1">×</button>
   </div>
   <!-- Quick prompts -->
@@ -407,7 +406,7 @@
         <i class="ti ti-send"></i>
       </button>
     </div>
-    <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;text-align:center">Claude AI · <span onclick="testAIConnection()" style="cursor:pointer;color:#8b5cf6;text-decoration:underline">Test connection</span></div>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:6px;text-align:center">Claude AI · Powered by Anthropic</div>
   </div>
 </div>
 
@@ -9785,86 +9784,21 @@ const LOGO_KEY = 'anmolpharma_logo';
 // ── CLAUDE AI ASSISTANT ───────────────────────────────────────────────────────
 let aiMessages = []; // conversation history
 
-function getAIKey() {
-  return localStorage.getItem('anmolpharma_ai_key') || '';
-}
+function getAIKey() { return 'worker'; }
 
 function toggleAIPanel() {
   const panel = document.getElementById('ai-panel');
   const isOpen = panel.style.display === 'flex';
   panel.style.display = isOpen ? 'none' : 'flex';
   if(!isOpen) {
-    if(!getAIKey()) {
-      showAIKeySetup();
-    } else {
-      // Show quick prompts, hide setup
-      const quick = document.getElementById('ai-quick');
-      if(quick) quick.style.display = '';
-      setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
-    }
+    const quick = document.getElementById('ai-quick');
+    if(quick) quick.style.display = '';
+    setTimeout(() => document.getElementById('ai-input')?.focus(), 100);
   }
 }
 
-function showAIKeySetup() {
-  const quick = document.getElementById('ai-quick');
-  if(quick) quick.style.display = 'none';
-  const msgs = document.getElementById('ai-messages');
-  if(!msgs) return;
-  const existing = getAIKey();
-  msgs.innerHTML = `
-<div style="padding:16px">
-  <div style="text-align:center;margin-bottom:16px">
-    <i class="ti ti-key" style="font-size:32px;color:#8b5cf6;display:block;margin-bottom:8px"></i>
-    <div style="font-weight:600;font-size:14px;margin-bottom:6px">${existing?'Update API Key':'API Key Required'}</div>
-    <div style="font-size:12px;color:var(--text-secondary);line-height:1.6">
-      Get a free key at <a href="https://console.anthropic.com" target="_blank" style="color:#8b5cf6;font-weight:500">console.anthropic.com</a><br>
-      Sign up → API Keys → Create Key → Copy &amp; paste below
-    </div>
-  </div>
-  <div style="margin-bottom:10px">
-    <label style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;display:block">Anthropic API Key</label>
-    <input type="password" id="ai-key-input" placeholder="sk-ant-api03-..." value="${existing||''}"
-      style="width:100%;padding:9px 12px;border:1px solid #8b5cf6;border-radius:8px;background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:monospace;box-sizing:border-box;outline:none">
-  </div>
-  <button onclick="saveAIKey()" style="width:100%;padding:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--font);margin-bottom:8px">
-    ${existing?'Update Key':'Save &amp; Start Chatting'}
-  </button>
-  ${existing?`<button onclick="cancelAIKeySetup()" style="width:100%;padding:8px;background:transparent;color:var(--text-secondary);border:1px solid var(--border-mid);border-radius:8px;cursor:pointer;font-size:13px;font-family:var(--font)">Cancel</button>`:''}
-  <div style="font-size:10px;color:var(--text-tertiary);margin-top:8px;text-align:center">🔒 Key stored on this device only</div>
-</div>`;
-  setTimeout(()=>{ const el=document.getElementById('ai-key-input'); if(el){el.focus();if(existing)el.select();} },100);
-}
-
-function cancelAIKeySetup() {
-  const quick = document.getElementById('ai-quick');
-  if(quick) quick.style.display = '';
-  const msgs = document.getElementById('ai-messages');
-  if(msgs && aiMessages.length===0) msgs.innerHTML = `
-<div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
-  <i class="ti ti-sparkles" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
-  <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">Hi! I'm Claude, your AI accounting assistant.</div>
-  <div style="font-size:12px;line-height:1.5">Ask me anything about your invoices, expenses, inventory, payroll, or accounting.</div>
-</div>`;
-  document.getElementById('ai-input')?.focus();
-}
-
-function saveAIKey() {
-  const key = document.getElementById('ai-key-input')?.value.trim();
-  if(!key || !key.startsWith('sk-')) { alert('Please enter a valid Anthropic API key (starts with sk-)'); return; }
-  localStorage.setItem('anmolpharma_ai_key', key);
-  const quick = document.getElementById('ai-quick');
-  if(quick) quick.style.display = '';
-  const msgs = document.getElementById('ai-messages');
-  if(msgs) msgs.innerHTML = `
-<div style="text-align:center;padding:24px 16px;color:var(--text-tertiary)">
-  <i class="ti ti-circle-check" style="font-size:32px;display:block;margin-bottom:10px;color:#8b5cf6"></i>
-  <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text-secondary)">API key saved! Ready to help.</div>
-  <div style="font-size:12px;line-height:1.5">Try one of the quick questions above, or type your own below.</div>
-</div>`;
-  aiMessages = [];
-  document.getElementById('ai-input')?.focus();
-}
-
+function showAIKeySetup() { return; } // no longer needed
+function saveAIKey() { return; } // no longer needed
 
 function buildAIContext() {
   try {
@@ -10051,39 +9985,39 @@ async function aiAsk(question) {
 
   try {
     const systemPrompt = buildAIContext();
-    const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
-    const apiKey = getAIKey();
+    const apiKey = getAIKey(); // not sent — Worker handles auth
 
-    const response = await fetch(WORKER_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1500,
-        system: systemPrompt,
-        messages: aiMessages.slice(-12)
-      })
-    });
+    let response;
+    try {
+      response = await fetch('https://lucky-wood-fa33.anmolpharma2025.workers.dev/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1500,
+          system: systemPrompt,
+          messages: aiMessages.slice(-12)
+        })
+      });
+    } catch(fetchErr) {
+      throw new Error('Network error — check your internet connection. (' + fetchErr.message + ')');
+    }
 
     const text = await response.text();
     let data;
-    try { data = JSON.parse(text); } catch(e) { throw new Error('Invalid response: ' + text.slice(0,100)); }
+    try { data = JSON.parse(text); } catch(e) { throw new Error('Unexpected response: ' + text.slice(0,200)); }
 
     if(!response.ok) {
-      if(response.status===401) throw new Error('Invalid API key — click 🔑 to update.');
-      if(response.status===429) throw new Error('Rate limit reached. Please wait a moment and try again.');
-      throw new Error(data?.error?.message || `Error ${response.status}`);
+      if(response.status===401) { localStorage.removeItem('anmolpharma_ai_key'); throw new Error('Invalid API key. Click Ask AI again to enter a new key.'); }
+      if(response.status===429) throw new Error('Rate limit reached. Wait a moment and try again.');
+      throw new Error(data?.error?.message || 'Error ' + response.status);
     }
 
     const reply = data.content?.[0]?.text || 'No response received.';
-
     aiHideThinking();
     aiMessages.push({ role: 'assistant', content: reply });
     aiAddMessage('assistant', reply);
+
 
   } catch(err) {
     aiHideThinking();
@@ -10097,12 +10031,11 @@ async function aiAsk(question) {
   }
 }
 async function testAIConnection() {
-  const apiKey = getAIKey();
   if(!apiKey) { alert('No API key saved. Click 🔑 to add one.'); return; }
   try {
     const r = await fetch('https://lucky-wood-fa33.anmolpharma2025.workers.dev/', {
       method: 'POST',
-      headers: { 'Content-Type':'application/json', 'x-api-key': apiKey, 'anthropic-version':'2023-06-01' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model:'claude-haiku-4-5-20251001', max_tokens:50, messages:[{role:'user',content:'Say OK'}] })
     });
     const text = await r.text();
