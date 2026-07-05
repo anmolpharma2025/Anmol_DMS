@@ -10021,10 +10021,9 @@ async function aiAsk(question) {
 
   } catch(err) {
     aiHideThinking();
-    const errMsg = 'Sorry, I could not connect to Claude AI. Please check your internet connection and try again.';
-    aiMessages.push({ role: 'assistant', content: errMsg });
-    aiAddMessage('assistant', errMsg);
     console.error('Claude AI error:', err);
+    aiMessages.push({ role: 'assistant', content: '⚠️ ' + err.message });
+    aiAddMessage('assistant', '⚠️ ' + err.message);
   } finally {
     if(sendBtn) sendBtn.disabled = false;
     document.getElementById('ai-input')?.focus();
