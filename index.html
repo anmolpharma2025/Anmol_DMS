@@ -1617,65 +1617,6 @@ function renderPage(page) {
   if(pages[page]) pages[page](c, ta);
 }
 
-function startBackgroundChatListener() {
-  if(!db) return;
-  let firstLoad = true;
-  db.collection(CHAT_COLLECTION)
-    .orderBy('ts', 'desc')
-    .limit(1)
-    .onSnapshot(snap => {
-      if(firstLoad) { firstLoad = false; return; } // skip initial load
-      if(state.page === 'chat') return; // already on chat
-      snap.docChanges().forEach(change => {
-        if(change.type === 'added') {
-          const msg = change.doc.data();
-          if(msg.sender === currentUser?.name) return; // own message
-          // Show badge
-          const badge = document.getElementById('chat-unread-badge');
-          if(badge) {
-            const cur = parseInt(badge.textContent)||0;
-            badge.style.display = '';
-            badge.textContent = cur < 9 ? cur+1 : '9+';
-          }
-          // Show toast notification
-          showChatToast(msg.sender, msg.text);
-        }
-      });
-    });
-}
-
-function showChatToast(sender, text) {
-  // Remove existing toast
-  document.getElementById('chat-toast')?.remove();
-  const toast = document.createElement('div');
-  toast.id = 'chat-toast';
-  toast.style.cssText = `position:fixed;bottom:80px;right:20px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;max-width:280px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);cursor:pointer;animation:slideIn 0.3s ease`;
-  toast.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-      <i class="ti ti-messages" style="color:var(--accent);font-size:14px"></i>
-      <strong style="font-size:12px">${escHtml(sender)}</strong>
-      <span style="font-size:10px;color:var(--text-tertiary);margin-left:auto">Team Chat</span>
-    </div>
-    <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((text||'').slice(0,60))}${(text||'').length>60?'…':''}</div>`;
-  toast.onclick = () => {
-    toast.remove();
-    // Navigate to chat
-    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-    document.querySelector('.nav-item[data-page="chat"]')?.classList.add('active');
-    state.page = 'chat';
-    render();
-  };
-  document.body.appendChild(toast);
-  // Add slide-in animation
-  if(!document.getElementById('chat-toast-style')) {
-    const style = document.createElement('style');
-    style.id = 'chat-toast-style';
-    style.textContent = '@keyframes slideIn{from{opacity:0;transform:translateX(100%)}to{opacity:1;transform:translateX(0)}}';
-    document.head.appendChild(style);
-  }
-  setTimeout(() => toast?.remove(), 5000);
-}
-
 function render() {
   const titles = { dashboard:'Dashboard', journal:'General Journal', disbursement:'Disbursement Journal', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
   document.getElementById('page-title').textContent = titles[state.page] || state.page;
@@ -10297,11 +10238,289 @@ function empDropdown(id, selectedName='', style='') {
 const CHAT_COLLECTION = 'companies/anmol/chat';
 let _chatUnsubscribe = null;
 let _chatLastSeen = 0;
+let _chatMode = 'group'; // 'group' or DM recipient name
+let _chatRecipient = null;
 
 function renderChat(c, ta) {
   ta.innerHTML = '';
   _chatLastSeen = Date.now();
   updateChatBadge(0);
+
+  const users = getUsers().filter(u => u.name && u.name !== currentUser?.name && u.active !== false);
+  const userOpts = users.map(u => `<option value="${u.name}">${u.name} (${u.role||'user'})</option>`).join('');
+
+  c.innerHTML = `
+<div style="display:flex;height:calc(100vh - 120px);max-width:960px;margin:0 auto;gap:0;border:1px solid var(--border-mid);border-radius:var(--radius-md);overflow:hidden">
+
+  <!-- Sidebar: channels + DMs -->
+  <div style="width:200px;flex-shrink:0;background:var(--bg-secondary);border-right:1px solid var(--border-light);display:flex;flex-direction:column">
+    <div style="padding:12px 12px 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary)">Channels</div>
+    <div id="chat-ch-group" onclick="switchChatChannel('group')" style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:7px;border-radius:var(--radius-sm);margin:0 6px;background:var(--accent);color:#fff;font-size:13px;font-weight:500">
+      <i class="ti ti-hash" style="font-size:13px"></i># general
+    </div>
+
+    <div style="padding:12px 12px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-top:8px">Direct Messages</div>
+    <div style="flex:1;overflow-y:auto">
+      ${users.length===0 ? '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">No other users</div>' :
+        users.map(u => {
+          const initials = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+          const hue = [...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
+          return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}')"
+            style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;color:var(--text-primary)" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':''">
+            <div style="width:24px;height:24px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.name}</span>
+            <span id="dm-unread-${u.name.replace(/\s+/g,'_')}" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:9px;font-weight:700;padding:1px 5px"></span>
+          </div>`;
+        }).join('')}
+    </div>
+  </div>
+
+  <!-- Main chat area -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <!-- Header -->
+    <div style="padding:10px 16px;background:var(--bg-card);border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:10px">
+      <i class="ti ti-messages" style="font-size:18px;color:var(--accent)"></i>
+      <div>
+        <div id="chat-channel-title" style="font-weight:700;font-size:14px"># general</div>
+        <div id="chat-status" style="font-size:11px;color:var(--text-tertiary)">Connecting…</div>
+      </div>
+    </div>
+    <!-- Messages -->
+    <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px">
+      <div style="text-align:center;color:var(--text-tertiary);font-size:12px">Loading…</div>
+    </div>
+    <!-- Input -->
+    <div style="padding:10px 12px;background:var(--bg-card);border-top:1px solid var(--border-light);display:flex;gap:8px;align-items:center">
+      <input type="text" id="chat-input" placeholder="Message #general… (Enter to send)"
+        style="flex:1;padding:9px 14px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg()}" maxlength="1000">
+      <button class="btn primary" onclick="sendChatMsg()" style="padding:9px 16px;font-size:13px;flex-shrink:0">
+        <i class="ti ti-send"></i>
+      </button>
+    </div>
+  </div>
+</div>`;
+
+  _chatMode = 'group';
+  _chatRecipient = null;
+  startChatListener();
+  setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
+}
+
+function switchChatChannel(mode, recipient) {
+  _chatMode = mode;
+  _chatRecipient = recipient || null;
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+
+  // Update sidebar active state
+  document.querySelectorAll('[id^="chat-ch-"], [id^="chat-dm-"]').forEach(el => {
+    el.style.background = '';
+    el.style.color = 'var(--text-primary)';
+  });
+  if(mode === 'group') {
+    const el = document.getElementById('chat-ch-group');
+    if(el) { el.style.background = 'var(--accent)'; el.style.color = '#fff'; }
+    document.getElementById('chat-channel-title').textContent = '# general';
+    document.getElementById('chat-input').placeholder = 'Message #general… (Enter to send)';
+    // Clear DM unread for group
+    updateChatBadge(0);
+  } else {
+    const key = recipient.replace(/\s+/g,'_');
+    const el = document.getElementById(`chat-dm-${key}`);
+    if(el) el.style.background = 'var(--bg-card)';
+    document.getElementById('chat-channel-title').textContent = `💬 ${recipient}`;
+    document.getElementById('chat-input').placeholder = `Message ${recipient}… (Enter to send)`;
+    // Clear DM unread badge for this user
+    const dmBadge = document.getElementById(`dm-unread-${key}`);
+    if(dmBadge) dmBadge.style.display = 'none';
+  }
+  startChatListener();
+  setTimeout(()=>document.getElementById('chat-input')?.focus(), 50);
+}
+
+function getDMChannelId(a, b) {
+  // Deterministic channel ID for two users (sorted alphabetically)
+  return [a, b].sort().join('__DM__');
+}
+
+function startChatListener() {
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  if(!db) {
+    document.getElementById('chat-status').textContent = 'Offline — Firebase not connected';
+    document.getElementById('chat-messages').innerHTML = `<div style="text-align:center;color:var(--amber);font-size:13px;padding:32px"><i class="ti ti-wifi-off" style="display:block;font-size:32px;margin-bottom:8px"></i>Firebase required for chat.</div>`;
+    return;
+  }
+  const collection = _chatMode === 'dm'
+    ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
+    : CHAT_COLLECTION;
+
+  try {
+    _chatUnsubscribe = db.collection(collection)
+      .orderBy('ts', 'asc').limitToLast(100)
+      .onSnapshot(snap => {
+        const statusEl = document.getElementById('chat-status');
+        const label = _chatMode === 'dm' ? `DM with ${_chatRecipient}` : '#general';
+        if(statusEl) statusEl.textContent = `${snap.docs.length} messages · ${label} · Live`;
+        renderChatMessages(snap.docs.map(d=>({id:d.id,...d.data()})));
+      }, err => {
+        const statusEl = document.getElementById('chat-status');
+        if(statusEl) statusEl.textContent = 'Connection error';
+      });
+  } catch(e) { console.error('Chat listener error:', e); }
+}
+
+function renderChatMessages(msgs) {
+  const box = document.getElementById('chat-messages');
+  if(!box) return;
+  if(!msgs.length) {
+    const emptyMsg = _chatMode === 'dm'
+      ? `Start a private conversation with <strong>${_chatRecipient}</strong> 👋`
+      : 'No messages yet. Say hello! 👋';
+    box.innerHTML = `<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:32px"><i class="ti ti-message-circle" style="display:block;font-size:40px;margin-bottom:8px;opacity:0.4"></i>${emptyMsg}</div>`;
+    return;
+  }
+  const me = currentUser?.name || 'Me';
+  let lastDate = '', lastSender = '';
+  box.innerHTML = msgs.map(m => {
+    const isMe = m.sender === me;
+    const ts = m.ts?.toDate ? m.ts.toDate() : new Date(m.ts||0);
+    const timeStr = ts.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'});
+    const dateStr = ts.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'});
+    let dateDivider = '';
+    if(dateStr !== lastDate) {
+      dateDivider = `<div style="text-align:center;margin:10px 0 6px;font-size:11px;color:var(--text-tertiary)"><span style="background:var(--bg-card);padding:2px 12px;border-radius:99px;border:1px solid var(--border-light)">${dateStr}</span></div>`;
+      lastDate = dateStr; lastSender = '';
+    }
+    const showAvatar = !isMe && m.sender !== lastSender;
+    lastSender = m.sender;
+    const initials = (m.sender||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const hue = [...(m.sender||'')].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
+    return `${dateDivider}
+<div style="display:flex;gap:8px;align-items:flex-end;${isMe?'flex-direction:row-reverse':''}">
+  <div style="width:28px;height:28px;flex-shrink:0;${showAvatar?`border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff`:'opacity:0'}">
+    ${showAvatar?initials:''}
+  </div>
+  <div style="max-width:65%;display:flex;flex-direction:column;gap:2px;${isMe?'align-items:flex-end':'align-items:flex-start'}">
+    ${showAvatar&&!isMe?`<div style="font-size:11px;color:var(--text-tertiary)">${m.sender||'?'}</div>`:''}
+    <div style="padding:8px 12px;border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isMe?'var(--accent)':'var(--bg-card)'};color:${isMe?'#fff':'var(--text-primary)'};font-size:13px;line-height:1.5;word-break:break-word;border:${isMe?'none':'1px solid var(--border-light)'}">
+      ${escHtml(m.text||'')}
+    </div>
+    <div style="font-size:10px;color:var(--text-tertiary)">${timeStr}</div>
+  </div>
+</div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
+}
+
+function sendChatMsg() {
+  const inp = document.getElementById('chat-input');
+  const text = inp?.value.trim();
+  if(!text) return;
+  if(!db) { alert('Firebase not connected.'); return; }
+  inp.value = ''; inp.disabled = true;
+
+  const collection = _chatMode === 'dm'
+    ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
+    : CHAT_COLLECTION;
+
+  db.collection(collection).add({
+    text,
+    sender: currentUser?.name||'Unknown',
+    role: currentUser?.role||'',
+    recipient: _chatMode === 'dm' ? _chatRecipient : null,
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{
+    inp.disabled = false; inp.focus();
+  }).catch(err=>{
+    inp.disabled = false;
+    alert('Failed to send: '+err.message);
+    inp.value = text;
+  });
+}
+
+function updateChatBadge(count) {
+  const badge = document.getElementById('chat-unread-badge');
+  if(!badge) return;
+  if(count>0) { badge.style.display=''; badge.textContent=count>9?'9+':count; }
+  else badge.style.display='none';
+}
+
+function stopChatListener() {
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe=null; }
+}
+
+function startBackgroundChatListener() {
+  if(!db) return;
+  let firstLoad = true;
+  db.collection(CHAT_COLLECTION).orderBy('ts','desc').limit(1)
+    .onSnapshot(snap => {
+      if(firstLoad) { firstLoad=false; return; }
+      if(state.page==='chat') return;
+      snap.docChanges().forEach(change => {
+        if(change.type==='added') {
+          const msg = change.doc.data();
+          if(msg.sender===currentUser?.name) return;
+          const badge = document.getElementById('chat-unread-badge');
+          if(badge) { badge.style.display=''; badge.textContent=parseInt(badge.textContent||0)<9?(parseInt(badge.textContent||0)+1):'9+'; }
+          showChatToast(msg.sender, msg.text, 'group');
+        }
+      });
+    });
+  // Also listen for DMs to this user
+  getUsers().filter(u=>u.name&&u.name!==currentUser?.name).forEach(u => {
+    const collection = `companies/anmol/dm_${getDMChannelId(currentUser.name, u.name)}`;
+    let firstDMLoad = true;
+    db.collection(collection).orderBy('ts','desc').limit(1)
+      .onSnapshot(snap => {
+        if(firstDMLoad) { firstDMLoad=false; return; }
+        snap.docChanges().forEach(change => {
+          if(change.type==='added') {
+            const msg = change.doc.data();
+            if(msg.sender===currentUser?.name) return;
+            if(state.page==='chat'&&_chatRecipient===msg.sender) return;
+            // Show DM badge on sidebar
+            const key = msg.sender.replace(/\s+/g,'_');
+            const navBadge = document.getElementById('chat-unread-badge');
+            if(navBadge&&state.page!=='chat') { navBadge.style.display=''; navBadge.textContent=parseInt(navBadge.textContent||0)<9?(parseInt(navBadge.textContent||0)+1):'9+'; }
+            showChatToast(msg.sender, msg.text, 'dm');
+          }
+        });
+      });
+  });
+}
+
+function showChatToast(sender, text, mode) {
+  document.getElementById('chat-toast')?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'chat-toast';
+  toast.style.cssText = 'position:fixed;bottom:80px;right:20px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:12px 16px;max-width:280px;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.4);cursor:pointer;animation:slideIn 0.3s ease';
+  toast.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <i class="ti ti-${mode==='dm'?'message':'messages'}" style="color:var(--accent);font-size:14px"></i>
+      <strong style="font-size:12px">${escHtml(sender)}</strong>
+      <span style="font-size:10px;color:var(--text-tertiary);margin-left:auto">${mode==='dm'?'Direct Message':'#general'}</span>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((text||'').slice(0,60))}${(text||'').length>60?'…':''}</div>`;
+  toast.onclick = () => {
+    toast.remove();
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    document.querySelector('.nav-item[data-page="chat"]')?.classList.add('active');
+    state.page='chat'; render();
+    setTimeout(()=>{ if(mode==='dm') switchChatChannel('dm',sender); },200);
+  };
+  document.body.appendChild(toast);
+  if(!document.getElementById('chat-toast-style')) {
+    const style=document.createElement('style');
+    style.id='chat-toast-style';
+    style.textContent='@keyframes slideIn{from{opacity:0;transform:translateX(100%)}to{opacity:1;transform:translateX(0)}}';
+    document.head.appendChild(style);
+  }
+  setTimeout(()=>toast?.remove(),5000);
+}
 
   c.innerHTML = `
 <div style="display:flex;flex-direction:column;height:calc(100vh - 120px);max-width:800px;margin:0 auto">
@@ -10331,109 +10550,6 @@ function renderChat(c, ta) {
     </button>
   </div>
 </div>`;
-
-  startChatListener();
-  setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
-}
-
-function startChatListener() {
-  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe=null; }
-  if(!db) {
-    document.getElementById('chat-status').textContent = 'Offline — Firebase not connected';
-    document.getElementById('chat-messages').innerHTML = `<div style="text-align:center;color:var(--amber);font-size:13px;padding:32px"><i class="ti ti-wifi-off" style="display:block;font-size:32px;margin-bottom:8px"></i>Firebase required for real-time chat.<br>Connect to Firebase to use Team Chat.</div>`;
-    return;
-  }
-  try {
-    _chatUnsubscribe = db.collection(CHAT_COLLECTION)
-      .orderBy('ts', 'asc')
-      .limitToLast(100)
-      .onSnapshot(snap => {
-        const statusEl = document.getElementById('chat-status');
-        if(statusEl) statusEl.textContent = `${snap.docs.length} messages · Live`;
-        renderChatMessages(snap.docs.map(d=>({id:d.id, ...d.data()})));
-      }, err => {
-        const statusEl = document.getElementById('chat-status');
-        if(statusEl) statusEl.textContent = 'Connection error';
-        console.error('Chat error:', err);
-      });
-  } catch(e) { console.error('Chat listener error:', e); }
-}
-
-function renderChatMessages(msgs) {
-  const box = document.getElementById('chat-messages');
-  if(!box) return;
-  if(!msgs.length) {
-    box.innerHTML = `<div style="text-align:center;color:var(--text-tertiary);font-size:13px;padding:32px"><i class="ti ti-message-circle" style="display:block;font-size:40px;margin-bottom:8px;opacity:0.4"></i>No messages yet.<br>Say hello! 👋</div>`;
-    return;
-  }
-  const me = currentUser?.name || 'Me';
-  let lastDate = '';
-  box.innerHTML = msgs.map(m => {
-    const isMe = m.sender === me;
-    const ts = m.ts?.toDate ? m.ts.toDate() : new Date(m.ts||0);
-    const timeStr = ts.toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'});
-    const dateStr = ts.toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'});
-    let dateDivider = '';
-    if(dateStr !== lastDate) {
-      dateDivider = `<div style="text-align:center;margin:8px 0;font-size:11px;color:var(--text-tertiary)"><span style="background:var(--bg-secondary);padding:2px 10px;border-radius:99px;border:1px solid var(--border-light)">${dateStr}</span></div>`;
-      lastDate = dateStr;
-    }
-    const initials = (m.sender||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    const hue = [...(m.sender||'')].reduce((h,c)=>h+c.charCodeAt(0),0) % 360;
-    return `${dateDivider}
-<div style="display:flex;gap:8px;align-items:flex-end;${isMe?'flex-direction:row-reverse':''};margin-bottom:2px">
-  <div style="width:30px;height:30px;border-radius:50%;background:hsl(${hue},60%,40%);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
-  <div style="max-width:65%;${isMe?'align-items:flex-end':'align-items:flex-start'};display:flex;flex-direction:column;gap:2px">
-    ${!isMe?`<div style="font-size:11px;color:var(--text-tertiary);margin-bottom:1px">${m.sender||'Unknown'}${m.role?` · <em>${m.role}</em>`:''}</div>`:''}
-    <div style="padding:9px 13px;border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isMe?'var(--accent)':'var(--bg-card)'};color:${isMe?'#fff':'var(--text-primary)'};font-size:13px;line-height:1.5;word-break:break-word;border:${isMe?'none':'1px solid var(--border-light)'}">
-      ${escHtml(m.text||'')}
-    </div>
-    <div style="font-size:10px;color:var(--text-tertiary)">${timeStr}${isMe?'':''}</div>
-  </div>
-</div>`;
-  }).join('');
-  // Scroll to bottom
-  box.scrollTop = box.scrollHeight;
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/\n/g,'<br>');
-}
-
-function sendChatMsg() {
-  const inp = document.getElementById('chat-input');
-  const text = inp?.value.trim();
-  if(!text) return;
-  if(!db) { alert('Firebase not connected. Cannot send messages.'); return; }
-  inp.value = '';
-  inp.disabled = true;
-
-  db.collection(CHAT_COLLECTION).add({
-    text,
-    sender: currentUser?.name || 'Unknown',
-    role: currentUser?.role || '',
-    ts: firebase.firestore.FieldValue.serverTimestamp()
-  }).then(()=>{
-    inp.disabled = false;
-    inp.focus();
-  }).catch(err=>{
-    inp.disabled = false;
-    alert('Failed to send: ' + err.message);
-    inp.value = text; // restore
-  });
-}
-
-function updateChatBadge(count) {
-  const badge = document.getElementById('chat-unread-badge');
-  if(!badge) return;
-  if(count > 0) { badge.style.display=''; badge.textContent = count > 9 ? '9+' : count; }
-  else badge.style.display = 'none';
-}
-
-// Stop chat listener when navigating away
-function stopChatListener() {
-  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
-}
 
 // ── EMPLOYEES ─────────────────────────────────────────────────────────────────
 function renderEmployees(c, ta) {
@@ -10707,7 +10823,7 @@ function saveAttendance() {
 
 function showEditAttendance(id) {
   const a = (state.attendance||[]).find(a=>a.id===id);
-  if(!a) return;
+  if(!a || !a.status) { alert('Attendance record not found or incomplete.'); return; }
   const emp = (state.employees||[]).find(e=>e.id===a.empId);
   showModal(`
 <div class="modal-head"><h3>Edit Attendance — ${emp?.name||a.empId}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
