@@ -841,19 +841,107 @@ function login(username, password) {
   const users = getUsers();
   const u = users.find(u => u.username === username && u.active);
   if(!u) return false;
-  // Support both plain-text and previously hashed passwords (migration back)
   const storedPw = u.password || '';
   const match = storedPw === password || (storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw));
-  // If stored as hash (legacy), allow login but convert back to plain text
   if(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw)) {
-    // Can't reverse hash — reset to typed password on login
     u.password = password;
     try { localStorage.setItem('anmolpharma_users', JSON.stringify(users)); } catch(e) {}
   }
   if(storedPw !== password && !(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw))) return false;
+
+  // Admin 2-step verification
+  if(u.role === 'admin' && u.loginPin) {
+    // Show PIN prompt instead of logging in immediately
+    showAdminPinVerify(u);
+    return 'pending';
+  }
+
   setSession(u);
   currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
   return true;
+}
+
+function showAdminPinVerify(u) {
+  const errEl = document.getElementById('login-error');
+  if(errEl) errEl.textContent = '';
+
+  // Replace login form with PIN entry
+  const form = document.getElementById('login-form-inner') || document.getElementById('login-screen');
+  const pinHtml = `
+<div id="admin-pin-verify" style="text-align:center;padding:8px 0">
+  <div style="font-size:32px;margin-bottom:8px">🔐</div>
+  <div style="font-weight:700;font-size:15px;margin-bottom:4px">Admin Verification</div>
+  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:18px">Welcome, <strong>${u.name}</strong>. Enter your admin PIN to continue.</div>
+  <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px">
+    <input type="password" id="admin-pin-input" maxlength="6" inputmode="numeric" placeholder="• • • • • •"
+      style="width:140px;padding:12px;text-align:center;font-size:22px;letter-spacing:8px;border:2px solid var(--accent);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);outline:none"
+      onkeydown="if(event.key==='Enter')verifyAdminPin('${u.id}')">
+  </div>
+  <button onclick="verifyAdminPin('${u.id}')" style="width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-md);cursor:pointer;font-size:14px;font-weight:600;font-family:var(--font);margin-bottom:8px">
+    Verify &amp; Login
+  </button>
+  <button onclick="cancelAdminPin()" style="background:none;border:none;color:var(--text-tertiary);cursor:pointer;font-size:12px;font-family:var(--font)">
+    ← Back to login
+  </button>
+  <div id="admin-pin-error" style="color:var(--red);font-size:12px;margin-top:8px"></div>
+</div>`;
+
+  // Store pending user
+  window._pendingAdminUser = u;
+
+  // Hide normal login fields, show PIN
+  const loginBtn = document.getElementById('login-btn');
+  const loginUser = document.getElementById('login-user')?.parentElement;
+  const loginPass = document.getElementById('login-pass')?.parentElement;
+  if(loginBtn) loginBtn.style.display = 'none';
+  if(loginUser) loginUser.style.display = 'none';
+  if(loginPass) loginPass.style.display = 'none';
+
+  let pinDiv = document.getElementById('admin-pin-verify');
+  if(!pinDiv) {
+    pinDiv = document.createElement('div');
+    pinDiv.id = 'admin-pin-verify';
+    const loginError = document.getElementById('login-error');
+    if(loginError) loginError.parentElement.insertBefore(pinDiv, loginError);
+    else document.getElementById('login-screen').appendChild(pinDiv);
+  }
+  pinDiv.innerHTML = pinHtml.replace('<div id="admin-pin-verify"','<div');
+  setTimeout(()=>document.getElementById('admin-pin-input')?.focus(), 100);
+}
+
+function verifyAdminPin(userId) {
+  const pin = document.getElementById('admin-pin-input')?.value.trim();
+  const errEl = document.getElementById('admin-pin-error');
+  const u = window._pendingAdminUser;
+  if(!u || !pin) return;
+
+  if(pin !== u.loginPin) {
+    if(errEl) errEl.textContent = '❌ Incorrect PIN. Try again.';
+    document.getElementById('admin-pin-input').value = '';
+    document.getElementById('admin-pin-input').focus();
+    return;
+  }
+
+  // PIN correct — complete login
+  window._pendingAdminUser = null;
+  cancelAdminPin(); // restore form
+  setSession(u);
+  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
+  showAppScreen();
+}
+
+function cancelAdminPin() {
+  document.getElementById('admin-pin-verify')?.remove();
+  const loginBtn = document.getElementById('login-btn');
+  const loginUser = document.getElementById('login-user')?.parentElement;
+  const loginPass = document.getElementById('login-pass')?.parentElement;
+  if(loginBtn) loginBtn.style.display = '';
+  if(loginUser) loginUser.style.display = '';
+  if(loginPass) loginPass.style.display = '';
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+  window._pendingAdminUser = null;
 }
 
 function logout() {
@@ -953,7 +1041,9 @@ function showAppScreen() {
 function doLogin() {
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
-  if(login(u, p)) {
+  const result = login(u, p);
+  if(result === 'pending') return; // waiting for admin PIN
+  if(result) {
     showAppScreen();
   } else {
     document.getElementById('login-error').textContent = 'Incorrect username or password.';
@@ -1492,7 +1582,7 @@ function showEditUser(id) {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Role</label>
-    <select id="eu-role">
+    <select id="eu-role" onchange="togglePinField(this.value)">
       ${Object.keys(getAllRoles()).filter(r=>r!=='admin').map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${r.charAt(0).toUpperCase()+r.slice(1)}</option>`).join('')}
       <option value="admin" ${u.role==='admin'?'selected':''}>Admin — Full access</option>
     </select>
@@ -1500,6 +1590,15 @@ function showEditUser(id) {
   <div class="form-group"><label>Assigned Branch <span style="font-weight:400;color:var(--text-tertiary)">(optional)</span></label>
     <select id="eu-branch">${branchOpts}</select>
     <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">Restricts inventory transfers to/from this branch only</div>
+  </div>
+</div>
+<div id="eu-pin-wrap" style="${u.role==='admin'?'':'display:none'}">
+  <div style="padding:10px 14px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:10px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--amber);margin-bottom:6px"><i class="ti ti-shield-lock" style="margin-right:4px"></i>Admin Login PIN (2-Step Verification)</div>
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">Set a 4-6 digit PIN required after password login. Leave blank to disable 2-step verification.</div>
+    <input type="password" id="eu-pin" inputmode="numeric" maxlength="6" placeholder="e.g. 1234 (leave blank to disable)"
+      value="${u.loginPin||''}"
+      style="width:100%;padding:8px 12px;border:1px solid var(--amber);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;letter-spacing:4px;font-family:var(--font);outline:none">
   </div>
 </div>
 <div style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
@@ -1512,6 +1611,11 @@ function showEditUser(id) {
 </div>`);
 }
 
+function togglePinField(role) {
+  const wrap = document.getElementById('eu-pin-wrap');
+  if(wrap) wrap.style.display = role === 'admin' ? '' : 'none';
+}
+
 function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const users = getUsers();
   const u = users.find(u=>u.id===id);
@@ -1520,6 +1624,18 @@ function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const newPass = document.getElementById('eu-pass').value;
   if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password=newPass; }
   u.role = document.getElementById('eu-role').value;
+  // Save login PIN for admin accounts
+  const pin = document.getElementById('eu-pin')?.value.trim();
+  if(u.role === 'admin') {
+    if(pin) {
+      if(!/^\d{4,6}$/.test(pin)) { alert('PIN must be 4-6 digits (numbers only).'); return; }
+      u.loginPin = pin;
+    } else {
+      delete u.loginPin; // blank = disable PIN
+    }
+  } else {
+    delete u.loginPin; // non-admin never needs PIN
+  }
   const branchId = document.getElementById('eu-branch')?.value || '';
   if(branchId) u.branchId = branchId; else delete u.branchId;
   saveUsers(users); closeModal(); render();
