@@ -5639,6 +5639,15 @@ function recomputeBalances() {
   });
 }
 
+function getInvoiceBalance(invId) {
+  const inv = (state.invoices||[]).find(i=>i.id===invId);
+  if(!inv) return 0;
+  const totalPaid = (state.collections||[])
+    .filter(c => (c.invoices||[]).includes(invId) || c.invoice===invId)
+    .reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  return Math.max(0, (inv.amount||0) - totalPaid);
+}
+
 function filterCollectionInvoices() {
   const custName = document.getElementById('col-cust')?.value;
   const invSel   = document.getElementById('col-inv');
