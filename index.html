@@ -1181,6 +1181,7 @@ function renderUsers(c, ta) {
   ta.innerHTML = `
     <button class="btn" onclick="showManageRoles()"><i class="ti ti-shield-cog"></i>Manage Roles</button>
     <button class="btn" onclick="showESignatureManager()"><i class="ti ti-signature"></i>E-Signatures</button>
+    <button class="btn" onclick="showSetMyPIN()" style="color:var(--amber);border-color:var(--amber)"><i class="ti ti-shield-lock"></i>Set My Login PIN</button>
     <button class="btn primary" onclick="showAddUser()"><i class="ti ti-plus"></i>Add User</button>`;
   const users = getUsers();
   const roleColors = { admin:'var(--accent)', accountant:'var(--green)', sales:'var(--amber)', hr:'#34c98a', warehouse:'#a78bfa', viewer:'var(--text-secondary)' };
@@ -1609,6 +1610,68 @@ function showEditUser(id) {
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveEditUser('${id}')">Save Changes</button>
 </div>`);
+}
+
+function showSetMyPIN() {
+  const users = getUsers();
+  const u = users.find(u=>u.id===currentUser.id);
+  if(!u) return;
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-shield-lock" style="margin-right:6px;color:var(--amber)"></i>Set My Login PIN</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 14px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
+  After setting a PIN, you will be asked for it every time you log in as admin.<br>
+  Leave blank and save to <strong>remove</strong> the PIN requirement.
+</div>
+<div class="form-group">
+  <label>Current Password <span style="color:var(--red)">*</span> <span style="font-size:10px;color:var(--text-tertiary)">(required to change PIN)</span></label>
+  <input type="password" id="mypin-pw" placeholder="Enter your current password">
+</div>
+<div class="form-group">
+  <label>New PIN <span style="font-size:10px;color:var(--text-tertiary)">(4-6 digits · leave blank to remove)</span></label>
+  <input type="password" id="mypin-new" inputmode="numeric" maxlength="6" placeholder="e.g. 1234"
+    style="letter-spacing:6px;font-size:18px"
+    value="${u.loginPin||''}">
+</div>
+<div class="form-group">
+  <label>Confirm PIN</label>
+  <input type="password" id="mypin-confirm" inputmode="numeric" maxlength="6" placeholder="Re-enter PIN"
+    style="letter-spacing:6px;font-size:18px">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" style="background:var(--amber);border-color:var(--amber)" onclick="saveMyPIN()"><i class="ti ti-shield-check"></i>Save PIN</button>
+</div>`);
+  setTimeout(()=>document.getElementById('mypin-pw')?.focus(), 100);
+}
+
+function saveMyPIN() {
+  const users = getUsers();
+  const u = users.find(u=>u.id===currentUser.id);
+  if(!u) return;
+  const pw      = document.getElementById('mypin-pw')?.value;
+  const newPin  = document.getElementById('mypin-new')?.value.trim();
+  const confirm = document.getElementById('mypin-confirm')?.value.trim();
+
+  // Verify current password
+  if(pw !== u.password) { alert('❌ Incorrect current password.'); return; }
+
+  // Removing PIN
+  if(!newPin) {
+    delete u.loginPin;
+    saveUsers(users);
+    closeModal();
+    alert('✅ Login PIN removed. You will log in with password only.');
+    return;
+  }
+
+  // Validate PIN
+  if(!/^\d{4,6}$/.test(newPin)) { alert('PIN must be 4 to 6 digits (numbers only).'); return; }
+  if(newPin !== confirm) { alert('PINs do not match. Please try again.'); return; }
+
+  u.loginPin = newPin;
+  saveUsers(users);
+  closeModal();
+  alert('✅ Login PIN set successfully! You will be asked for it on your next login.');
 }
 
 function togglePinField(role) {
