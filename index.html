@@ -2578,6 +2578,7 @@ ${disbFields}
 </div>`;
   window._jeOpts = opts;
   window._jeIsDisbursement = isDisbursement;
+  window._jeEditGroupId = prefill?.groupId || null;
   renderJeLines();
   // Pre-select payee dropdown if editing/prefill has payee
   if(isDisbursement && prefill?.payee) {
@@ -3011,7 +3012,7 @@ function saveJournal() {
     const totalOtherC = creditLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
     const netDrawn    = totalDebit - totalOtherC;
     if(netDrawn < 0) { alert('Other credits cannot exceed total debits.'); return; }
-    const groupId = prefill?.groupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
+    const groupId = window._jeEditGroupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
     let lineIdx = 0;
     // Debit lines
     debitLines.forEach(l => {
@@ -3040,7 +3041,7 @@ function saveJournal() {
   const hasCashCredit = jeLines.some(l=>l.credit && state.accounts.find(a=>String(a.id)===String(l.credit) && cashKeywords.some(k=>a.name.toLowerCase().includes(k))));
   const entryType = hasCashCredit ? 'disbursement' : 'general';
   const entryPrefix = entryType==='disbursement' ? 'DV' : 'JV';
-  const groupId = prefill?.groupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
+  const groupId = window._jeEditGroupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
@@ -5560,10 +5561,15 @@ function showAddCollection() {
   </div></div>
 </div>
 <div class="form-group"><label>Customer</label><select id="col-cust" onchange="filterCollectionInvoices()">${custOpts}</select></div>
-<div class="form-group"><label>Invoice <span id="col-inv-hint" style="font-size:11px;color:var(--text-tertiary)">(select customer first)</span></label>
-  <select id="col-inv" onchange="fillCollectionAmount()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+<div class="form-group">
+  <label>Invoices <span id="col-inv-hint" style="font-size:11px;color:var(--text-tertiary)">(select customer first)</span>
+    <span style="font-size:10px;color:var(--accent);font-weight:400;margin-left:6px">Hold Ctrl/Cmd to select multiple</span>
+  </label>
+  <select id="col-inv" multiple onchange="fillCollectionAmount()"
+    style="width:100%;padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-height:80px">
     <option value="">— select customer first —</option>
   </select>
+  <div id="col-selected-total" style="font-size:12px;color:var(--accent);margin-top:4px;text-align:right"></div>
 </div>
 <div class="form-group"><label>Amount Received (₱)</label><input type="number" id="col-amt" placeholder="0.00" min="0" step="0.01" oninput="calcCWT()"></div>
 <div class="form-row">
@@ -5638,53 +5644,41 @@ function filterCollectionInvoices() {
   const invSel   = document.getElementById('col-inv');
   const hint     = document.getElementById('col-inv-hint');
   if(!invSel) return;
-
-  if(!custName) {
+  if(!custName || custName==='__add_new__') {
     invSel.innerHTML = '<option value="">— select customer first —</option>';
     if(hint) hint.textContent = '(select customer first)';
     return;
   }
-
-  // Filter invoices by selected customer that are not yet paid
-  const custInvoices = (state.invoices||[]).filter(i =>
-    (i.customer === custName) && i.status !== 'paid'
-  );
-
+  const custInvoices = (state.invoices||[]).filter(i=>(i.customer===custName)&&i.status!=='paid');
   if(!custInvoices.length) {
-    invSel.innerHTML = '<option value="">— no outstanding invoices for this customer —</option>';
+    invSel.innerHTML = '<option value="">— no outstanding invoices —</option>';
     if(hint) hint.textContent = '(no outstanding invoices)';
     return;
   }
-
-  invSel.innerHTML = '<option value="">— select invoice —</option>' +
-    custInvoices.map(i => {
-      const balance = getInvoiceBalance(i.id);
-      const overdue = i.due && i.due < today();
-      return `<option value="${i.id}">${i.id} — ${fmt(i.amount)} (balance: ${fmt(balance)}) [${i.status}]${overdue?' ⚠ OVERDUE':''}</option>`;
-    }).join('');
-
-  if(hint) hint.textContent = `(${custInvoices.length} outstanding invoice${custInvoices.length!==1?'s':''})`;
+  invSel.innerHTML = custInvoices.map(i => {
+    const balance = getInvoiceBalance(i.id);
+    const overdue = i.due && i.due < today();
+    return `<option value="${i.id}">${i.id} — ${fmt(i.amount)} (bal: ${fmt(balance)})${overdue?' ⚠':''} [${i.status}]</option>`;
+  }).join('');
+  if(hint) hint.textContent = `(${custInvoices.length} outstanding — hold Ctrl/Cmd for multiple)`;
 }
 
 function fillCollectionAmount() {
-  const invId = document.getElementById('col-inv')?.value;
-  const amtEl = document.getElementById('col-amt');
-  if(!invId || !amtEl) return;
-  const balance = getInvoiceBalance(invId);
-  if(balance > 0) {
-    amtEl.value = balance.toFixed(2);
+  const invSel = document.getElementById('col-inv');
+  const amtEl  = document.getElementById('col-amt');
+  const totalEl= document.getElementById('col-selected-total');
+  if(!invSel||!amtEl) return;
+  const selected = Array.from(invSel.selectedOptions).map(o=>o.value).filter(Boolean);
+  const total = selected.reduce((s,id)=>s+getInvoiceBalance(id),0);
+  if(selected.length>0) {
+    amtEl.value = total.toFixed(2);
+    if(totalEl) totalEl.textContent = `${selected.length} invoice${selected.length>1?'s':''} selected — Total balance: ${fmt(total)}`;
     calcCWT();
+  } else {
+    if(totalEl) totalEl.textContent = '';
   }
 }
 
-function getInvoiceBalance(invId) {
-  const inv = (state.invoices||[]).find(i=>i.id===invId);
-  if(!inv) return 0;
-  const totalPaid = (state.collections||[])
-    .filter(c=>c.invoice===invId)
-    .reduce((s,c)=>s+(c.netCash||c.amount||0),0);
-  return Math.max(0, (inv.amount||0) - totalPaid);
-}
 
 function calcCWT() {
   const rateEl = document.getElementById('col-cwt-rate');
@@ -5708,7 +5702,9 @@ function calcCWT() {
 function saveCollection() {
   const date       = document.getElementById('col-date').value;
   const customer   = document.getElementById('col-cust').value;
-  const invoice    = document.getElementById('col-inv').value || '—';
+  const invSel     = document.getElementById('col-inv');
+  const selectedInvoices = invSel ? Array.from(invSel.selectedOptions).map(o=>o.value).filter(Boolean) : [];
+  const invoice    = selectedInvoices.length > 0 ? selectedInvoices.join(', ') : '—';
   const amount     = parseFloat(document.getElementById('col-amt').value) || 0;
   const mode       = document.getElementById('col-mode2').value;
   const reference  = document.getElementById('col-ref').value || '—';
@@ -5716,10 +5712,11 @@ function saveCollection() {
   const cwtAmt     = parseFloat(document.getElementById('col-cwt-amt')?.value)||0;
   const cwtRateEl  = document.getElementById('col-cwt-rate');
   const cwtRate    = cwtRateEl ? cwtRateEl.value : '0';
-  if (!amount) { alert('Please enter the amount received.'); return; }
+  if(!customer) { alert('Please select a customer.'); return; }
+  if(!amount) { alert('Please enter the amount received.'); return; }
 
   const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
-  const rec = { id, date, customer, invoice, amount, mode, reference, receivedBy };
+  const rec = { id, date, customer, invoice, invoices: selectedInvoices, amount, mode, reference, receivedBy };
   if(cwtAmt > 0) { rec.cwtAmount = cwtAmt; rec.cwtRate = cwtRate; rec.netCash = amount - cwtAmt; }
   state.collections.push(rec);
 
@@ -6997,33 +6994,35 @@ function saveMovement(itemId) {
 }
 
 function showReceiveFromPO() {
-  // List only approved POs that haven't been received yet
   const eligiblePOs = (state.purchaseOrders||[]).filter(po=>po.status==='approved');
   if(!eligiblePOs.length) {
-    alert('No approved Purchase Orders available to receive.\nApprove a PO first, then come back to receive it.');
+    alert('No approved Purchase Orders available to receive.\nApprove a PO first in the Purchase Orders tab.');
     return;
   }
   const poOpts = eligiblePOs.map(po=>{
     const poTotal = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-    return `<option value="${po.id}">${po.id} — ${po.supplier} (${po.lines.length} items, ${fmt(poTotal)})</option>`;
+    return `<option value="${po.id}">${po.id} — ${po.supplier} (${po.lines.length} items · ${fmt(poTotal)})</option>`;
   }).join('');
 
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px"></i>Receive Inventory from PO</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="padding:10px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--green)">
-  <i class="ti ti-info-circle" style="margin-right:5px"></i>
-  Receiving a PO will add the ordered quantities to inventory and create stock movement records automatically.
-</div>
+<div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px;color:var(--green)"></i>Receive Inventory from PO</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-group"><label>Select Purchase Order</label>
-  <select id="recv-po" onchange="previewPOReceive()" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+  <select id="recv-po-sel" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
     <option value="">— select PO —</option>${poOpts}
   </select>
 </div>
-<div id="recv-po-preview" style="margin-bottom:14px"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="confirmReceivePO()"><i class="ti ti-check"></i>Receive & Update Inventory</button>
+  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="openReceivePOFromInventory()"><i class="ti ti-arrow-right"></i>Continue</button>
 </div>`);
+}
+
+function openReceivePOFromInventory() {
+  const poId = document.getElementById('recv-po-sel')?.value;
+  if(!poId) { alert('Please select a Purchase Order.'); return; }
+  closeModal();
+  // Use the same receivePO modal which requires supplier invoice + DR
+  setTimeout(()=>receivePO(poId), 100);
 }
 
 function previewPOReceive() {
@@ -9310,6 +9309,30 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 </table>`;
 }
 
+function savePO() {
+  const supplier     = document.getElementById('po-sup').value;
+  const date         = document.getElementById('po-date').value;
+  const deliveryDate = document.getElementById('po-del').value;
+  const notes        = document.getElementById('po-notes')?.value||'';
+  const preparedBy   = document.getElementById('po-by')?.value||currentUser?.name||'';
+  const paymentTerms = document.getElementById('po-payment-terms')?.value||'on_account';
+  const dueDate      = document.getElementById('po-due')?.value||'';
+  const purchaseType = document.getElementById('po-purchase-type')?.value||'merchandise';
+  const category     = document.getElementById('po-category')?.value||'Goods for Resale';
+  const supplierInvoiceNo = document.getElementById('po-inv-no')?.value.trim()||'';
+  if(!supplier||supplier==='__add_new__') { alert('Please select a supplier.'); return; }
+  const lines = (window._poLines||[]).map(l=>({
+    ...l, qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0,
+    lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0),
+    vatExempt:l.vatExempt||false
+  })).filter(l=>l.desc||l.itemId);
+  if(!lines.length) { alert('Add at least one line item.'); return; }
+  const id = nextRefNum('PO', state.purchaseOrders||[]);
+  if(!state.purchaseOrders) state.purchaseOrders=[];
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, status:'pending' });
+  save(); closeModal(); render();
+}
+
 function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(po); } save(); render(); }
 function receivePO(id) {
   if(!currentUser || (currentUser.role!=='admin'&&currentUser.role!=='warehouse')) {
@@ -9386,13 +9409,19 @@ function confirmReceivePO(id) {
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO() {
-  const supOpts = '<option value="">— Select supplier —</option>' + (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
-  window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
+  const supOpts = '<option value="">— Select supplier —</option>' +
+    (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
+    '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
+  window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false }];
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
 <div class="modal-head"><h3>New Purchase Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
-  <div class="form-group"><label>Supplier</label><select id="po-sup">${supOpts}</select></div>
+  <div class="form-group"><label>Supplier</label>
+    <select id="po-sup" onchange="handlePOSupSel(this)">
+      ${supOpts}
+    </select>
+  </div>
   <div class="form-group">
     <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
     <input type="text" id="po-by" value="${currentUser?.name||''}" readonly
@@ -9448,32 +9477,121 @@ function showAddPO() {
   </div>
   ${orderLineTableHtml('po')}
 </div>
-<div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier Invoice No. <span style="font-size:10px;color:var(--text-tertiary)">(if available at ordering)</span></label>
+    <input type="text" id="po-inv-no" placeholder="e.g. SI-2026-001">
+  </div>
+  <div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="savePO()">Create Purchase Order</button>
 </div>`);
-  renderOrderLines('po');
+  renderPOLines();
 }
 
-function savePO() {
-  const supplier     = document.getElementById('po-sup').value;
-  const date         = document.getElementById('po-date').value;
-  const deliveryDate = document.getElementById('po-del').value;
-  const notes        = document.getElementById('po-notes').value;
-  const preparedBy   = document.getElementById('po-by').value;
-  const paymentTerms = document.getElementById('po-payment-terms').value;
-  const dueDate      = document.getElementById('po-due').value;
-  const purchaseType = document.getElementById('po-purchase-type')?.value || 'merchandise';
-  const category     = document.getElementById('po-category')?.value || 'Goods for Resale';
-  const lines = window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
-  if(!lines.length){ alert('Add at least one line item.'); return; }
-  const id = nextRefNum('PO', state.purchaseOrders||[]);
-  if(!state.purchaseOrders) state.purchaseOrders = [];
-  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, status:'pending' });
-  save(); closeModal(); render();
+function handlePOSupSel(sel) {
+  if(sel.value === '__add_new__') {
+    sel.value = '';
+    if(confirm('Supplier not in list.\n\nAdd new supplier now? The PO form will re-open after saving.')) {
+      closeModal(); showAddSupplier('po');
+    }
+  }
 }
 
+function renderPOLines() {
+  const tbody = document.getElementById('po-lines-body');
+  if(!tbody) return;
+  const items = state.inventory||[];
+  const dlId = 'po-items-dl';
+  const datalist = `<datalist id="${dlId}">${items.map(it=>`<option value="${it.name}">`).join('')}</datalist>`;
+  tbody.innerHTML = datalist + (window._poLines||[]).map((l,i) => {
+    const item = items.find(it=>String(it.id)===String(l.itemId));
+    const lineTotal = (parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0);
+    const vatAmt = l.vatExempt ? 0 : lineTotal/1.12*0.12;
+    return `<tr>
+      <td style="padding:4px 6px;vertical-align:top">
+        <input type="text" list="${dlId}" value="${item?item.name:(l.desc||'')}" placeholder="Search item…"
+          autocomplete="off" oninput="matchPOItem(${i},this.value)" onchange="matchPOItem(${i},this.value)"
+          style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+      </td>
+      <td style="padding:4px"><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updatePOLine(${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
+      <td style="padding:4px"><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updatePOLine(${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
+      <td style="text-align:center;padding:4px">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;justify-content:center">
+          <input type="checkbox" ${l.vatExempt?'checked':''} onchange="window._poLines[${i}].vatExempt=this.checked;renderPOLines()">
+          <span style="color:${l.vatExempt?'var(--amber)':'var(--text-tertiary)'}">Exempt</span>
+        </label>
+      </td>
+      <td style="text-align:right;padding:4px 8px;font-size:12px;font-weight:500">${fmt(lineTotal)}</td>
+      <td style="text-align:right;padding:4px 8px;font-size:11px;color:var(--amber)">${l.vatExempt?'—':fmt(vatAmt)}</td>
+      <td><button class="je-line-btn" onclick="window._poLines.splice(${i},1);renderPOLines()">×</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function matchPOItem(i, val) {
+  const items = state.inventory||[];
+  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
+  if(match) {
+    window._poLines[i].itemId = match.id;
+    window._poLines[i].desc = match.name;
+    if(!window._poLines[i].unitPrice) window._poLines[i].unitPrice = match.costPrice||0;
+  } else {
+    window._poLines[i].itemId = '';
+    window._poLines[i].desc = val;
+  }
+}
+
+function updatePOLine(i, field, val) {
+  window._poLines[i][field] = val;
+  const qty = parseFloat(window._poLines[i].qty)||0;
+  const price = parseFloat(window._poLines[i].unitPrice)||0;
+  window._poLines[i].lineTotal = qty*price;
+  // Update total cell without full re-render
+  const tbody = document.getElementById('po-lines-body');
+  if(tbody) {
+    const rows = tbody.querySelectorAll('tr');
+    if(rows[i]) {
+      const totalCell = rows[i].querySelectorAll('td')[4];
+      const vatCell   = rows[i].querySelectorAll('td')[5];
+      if(totalCell) totalCell.textContent = fmt(qty*price);
+      if(vatCell) vatCell.textContent = window._poLines[i].vatExempt?'—':fmt(qty*price/1.12*0.12);
+    }
+  }
+}
+
+function addPOLine() {
+  window._poLines = window._poLines||[];
+  window._poLines.push({ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false });
+  renderPOLines();
+}
+
+function orderLineTableHtml(prefix) {
+  if(prefix==='po') return `
+<table class="je-lines">
+  <thead><tr>
+    <th style="width:35%">Item</th>
+    <th style="width:10%">Qty</th>
+    <th style="width:18%">Unit Price</th>
+    <th style="width:12%;text-align:center">VAT</th>
+    <th style="width:15%;text-align:right">Line Total</th>
+    <th style="width:8%;text-align:right">VAT Amt</th>
+    <th style="width:2%"></th>
+  </tr></thead>
+  <tbody id="po-lines-body"></tbody>
+</table>`;
+  return `
+<table class="je-lines">
+  <thead><tr>
+    <th style="width:40%">Item</th><th style="width:12%">Qty</th>
+    <th style="width:22%">Unit Price</th>
+    <th style="width:22%;text-align:right">Line Total</th>
+    <th style="width:4%"></th>
+  </tr></thead>
+  <tbody id="${prefix}-lines-body"></tbody>
+</table>`;
+}
 function viewPO(id) {
   const po = (state.purchaseOrders||[]).find(p=>p.id===id);
   if(!po) return;
