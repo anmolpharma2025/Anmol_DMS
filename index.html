@@ -709,7 +709,6 @@ async function fbForceRefresh() {
     _fbListening = false;
     fbListen();
   }
-}
 
 const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtS = n => (n < 0 ? '-' : '') + fmt(n);
@@ -768,6 +767,13 @@ function getUsers() {
 function saveUsers(users) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch(e) {}
   fbSaveMeta();
+  // Re-apply nav visibility so permission changes take effect immediately
+  if(typeof currentUser !== 'undefined' && currentUser) {
+    document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+      el.style.display = canAccess(el.dataset.page) ? '' : 'none';
+    });
+  }
+}
 }
 
 function getSession() {
@@ -1804,6 +1810,15 @@ function renderPage(page) {
   if(!c||!ta) return;
   const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat };
   if(pages[page]) pages[page](c, ta);
+}
+
+function renderCurrentPage() {
+  const c  = document.getElementById('content');
+  const ta = document.getElementById('top-actions') || document.getElementById('toolbar-actions');
+  if(!c||!ta) return;
+  const pageMap = { dashboard:renderDashboard, journal:renderJournal, disbursement:renderDisbursementJournal, salesorders:renderSalesOrders, invoices:renderInvoices, salesreturns:renderSalesReturns, purchaseorders:renderPurchaseOrders, purchases:renderPurchases, expenses:renderExpenses, lapsing:renderLapsingSchedule, coa:renderCOA, reports:renderReports, collections:renderCollections, inventory:renderInventory, customers:renderCustomers, suppliers:renderSuppliers, users:renderUsers, company:renderCompanyProfile, employees:renderEmployees, attendance:renderAttendance, payroll:renderPayroll, chat:renderChat };
+  const fn = pageMap[state.page];
+  if(fn) fn(c, ta);
 }
 
 function render() {
@@ -3176,7 +3191,7 @@ function renderInvoices(c, ta) {
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
     value="${window._invFilter||''}"
-    oninput="window._invFilter=this.value;render()"
+    oninput="window._invFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -5613,36 +5628,37 @@ function showAddCollection() {
 }
 
 function recomputeBalances() {
-  // Recalculate every customer's balance and every invoice's paid status from scratch
+  // Customer balances
   state.customers.forEach(cu => {
-    // Sum all non-draft invoice amounts for this customer
-    const totalInvoiced = state.invoices
-      .filter(i => i.customer === cu.name && i.status !== 'draft')
-      .reduce((s, i) => s + (i.amount || 0), 0);
-    // Sum all collections for this customer
-    const totalCollected = state.collections
-      .filter(r => r.customer === cu.name)
-      .reduce((s, r) => s + (r.amount || 0), 0);
-    // Sum all approved sales returns for this customer (credits that reduce balance)
-    const totalReturns = (state.salesReturns||[])
-      .filter(r => r.customer === cu.name && r.status === 'approved')
-      .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.lineTotal || 0), 0), 0);
+    const totalInvoiced  = (state.invoices||[]).filter(i=>i.customer===cu.name&&i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+    const totalCollected = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.amount||0),0);
+    const totalReturns   = (state.salesReturns||[]).filter(r=>r.customer===cu.name&&r.status==='approved').reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
     cu.balance = Math.max(0, totalInvoiced - totalCollected - totalReturns);
   });
-
-  // For each non-draft invoice, check if cumulative collections cover it → mark paid
+  // Invoice paid status
   state.invoices.forEach(inv => {
-    if (inv.status === 'draft') return;
-    const totalCollected = state.collections
-      .filter(r => r.invoice === inv.id)
-      .reduce((s, r) => s + (r.amount || 0), 0);
-    if (totalCollected >= inv.amount) {
-      inv.status = 'paid';
-    } else if (inv.status === 'paid' && !inv.manuallyPaid) {
-      // Only revert if NOT manually marked paid by admin
-      inv.status = 'pending';
-    }
+    if(inv.status==='draft') return;
+    const totalCollected = (state.collections||[])
+      .filter(r=>(r.invoices||[]).includes(inv.id)||r.invoice===inv.id)
+      .reduce((s,r)=>s+(r.amount||0),0);
+    if(totalCollected>=inv.amount) inv.status='paid';
+    else if(inv.status==='paid'&&!inv.manuallyPaid) inv.status='pending';
   });
+  // Accounts Payable balance
+  const apAcc = (state.accounts||[]).find(a=>{
+    const n=String(a.name||'').toLowerCase();
+    return n.includes('accounts payable')||n.includes('trade payable')||(n.includes('payable')&&!n.includes('tax')&&!n.includes('withholding')&&!n.includes('cwt'));
+  });
+  if(apAcc) {
+    const totalPOAP = (state.purchaseOrders||[])
+      .filter(po=>po.status==='received'&&po.paymentTerms&&!['cod','cod_check','prepaid'].includes(po.paymentTerms))
+      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+    const paidPOs = new Set((state.journal||[]).filter(j=>j.poRef&&!j.cancelled).map(j=>j.poRef));
+    const paidAP = (state.purchaseOrders||[])
+      .filter(po=>paidPOs.has(po.id))
+      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+    apAcc.balance = Math.max(0, totalPOAP - paidAP);
+  }
 }
 
 function getInvoiceBalance(invId) {
@@ -8646,7 +8662,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
     value="${window._soFilter||''}"
-    oninput="window._soFilter=this.value;render()"
+    oninput="window._soFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -9302,7 +9318,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by PO no., supplier, item, status…"
     value="${window._poFilter||''}"
-    oninput="window._poFilter=this.value;render()"
+    oninput="window._poFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -10733,7 +10749,7 @@ function stopChatListener() {
 }
 
 function startBackgroundChatListener() {
-  if(!db) return;
+  if(!db || !currentUser) return; // Only run when logged in
   let firstLoad = true;
   db.collection(CHAT_COLLECTION).orderBy('ts','desc').limit(1)
     .onSnapshot(snap => {
@@ -12279,15 +12295,6 @@ if (currentUser) {
   </div>
 </div>
 
-<!-- Floating Chat Button -->
-<div id="chat-float-btn" onclick="toggleChatPanel()" style="display:none;position:fixed;bottom:24px;right:24px;width:52px;height:52px;background:var(--accent);border-radius:50%;cursor:pointer;z-index:600;box-shadow:0 4px 16px rgba(0,0,0,0.4);align-items:center;justify-content:center;transition:transform 0.2s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
-  <i class="ti ti-messages" style="font-size:22px;color:#fff"></i>
-  <span id="chat-unread-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:2px 6px;min-width:18px;text-align:center;border:2px solid var(--bg-secondary)"></span>
-</div>
-
-<!-- Floating Chat Panel -->
-<div id="chat-panel" style="display:none;position:fixed;bottom:88px;right:24px;width:380px;height:520px;background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:var(--radius-md);z-index:600;box-shadow:0 8px 32px rgba(0,0,0,0.4);flex-direction:column;overflow:hidden">
-</div>
 <div class="overlay" id="modal" style="display:none" onclick="overlayClick(event)">
   <div class="modal" id="modal-inner"></div>
 </div>
@@ -15033,7 +15040,7 @@ function renderInvoices(c, ta) {
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
     value="${window._invFilter||''}"
-    oninput="window._invFilter=this.value;render()"
+    oninput="window._invFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -20503,7 +20510,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
     value="${window._soFilter||''}"
-    oninput="window._soFilter=this.value;render()"
+    oninput="window._soFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -21159,7 +21166,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by PO no., supplier, item, status…"
     value="${window._poFilter||''}"
-    oninput="window._poFilter=this.value;render()"
+    oninput="window._poFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
