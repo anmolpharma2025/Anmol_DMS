@@ -1848,6 +1848,115 @@ function closeModal() { document.getElementById('modal').style.display = 'none';
 function overlayClick(e) { if (e.target === document.getElementById('modal')) closeModal(); }
 // showModal is defined later with searchable-select support
 
+function filterTable() {
+  // Re-render only the table body rows without touching the search box
+  // This preserves focus and cursor position
+  const page = state.page;
+  if(page === 'salesorders') {
+    const sos = state.salesOrders||[];
+    const q = (window._soFilter||'').toLowerCase();
+    const filterStatus = window._soStatusFilter||'';
+    const filtered = sos.filter(so => {
+      if(filterStatus && so.status !== filterStatus) return false;
+      if(!q) return true;
+      return so.id.toLowerCase().includes(q) || so.customer.toLowerCase().includes(q) ||
+        so.status.toLowerCase().includes(q) || (so.date||'').includes(q) ||
+        so.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
+    });
+    const tbody = document.querySelector('#content table tbody');
+    if(tbody) {
+      tbody.innerHTML = filtered.length===0
+        ? `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-tertiary)">No results for "${window._soFilter}"</td></tr>`
+        : filtered.map(so=>{
+            const soTotal=so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+            const approvedCount=so.lines.filter(l=>l.approved).length;
+            return `<tr>
+              <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
+              <td style="font-weight:500">${so.customer}</td>
+              <td style="font-size:12px;color:var(--text-secondary)">${so.lines.map(l=>`${l.desc}×${l.qty}${l.approved?'<span style="color:var(--green);margin-left:3px">✓</span>':''}`).join(', ')}</td>
+              <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
+              <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
+                ${approvedCount>0&&so.status!=='delivered'?`<span style="font-size:10px;color:var(--green);display:block;margin-top:2px">${approvedCount}/${so.lines.length} approved</span>`:''}
+              </td>
+              <td><div class="action-btns">
+                <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewSO('${so.id}')"><i class="ti ti-eye"></i>View</button>
+                <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printSO('${so.id}')"><i class="ti ti-printer"></i></button>
+                <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteSO('${so.id}')"><i class="ti ti-trash"></i></button>
+              </div></td>
+            </tr>`;
+          }).join('');
+    }
+  } else if(page === 'purchaseorders') {
+    const pos2 = state.purchaseOrders||[];
+    const q = (window._poFilter||'').toLowerCase();
+    const filterStatus = window._poStatusFilter||'';
+    const filtered = pos2.filter(po => {
+      if(filterStatus && po.status !== filterStatus) return false;
+      if(!q) return true;
+      return po.id.toLowerCase().includes(q) || po.supplier.toLowerCase().includes(q) ||
+        po.status.toLowerCase().includes(q) || (po.date||'').includes(q) ||
+        po.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
+    });
+    const tbody = document.querySelector('#content table tbody');
+    if(tbody) {
+      tbody.innerHTML = filtered.length===0
+        ? `<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-tertiary)">No results for "${window._poFilter}"</td></tr>`
+        : filtered.map(po=>{
+            const poTotal=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+            return `<tr>
+              <td class="mono">${po.id}</td><td>${po.date}</td><td>${po.deliveryDate||'—'}</td>
+              <td style="font-weight:500">${po.supplier}
+                ${po.supplierInvoiceNo?`<div style="font-size:10px;color:var(--green);margin-top:1px"><i class="ti ti-receipt" style="font-size:10px"></i> SI: ${po.supplierInvoiceNo}${po.drNo?' · DR: '+po.drNo:''}</div>`:''}
+              </td>
+              <td style="text-align:right;font-weight:500">${fmt(poTotal)}</td>
+              <td><span class="badge" style="font-size:11px">${paymentTermsLabel(po.paymentTerms||'on_account')}</span></td>
+              <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
+              <td><div class="action-btns">
+                <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
+                <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printPO('${po.id}')"><i class="ti ti-printer"></i></button>
+                ${po.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="approvePO('${po.id}')">Approve</button>`:''}
+                ${po.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="receivePO('${po.id}')"><i class="ti ti-package-import"></i>Receive</button>`:''}
+                <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePO('${po.id}')"><i class="ti ti-trash"></i></button>
+              </div></td>
+            </tr>`;
+          }).join('');
+    }
+  } else if(page === 'invoices') {
+    const invs = state.invoices||[];
+    const q = (window._invFilter||'').toLowerCase();
+    const filtered = invs.filter(inv => {
+      if(!q) return true;
+      return inv.id.toLowerCase().includes(q) || (inv.customer||'').toLowerCase().includes(q) ||
+        (inv.status||'').toLowerCase().includes(q) || (inv.due||'').includes(q) || (inv.date||'').includes(q);
+    });
+    const tbody = document.querySelector('#content table tbody');
+    if(tbody) {
+      tbody.innerHTML = filtered.length===0
+        ? `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No results for "${window._invFilter}"</td></tr>`
+        : filtered.map(inv=>{
+            const base=inv.vatBase!=null?inv.vatBase:inv.amount;
+            const vat=inv.vat!=null?inv.vat:0;
+            return `<tr>
+              <td class="mono">${inv.id}</td><td>${inv.date}</td>
+              <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
+              <td style="${inv.due&&inv.due<today()&&inv.status!=='paid'?'color:var(--red);font-weight:500':''}">${inv.due||'—'}${inv.due&&inv.due<today()&&inv.status!=='paid'?' <span style="font-size:10px">⚠</span>':''}</td>
+              <td>${inv.customer}</td>
+              <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
+              <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
+              <td style="text-align:right;font-weight:500">${fmt(inv.amount||0)}</td>
+              <td><span class="badge ${inv.status}">${inv.status}</span></td>
+              <td><div class="action-btns">
+                <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
+                <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
+                <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
+                <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')"><i class="ti ti-trash"></i></button>
+              </div></td>
+            </tr>`;
+          }).join('');
+    }
+  }
+}
+
 function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
@@ -3242,7 +3351,7 @@ function renderInvoices(c, ta) {
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
     value="${window._invFilter||''}"
-    oninput="window._invFilter=this.value;renderCurrentPage()"
+    oninput="window._invFilter=this.value;filterTable()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -8713,7 +8822,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
     value="${window._soFilter||''}"
-    oninput="window._soFilter=this.value;renderCurrentPage()"
+    oninput="window._soFilter=this.value;filterTable()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -9369,7 +9478,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by PO no., supplier, item, status…"
     value="${window._poFilter||''}"
-    oninput="window._poFilter=this.value;renderCurrentPage()"
+    oninput="window._poFilter=this.value;filterTable()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
