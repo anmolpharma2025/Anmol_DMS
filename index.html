@@ -5641,14 +5641,17 @@ function renderCollections(c, ta) {
   ta.innerHTML = `
     <button class="btn no-print" onclick="window.print()"><i class="ti ti-printer"></i>Print</button>
     <button class="btn primary" onclick="showAddCollection()"><i class="ti ti-plus"></i>Record Collection</button>`;
-  const total = state.collections.reduce((s,r) => s+r.amount, 0);
+  const total    = state.collections.reduce((s,r) => s + (r.netCash||r.amount||0), 0);
+  const totalCWT = state.collections.reduce((s,r) => s + (r.cwtAmount||0), 0);
+  const totalGross = state.collections.reduce((s,r) => s + (r.amount||0), 0);
   const byMode = {};
-  state.collections.forEach(r => { byMode[r.mode] = (byMode[r.mode]||0) + r.amount; });
+  state.collections.forEach(r => { byMode[r.mode] = (byMode[r.mode]||0) + (r.netCash||r.amount||0); });
   c.innerHTML = `
-<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash"></i>Total Collected</div><div class="kpi-value pos">${fmt(total)}</div><div class="kpi-sub">${state.collections.length} receipt${state.collections.length!==1?'s':''}</div></div>
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash"></i>Total Net Cash</div><div class="kpi-value pos">${fmt(total)}</div><div class="kpi-sub">${state.collections.length} receipt${state.collections.length!==1?'s':''}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-receipt"></i>Total Gross</div><div class="kpi-value">${fmt(totalGross)}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-file-invoice"></i>Total CWT (2307)</div><div class="kpi-value" style="color:var(--amber)">${fmt(totalCWT)}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-building-bank"></i>Bank Transfer</div><div class="kpi-value">${fmt(byMode['Bank Transfer']||0)}</div></div>
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-writing"></i>Check / Other</div><div class="kpi-value">${fmt(total-(byMode['Bank Transfer']||0))}</div></div>
 </div>
 <div id="collection-print-area">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -5664,7 +5667,13 @@ function renderCollections(c, ta) {
 <table id="col-table">
   <thead><tr><th>OR No.</th><th>Date</th><th>Customer</th><th>Invoice</th><th>Mode of Payment</th><th>Reference</th><th>Received by</th><th style="text-align:right">Gross Amount</th><th style="text-align:right">CWT (2307)</th><th style="text-align:right">Net Cash</th><th class="no-print"></th></tr></thead>
   <tbody id="col-tbody">${buildCollectionRows(state.collections)}</tbody>
-  <tfoot><tr style="background:var(--bg-secondary)"><td colspan="7" style="font-weight:500;padding:8px 10px">Total</td><td style="text-align:right;font-weight:500;padding:8px 10px">${fmt(total)}</td><td class="no-print"></td></tr></tfoot>
+  <tfoot><tr style="background:var(--bg-secondary);font-weight:600">
+    <td colspan="7" style="padding:8px 10px">TOTAL</td>
+    <td style="text-align:right;padding:8px 10px">${fmt(totalGross)}</td>
+    <td style="text-align:right;padding:8px 10px;color:var(--amber)">${totalCWT>0?fmt(totalCWT):'—'}</td>
+    <td style="text-align:right;padding:8px 10px;color:var(--green)">${fmt(total)}</td>
+    <td class="no-print"></td>
+  </tr></tfoot>
 </table>
 </div>`;
 }
@@ -5821,25 +5830,31 @@ function showAddCollection() {
 }
 
 function recomputeBalances() {
-  // Customer balances
-  state.customers.forEach(cu => {
+  // Invoice paid status — check every invoice against collections
+  (state.invoices||[]).forEach(inv => {
+    if(inv.status === 'draft') return;
+    const totalCollected = (state.collections||[])
+      .filter(r => (r.invoices||[]).includes(inv.id) || r.invoice === inv.id)
+      .reduce((s,r) => s + (r.netCash || r.amount || 0), 0);
+    if(totalCollected >= (inv.amount||0)) {
+      inv.status = 'paid';
+    } else if(inv.status === 'paid' && !inv.manuallyPaid) {
+      // Revert to pending if collection was deleted
+      inv.status = 'pending';
+    }
+  });
+
+  // Customer balances — invoiced minus collected minus returns
+  (state.customers||[]).forEach(cu => {
     const totalInvoiced  = (state.invoices||[]).filter(i=>i.customer===cu.name&&i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
-    const totalCollected = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.amount||0),0);
+    const totalCollected = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.netCash||r.amount||0),0);
     const totalReturns   = (state.salesReturns||[]).filter(r=>r.customer===cu.name&&r.status==='approved').reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
     cu.balance = Math.max(0, totalInvoiced - totalCollected - totalReturns);
   });
-  // Invoice paid status
-  state.invoices.forEach(inv => {
-    if(inv.status==='draft') return;
-    const totalCollected = (state.collections||[])
-      .filter(r=>(r.invoices||[]).includes(inv.id)||r.invoice===inv.id)
-      .reduce((s,r)=>s+(r.amount||0),0);
-    if(totalCollected>=inv.amount) inv.status='paid';
-    else if(inv.status==='paid'&&!inv.manuallyPaid) inv.status='pending';
-  });
+
   // Accounts Payable balance
   const apAcc = (state.accounts||[]).find(a=>{
-    const n=String(a.name||'').toLowerCase();
+    const n = String(a.name||'').toLowerCase();
     return n.includes('accounts payable')||n.includes('trade payable')||(n.includes('payable')&&!n.includes('tax')&&!n.includes('withholding')&&!n.includes('cwt'));
   });
   if(apAcc) {
@@ -5847,7 +5862,7 @@ function recomputeBalances() {
       .filter(po=>po.status==='received'&&po.paymentTerms&&!['cod','cod_check','prepaid'].includes(po.paymentTerms))
       .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
     const paidPOs = new Set((state.journal||[]).filter(j=>j.poRef&&!j.cancelled).map(j=>j.poRef));
-    const paidAP = (state.purchaseOrders||[])
+    const paidAP  = (state.purchaseOrders||[])
       .filter(po=>paidPOs.has(po.id))
       .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
     apAcc.balance = Math.max(0, totalPOAP - paidAP);
@@ -5940,7 +5955,7 @@ function calcCWT() {
 function saveCollection() {
   const date       = document.getElementById('col-date').value;
   const customer   = document.getElementById('col-cust').value;
-  const list = document.getElementById('col-inv-list');
+  const list       = document.getElementById('col-inv-list');
   const selectedInvoices = list ? Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value) : [];
   const invoice    = selectedInvoices.length > 0 ? selectedInvoices.join(', ') : '—';
   const amount     = parseFloat(document.getElementById('col-amt').value) || 0;
@@ -5951,15 +5966,38 @@ function saveCollection() {
   const cwtRateEl  = document.getElementById('col-cwt-rate');
   const cwtRate    = cwtRateEl ? cwtRateEl.value : '0';
   if(!customer) { alert('Please select a customer.'); return; }
-  if(!amount) { alert('Please enter the amount received.'); return; }
+  if(!amount)   { alert('Please enter the amount received.'); return; }
 
-  const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
+  const id  = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
   const rec = { id, date, customer, invoice, invoices: selectedInvoices, amount, mode, reference, receivedBy };
   if(cwtAmt > 0) { rec.cwtAmount = cwtAmt; rec.cwtRate = cwtRate; rec.netCash = amount - cwtAmt; }
   state.collections.push(rec);
 
+  // Auto-mark invoices as paid if fully collected
+  const paidNow = [];
+  selectedInvoices.forEach(invId => {
+    const inv = (state.invoices||[]).find(i=>i.id===invId);
+    if(inv && inv.status !== 'paid') {
+      const totalColl = (state.collections||[])
+        .filter(r=>(r.invoices||[]).includes(invId)||r.invoice===invId)
+        .reduce((s,r)=>s+(r.netCash||r.amount||0),0);
+      if(totalColl >= (inv.amount||0)) paidNow.push(invId);
+    }
+  });
+
   recomputeBalances();
-  save(); closeModal(); render();
+  save();
+  closeModal();
+  render();
+
+  // Notify which invoices were auto-marked paid
+  if(paidNow.length > 0) {
+    setTimeout(() => {
+      alert(`✅ Collection saved!\n\n${paidNow.length === 1
+        ? `Invoice ${paidNow[0]} has been automatically marked as PAID.`
+        : `${paidNow.length} invoices automatically marked as PAID:\n${paidNow.join(', ')}`}`);
+    }, 200);
+  }
 }
 
 // ── INVENTORY TRACKER ────────────────────────────────────────────────────────
@@ -8950,7 +8988,9 @@ ${(so.drIssued||[]).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print SO</button>
-  <button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>
+  ${(so.status==='approved'||so.status==='delivered')
+    ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
+    : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve SO first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
   ${so.status==='approved'&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
 </div>`);
@@ -8959,6 +8999,16 @@ ${(so.drIssued||[]).length>0?`
 function showIssueDR(soId) {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
+
+  // Require SO to be approved before issuing DR
+  if(so.status === 'pending') {
+    alert('❌ Cannot issue Delivery Receipt.\n\nThis Sales Order is still PENDING approval.\n\nPlease approve the SO first before issuing a DR.');
+    return;
+  }
+  if(so.status === 'draft') {
+    alert('❌ Cannot issue Delivery Receipt.\n\nThis Sales Order is in DRAFT status. Please approve it first.');
+    return;
+  }
   // Find lines NOT yet issued in any DR
   const issuedItemIds = new Set((so.drIssued||[]).flatMap(dr=>dr.items.map(it=>it.itemId+':'+it.qty)));
   // Build per-line issued qty tracker
