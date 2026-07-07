@@ -5091,44 +5091,51 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
       const vat = inv.vat ?? 0;
       const exempt = 0;
       return `<tr>
-        <td>${inv.date}</td>
-        <td class="mono">${inv.id}</td>
-        <td>${cust?.name||inv.customer||'—'}</td>
-        <td class="mono" style="font-size:11px">${cust?.tin||'—'}</td>
-        <td style="text-align:right">${fmt(inv.amount)}</td>
-        <td style="text-align:right">${fmt(vatBase)}</td>
-        <td style="text-align:right">${fmt(vat)}</td>
-        <td style="text-align:right">${fmt(exempt)}</td>
+        <td style="white-space:nowrap">${inv.date}</td>
+        <td class="mono" style="white-space:nowrap">${inv.id}</td>
+        <td style="font-weight:500">${cust?.name||inv.customer||'—'}</td>
+        <td class="mono" style="font-size:11px;white-space:nowrap">${cust?.tin||'—'}</td>
+        <td style="font-size:11px;color:var(--text-secondary);min-width:160px">${cust?.address||'—'}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(inv.amount)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(vatBase)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(vat)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(exempt)}</td>
       </tr>`;
     }).join('');
-    const totAmt = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
+    const totAmt  = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
     const totBase = invInPeriod.reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
-    const totVAT = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
+    const totVAT  = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
     rb.innerHTML = `
-<div class="report-section" style="max-width:900px">
+<div class="report-section" style="max-width:100%;overflow-x:auto">
   <div style="text-align:center;margin-bottom:12px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
     <div style="font-size:13px;font-weight:600;margin-top:6px">SALES BOOK (BIR)</div>
     <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
   </div>
-  <table class="report-table" style="font-size:12px">
+  <div style="overflow-x:auto">
+  <table class="report-table" style="font-size:12px;min-width:900px;width:100%">
     <thead><tr>
-      <th>Date</th><th>OR / Invoice No.</th><th>Customer Name</th><th>TIN</th>
-      <th style="text-align:right">Gross Amount</th>
-      <th style="text-align:right">VAT Sales</th>
-      <th style="text-align:right">Output VAT</th>
-      <th style="text-align:right">Exempt Sales</th>
+      <th style="white-space:nowrap">Date</th>
+      <th style="white-space:nowrap">OR / Invoice No.</th>
+      <th>Customer Name</th>
+      <th>TIN</th>
+      <th>Address</th>
+      <th style="text-align:right;white-space:nowrap">Gross Amount</th>
+      <th style="text-align:right;white-space:nowrap">VAT Sales</th>
+      <th style="text-align:right;white-space:nowrap">Output VAT</th>
+      <th style="text-align:right;white-space:nowrap">Exempt Sales</th>
     </tr></thead>
-    <tbody>${rows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tbody>${rows||'<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;background:var(--bg-card)">
-      <td colspan="4">TOTAL</td>
+      <td colspan="5">TOTAL</td>
       <td style="text-align:right">${fmt(totAmt)}</td>
       <td style="text-align:right">${fmt(totBase)}</td>
       <td style="text-align:right">${fmt(totVAT)}</td>
       <td style="text-align:right">—</td>
     </tr></tfoot>
   </table>
+  </div>
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
   }
@@ -5366,46 +5373,48 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
 
   else if(type === 'bir_slsp') {
     const cp = getCompanyProfile();
-    // Summary List of Sales
-    const salesBySupplier = {};
-    invInPeriod.forEach(inv => {
+
+    // Schedule 1 — Sales: one row per invoice (with date and invoice no.)
+    const salesRows = invInPeriod.sort((a,b)=>a.date.localeCompare(b.date)).map(inv => {
       const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
-      const key = cust?.tin || inv.customer || 'N/A';
-      if(!salesBySupplier[key]) salesBySupplier[key]={tin:cust?.tin||'N/A',name:cust?.name||inv.customer||'N/A',address:cust?.address||'—',taxable:0,vat:0,gross:0};
-      salesBySupplier[key].taxable += (inv.vatBase??inv.amount??0);
-      salesBySupplier[key].vat += (inv.vat||0);
-      salesBySupplier[key].gross += (inv.amount||0);
-    });
-    // Summary List of Purchases
-    const purBySupplier = {};
-    [...purInPeriod,...expInPeriod].forEach(p => {
+      return `<tr>
+        <td style="white-space:nowrap">${inv.date}</td>
+        <td class="mono" style="white-space:nowrap">${inv.id}</td>
+        <td class="mono" style="font-size:11px">${cust?.tin||'N/A'}</td>
+        <td style="font-weight:500">${cust?.name||inv.customer||'N/A'}</td>
+        <td style="font-size:11px;color:var(--text-secondary);min-width:150px">${cust?.address||'—'}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(inv.vatBase??inv.amount??0)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(inv.vat||0)}</td>
+        <td style="text-align:right;font-weight:500;white-space:nowrap">${fmt(inv.amount||0)}</td>
+      </tr>`;
+    }).join('');
+
+    // Schedule 2 — Purchases: one row per PO (with date and SI number)
+    const purRows2 = [...purInPeriod,...expInPeriod].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(p => {
       const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
-      const key = sup?.tin || p.vendor || 'N/A';
-      if(!purBySupplier[key]) purBySupplier[key]={tin:sup?.tin||'N/A',name:sup?.name||p.vendor||'N/A',address:sup?.address||'—',taxable:0,vat:0,gross:0};
-      purBySupplier[key].taxable += (p.vatBase??p.amount??0);
-      purBySupplier[key].vat += (p.vat||0);
-      purBySupplier[key].gross += (p.amount||0);
-    });
-    const salesRows = Object.values(salesBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
-      <td class="mono" style="font-size:11px">${r.tin}</td>
-      <td>${r.name}</td>
-      <td style="font-size:11px;color:var(--text-secondary)">${r.address}</td>
-      <td style="text-align:right">${fmt(r.taxable)}</td>
-      <td style="text-align:right">${fmt(r.vat)}</td>
-      <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
-    </tr>`).join('');
-    const purRows = Object.values(purBySupplier).sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<tr>
-      <td class="mono" style="font-size:11px">${r.tin}</td>
-      <td>${r.name}</td>
-      <td style="font-size:11px;color:var(--text-secondary)">${r.address}</td>
-      <td style="text-align:right">${fmt(r.taxable)}</td>
-      <td style="text-align:right">${fmt(r.vat)}</td>
-      <td style="text-align:right;font-weight:500">${fmt(r.gross)}</td>
-    </tr>`).join('');
-    const totSales={taxable:Object.values(salesBySupplier).reduce((s,r)=>s+r.taxable,0),vat:Object.values(salesBySupplier).reduce((s,r)=>s+r.vat,0),gross:Object.values(salesBySupplier).reduce((s,r)=>s+r.gross,0)};
-    const totPur={taxable:Object.values(purBySupplier).reduce((s,r)=>s+r.taxable,0),vat:Object.values(purBySupplier).reduce((s,r)=>s+r.vat,0),gross:Object.values(purBySupplier).reduce((s,r)=>s+r.gross,0)};
+      const po  = (state.purchaseOrders||[]).find(x=>x.id===p.id);
+      return `<tr>
+        <td style="white-space:nowrap">${p.date||'—'}</td>
+        <td class="mono" style="font-size:11px;white-space:nowrap">${po?.supplierInvoiceNo||p.id||'—'}</td>
+        <td class="mono" style="font-size:11px">${sup?.tin||'N/A'}</td>
+        <td style="font-weight:500">${sup?.name||p.vendor||'N/A'}</td>
+        <td style="font-size:11px;color:var(--text-secondary);min-width:150px">${sup?.address||'—'}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(p.vatBase??p.amount??0)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(p.vat||0)}</td>
+        <td style="text-align:right;font-weight:500;white-space:nowrap">${fmt(p.amount||0)}</td>
+      </tr>`;
+    }).join('');
+
+    const totSalesBase = invInPeriod.reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
+    const totSalesVAT  = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
+    const totSalesGross= invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
+    const allPur2 = [...purInPeriod,...expInPeriod];
+    const totPurBase  = allPur2.reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
+    const totPurVAT   = allPur2.reduce((s,p)=>s+(p.vat||0),0);
+    const totPurGross  = allPur2.reduce((s,p)=>s+(p.amount||0),0);
+
     rb.innerHTML = `
-<div style="max-width:900px">
+<div style="max-width:100%;overflow-x:auto">
   <div style="text-align:center;margin-bottom:16px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
@@ -5416,26 +5425,50 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   <div style="font-weight:700;font-size:13px;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-top:16px">
     SCHEDULE 1 — Summary List of Sales (SLS)
   </div>
-  <table class="report-table" style="font-size:12px">
-    <thead><tr><th>TIN</th><th>Customer Name</th><th>Address</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Output VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
-    <tbody>${salesRows||'<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
-    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="3">TOTAL</td><td style="text-align:right">${fmt(totSales.taxable)}</td><td style="text-align:right">${fmt(totSales.vat)}</td><td style="text-align:right">${fmt(totSales.gross)}</td></tr></tfoot>
+  <div style="overflow-x:auto">
+  <table class="report-table" style="font-size:12px;min-width:850px;width:100%">
+    <thead><tr>
+      <th>Date</th><th>Invoice No.</th><th>TIN</th><th>Customer Name</th><th>Address</th>
+      <th style="text-align:right">Taxable Amount</th>
+      <th style="text-align:right">Output VAT</th>
+      <th style="text-align:right">Gross Amount</th>
+    </tr></thead>
+    <tbody>${salesRows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="5">TOTAL</td>
+      <td style="text-align:right">${fmt(totSalesBase)}</td>
+      <td style="text-align:right">${fmt(totSalesVAT)}</td>
+      <td style="text-align:right">${fmt(totSalesGross)}</td>
+    </tr></tfoot>
   </table>
+  </div>
 
   <div style="font-weight:700;font-size:13px;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md) var(--radius-md) 0 0;margin-top:24px">
     SCHEDULE 2 — Summary List of Purchases (SLP)
   </div>
-  <table class="report-table" style="font-size:12px">
-    <thead><tr><th>TIN</th><th>Supplier Name</th><th>Address</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">Input VAT</th><th style="text-align:right">Gross Amount</th></tr></thead>
-    <tbody>${purRows||'<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
-    <tfoot><tr style="font-weight:700;background:var(--bg-card)"><td colspan="3">TOTAL</td><td style="text-align:right">${fmt(totPur.taxable)}</td><td style="text-align:right">${fmt(totPur.vat)}</td><td style="text-align:right">${fmt(totPur.gross)}</td></tr></tfoot>
+  <div style="overflow-x:auto">
+  <table class="report-table" style="font-size:12px;min-width:850px;width:100%">
+    <thead><tr>
+      <th>Date</th><th>Supplier Invoice No.</th><th>TIN</th><th>Supplier Name</th><th>Address</th>
+      <th style="text-align:right">Taxable Amount</th>
+      <th style="text-align:right">Input VAT</th>
+      <th style="text-align:right">Gross Amount</th>
+    </tr></thead>
+    <tbody>${purRows2||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tfoot><tr style="font-weight:700;background:var(--bg-card)">
+      <td colspan="5">TOTAL</td>
+      <td style="text-align:right">${fmt(totPurBase)}</td>
+      <td style="text-align:right">${fmt(totPurVAT)}</td>
+      <td style="text-align:right">${fmt(totPurGross)}</td>
+    </tr></tfoot>
   </table>
+  </div>
 
   <div style="margin-top:16px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-md);font-size:12px">
     <strong>VAT Summary:</strong> &nbsp;
-    Output VAT: <strong>${fmt(totSales.vat)}</strong> &nbsp;|&nbsp;
-    Input VAT: <strong>${fmt(totPur.vat)}</strong> &nbsp;|&nbsp;
-    VAT Payable: <strong style="color:${totSales.vat-totPur.vat>=0?'var(--red)':'var(--green)'}">${fmt(Math.abs(totSales.vat-totPur.vat))} ${totSales.vat-totPur.vat>=0?'(Payable)':'(Creditable)'}</strong>
+    Output VAT: <strong>${fmt(totSalesVAT)}</strong> &nbsp;|&nbsp;
+    Input VAT: <strong>${fmt(totPurVAT)}</strong> &nbsp;|&nbsp;
+    VAT Payable: <strong style="color:${totSalesVAT-totPurVAT>=0?'var(--red)':'var(--green)'}">${fmt(Math.abs(totSalesVAT-totPurVAT))} ${totSalesVAT-totPurVAT>=0?'(Payable)':'(Creditable)'}</strong>
   </div>
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
