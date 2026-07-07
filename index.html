@@ -249,7 +249,10 @@
     <div class="form-group"><label>Username</label><input type="text" id="login-user" placeholder="Enter username" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div class="form-group"><label>Password</label><input type="password" id="login-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:18px"></div>
-    <button class="btn primary" style="width:100%;justify-content:center;padding:10px" onclick="doLogin()"><i class="ti ti-login"></i>Sign In</button>
+    <button class="btn primary" id="login-btn" style="width:100%;justify-content:center;padding:10px" onclick="doLogin()"><i class="ti ti-login"></i>Sign In</button>
+    <div style="text-align:center;margin-top:12px">
+      <span onclick="resetUsersToDefault()" style="font-size:10px;color:var(--text-tertiary);cursor:pointer;text-decoration:underline">Can't log in? Reset to default</span>
+    </div>
   </div>
 </div>
 
@@ -304,13 +307,16 @@
     <div class="nav-item" title="Customers" data-page="customers"><i class="ti ti-users"></i><span>Customers</span></div>
     <div class="nav-item" title="Suppliers" data-page="suppliers"><i class="ti ti-truck"></i><span>Suppliers</span></div>
 
+
+    <div id="admin-nav" style="display:none">
     <div class="nav-section">Communication</div>
-    <div class="nav-item" title="Team Chat" data-page="chat"><i class="ti ti-messages"></i><span>Team Chat</span><span id="chat-unread-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:1px 6px;min-width:18px;text-align:center"></span></div>
+    <div class="nav-item" title="Team Chat" data-page="chat"><i class="ti ti-messages"></i><span>Team Chat</span><span id="chat-nav-badge" style="display:none;margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:1px 6px;min-width:18px;text-align:center"></span></div>
 
     <div id="admin-nav" style="display:none">
       <div class="nav-section">Administration</div>
       <div class="nav-item" title="User Accounts" data-page="users"><i class="ti ti-shield-lock"></i><span>User Accounts</span></div>
       <div class="nav-item" title="Company Profile" data-page="company"><i class="ti ti-building"></i><span>Company Profile</span></div>
+    </div>
     </div>
     <div style="margin-top:auto;flex-shrink:0;padding:10px 10px 10px;border-top:1px solid var(--border-light);background:var(--bg-secondary)">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -352,7 +358,15 @@
   </div>
 </div>
 
-<!-- Modal overlay -->
+<!-- Floating Chat Button -->
+<div id="chat-float-btn" onclick="toggleChatPanel()" style="display:none;position:fixed;bottom:24px;right:24px;width:52px;height:52px;background:var(--accent);border-radius:50%;cursor:pointer;z-index:600;box-shadow:0 4px 16px rgba(0,0,0,0.4);align-items:center;justify-content:center;transition:transform 0.2s" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+  <i class="ti ti-messages" style="font-size:22px;color:#fff"></i>
+  <span id="chat-unread-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:2px 6px;min-width:18px;text-align:center;border:2px solid var(--bg-secondary)"></span>
+</div>
+
+<!-- Floating Chat Panel -->
+<div id="chat-panel" style="display:none;position:fixed;bottom:88px;right:24px;width:380px;height:520px;background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:var(--radius-md);z-index:600;box-shadow:0 8px 32px rgba(0,0,0,0.4);flex-direction:column;overflow:hidden">
+</div>
 <div class="overlay" id="modal" style="display:none" onclick="overlayClick(event)">
   <div class="modal" id="modal-inner"></div>
 </div>
@@ -753,15 +767,23 @@ function getRolePages(role) {
 function getUsers() {
   try {
     const d = localStorage.getItem(USERS_KEY);
-    if (d) return JSON.parse(d);
+    if(d) {
+      const parsed = JSON.parse(d);
+      if(Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
   } catch(e) {}
-  // Default admin
   return [{ id:'U001', username:'admin', password:'admin123', name:'System Administrator', role:'admin', active:true }];
 }
 
 function saveUsers(users) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch(e) {}
   fbSaveMeta();
+  // Re-apply nav visibility so permission changes take effect immediately
+  if(typeof currentUser !== 'undefined' && currentUser) {
+    document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+      el.style.display = canAccess(el.dataset.page) ? '' : 'none';
+    });
+  }
 }
 
 function getSession() {
@@ -826,7 +848,7 @@ function requireAdmin(action) {
 
 function canAccess(page) {
   if (!currentUser) return false;
-  if (page === 'chat') return true; // Chat available to all logged-in users
+  if (page === 'chat') return true;
   if (currentUser.role === 'admin') return true;
   const users = getUsers();
   const u = users.find(u=>u.id===currentUser.id);
@@ -837,21 +859,41 @@ function canAccess(page) {
   return allowed.length === 0 || allowed.includes(page);
 }
 
-function login(username, password) {
-  const users = getUsers();
-  const u = users.find(u => u.username === username && u.active);
-  if(!u) return false;
-  const storedPw = u.password || '';
-  const match = storedPw === password || (storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw));
-  if(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw)) {
-    u.password = password;
-    try { localStorage.setItem('anmolpharma_users', JSON.stringify(users)); } catch(e) {}
+function resetUsersToDefault() {
+  if(!confirm('Reset users to default?\n\nThis will restore the default admin account (admin / admin123) and remove any PIN.\n\nAll other user accounts will be lost.\n\nContinue?')) return;
+  const defaultUsers = [{ id:'U001', username:'admin', password:'admin123', name:'System Administrator', role:'admin', active:true }];
+  try {
+    localStorage.setItem('anmolpharma_users', JSON.stringify(defaultUsers));
+    document.getElementById('login-error').textContent = '✅ Reset done. Login with admin / admin123';
+    document.getElementById('login-user').value = 'admin';
+    document.getElementById('login-pass').value = 'admin123';
+  } catch(e) {
+    alert('Reset failed: ' + e.message);
   }
-  if(storedPw !== password && !(storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw))) return false;
+}
 
-  // Admin 2-step verification
+function login(username, password) {
+  let users;
+  try { users = getUsers(); } catch(e) { console.error('getUsers failed:', e); return false; }
+
+  // Find user — also match inactive ones to give correct error message
+  const u = users.find(u => u.username === username);
+  if(!u) return false;
+  if(u.active === false) return false;
+
+  // Password check — support plain text and legacy hash migration
+  const storedPw = u.password || '';
+  const isLegacyHash = storedPw.length === 64 && /^[0-9a-f]+$/.test(storedPw);
+  if(!isLegacyHash && storedPw !== password) return false;
+
+  // Migrate legacy hash back to plain text
+  if(isLegacyHash) {
+    u.password = password;
+    try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch(e) {}
+  }
+
+  // Admin 2-step PIN verification
   if(u.role === 'admin' && u.loginPin) {
-    // Show PIN prompt instead of logging in immediately
     showAdminPinVerify(u);
     return 'pending';
   }
@@ -1035,6 +1077,22 @@ function showAppScreen() {
   if (adminNav) adminNav.style.display = currentUser.role === 'admin' ? '' : 'none';
   // Start background chat notification listener
   setTimeout(startBackgroundChatListener, 3000);
+  // Show floating chat button
+  const chatBtn = document.getElementById('chat-float-btn');
+  if(chatBtn) chatBtn.style.display = 'flex';
+  // Prompt admin to set PIN if not yet configured
+  if(currentUser.role === 'admin') {
+    const users = getUsers();
+    const u = users.find(x=>x.id===currentUser.id);
+    if(u && !u.loginPin) {
+      setTimeout(() => {
+        if(confirm('🔐 Security Tip\n\nYou have no Login PIN set for your admin account.\n\nA PIN adds 2-step verification each time you log in.\n\nSet up your PIN now?')) {
+          state.page = 'users'; render();
+          setTimeout(showSetMyPIN, 400);
+        }
+      }, 1800);
+    }
+  }
   render();
 }
 
@@ -1192,7 +1250,7 @@ function renderUsers(c, ta) {
   Only <strong>Admin</strong> users can manage accounts. Click a user card to expand details and actions.
 </div>
 <div style="display:flex;flex-direction:column;gap:8px">
-${users.map(u => {
+${users.filter(u=>u&&u.id).map(u => {
   const hasCustom = u.customPages && u.customPages.length > 0 && u.role !== 'admin';
   const hasCustomActions = u.customActions && u.customActions.length > 0 && u.role !== 'admin';
   const effectivePages = getUserEffectivePages(u);
@@ -1797,6 +1855,15 @@ function renderPage(page) {
   if(pages[page]) pages[page](c, ta);
 }
 
+function renderCurrentPage() {
+  const c  = document.getElementById('content');
+  const ta = document.getElementById('toolbar-actions') || document.getElementById('top-actions');
+  if(!c||!ta) return;
+  const pageMap = { dashboard:renderDashboard, journal:renderJournal, disbursement:renderDisbursementJournal, salesorders:renderSalesOrders, invoices:renderInvoices, salesreturns:renderSalesReturns, purchaseorders:renderPurchaseOrders, purchases:renderPurchases, expenses:renderExpenses, lapsing:renderLapsingSchedule, coa:renderCOA, reports:renderReports, collections:renderCollections, inventory:renderInventory, customers:renderCustomers, suppliers:renderSuppliers, users:renderUsers, company:renderCompanyProfile, employees:renderEmployees, attendance:renderAttendance, payroll:renderPayroll, chat:renderChat };
+  const fn = pageMap[state.page];
+  if(fn) fn(c, ta);
+}
+
 function render() {
   const titles = { dashboard:'Dashboard', journal:'General Journal', disbursement:'Disbursement Journal', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
   document.getElementById('page-title').textContent = titles[state.page] || state.page;
@@ -2187,7 +2254,12 @@ function renderDisbursementJournal(c, ta) {
     return groupLines.some(l=>l.credit&&isCashAcc(l.credit));
   });
   const cashKeywords2 = ['cash','bank','petty','drawing'];
-  const totalDisbursed = disbEntries.filter(j=>j.credit&&state.accounts.find(a=>a.id===j.credit&&cashKeywords2.some(k=>a.name.toLowerCase().includes(k)))).reduce((s,j)=>s+(j.amount||0),0);
+  // Sum the credit (drawn-from) lines only, one per group, no duplicates
+  const seenGroups = new Set();
+  const totalDisbursed = disbEntries
+    .filter(j => j.credit && state.accounts.find(a=>String(a.id)===String(j.credit)&&cashKeywords2.some(k=>a.name.toLowerCase().includes(k))))
+    .filter(j => { const g = j.group||j.id; if(seenGroups.has(g)) return false; seenGroups.add(g); return true; })
+    .reduce((s,j)=>s+(j.amount||0),0);
   const totalEntries = [...new Set(disbEntries.map(j=>j.group||j.id))].length;
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:20px">
@@ -2269,7 +2341,6 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
 <div style="margin-top:12px;text-align:right">
   <button onclick="window.print()" style="padding:8px 20px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button>
 </div>
-<script>
 (async function() {
   async function sha256(msg) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
@@ -2578,6 +2649,7 @@ ${disbFields}
 </div>`;
   window._jeOpts = opts;
   window._jeIsDisbursement = isDisbursement;
+  window._jeEditGroupId = prefill?.groupId || null;
   renderJeLines();
   // Pre-select payee dropdown if editing/prefill has payee
   if(isDisbursement && prefill?.payee) {
@@ -3011,7 +3083,7 @@ function saveJournal() {
     const totalOtherC = creditLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
     const netDrawn    = totalDebit - totalOtherC;
     if(netDrawn < 0) { alert('Other credits cannot exceed total debits.'); return; }
-    const groupId = prefill?.groupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
+    const groupId = window._jeEditGroupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
     let lineIdx = 0;
     // Debit lines
     debitLines.forEach(l => {
@@ -3040,7 +3112,7 @@ function saveJournal() {
   const hasCashCredit = jeLines.some(l=>l.credit && state.accounts.find(a=>String(a.id)===String(l.credit) && cashKeywords.some(k=>a.name.toLowerCase().includes(k))));
   const entryType = hasCashCredit ? 'disbursement' : 'general';
   const entryPrefix = entryType==='disbursement' ? 'DV' : 'JV';
-  const groupId = prefill?.groupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
+  const groupId = window._jeEditGroupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
@@ -3166,7 +3238,7 @@ function renderInvoices(c, ta) {
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
     value="${window._invFilter||''}"
-    oninput="window._invFilter=this.value;renderPage('invoices')"
+    oninput="window._invFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -5560,10 +5632,12 @@ function showAddCollection() {
   </div></div>
 </div>
 <div class="form-group"><label>Customer</label><select id="col-cust" onchange="filterCollectionInvoices()">${custOpts}</select></div>
-<div class="form-group"><label>Invoice <span id="col-inv-hint" style="font-size:11px;color:var(--text-tertiary)">(select customer first)</span></label>
-  <select id="col-inv" onchange="fillCollectionAmount()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-    <option value="">— select customer first —</option>
-  </select>
+<div class="form-group">
+  <label>Invoices <span id="col-inv-hint" style="font-size:11px;color:var(--text-tertiary)">(select customer first)</span></label>
+  <div id="col-inv-list" style="border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);max-height:180px;overflow-y:auto;padding:6px 0">
+    <div style="padding:10px 14px;color:var(--text-tertiary);font-size:12px">— select customer first —</div>
+  </div>
+  <div id="col-selected-total" style="font-size:12px;color:var(--accent);margin-top:5px;font-weight:500;text-align:right"></div>
 </div>
 <div class="form-group"><label>Amount Received (₱)</label><input type="number" id="col-amt" placeholder="0.00" min="0" step="0.01" oninput="calcCWT()"></div>
 <div class="form-row">
@@ -5601,79 +5675,36 @@ function showAddCollection() {
 }
 
 function recomputeBalances() {
-  // Recalculate every customer's balance and every invoice's paid status from scratch
+  // Customer balances
   state.customers.forEach(cu => {
-    // Sum all non-draft invoice amounts for this customer
-    const totalInvoiced = state.invoices
-      .filter(i => i.customer === cu.name && i.status !== 'draft')
-      .reduce((s, i) => s + (i.amount || 0), 0);
-    // Sum all collections for this customer
-    const totalCollected = state.collections
-      .filter(r => r.customer === cu.name)
-      .reduce((s, r) => s + (r.amount || 0), 0);
-    // Sum all approved sales returns for this customer (credits that reduce balance)
-    const totalReturns = (state.salesReturns||[])
-      .filter(r => r.customer === cu.name && r.status === 'approved')
-      .reduce((s, r) => s + r.lines.reduce((a, l) => a + (l.lineTotal || 0), 0), 0);
+    const totalInvoiced  = (state.invoices||[]).filter(i=>i.customer===cu.name&&i.status!=='draft').reduce((s,i)=>s+(i.amount||0),0);
+    const totalCollected = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.amount||0),0);
+    const totalReturns   = (state.salesReturns||[]).filter(r=>r.customer===cu.name&&r.status==='approved').reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
     cu.balance = Math.max(0, totalInvoiced - totalCollected - totalReturns);
   });
-
-  // For each non-draft invoice, check if cumulative collections cover it → mark paid
+  // Invoice paid status
   state.invoices.forEach(inv => {
-    if (inv.status === 'draft') return;
-    const totalCollected = state.collections
-      .filter(r => r.invoice === inv.id)
-      .reduce((s, r) => s + (r.amount || 0), 0);
-    if (totalCollected >= inv.amount) {
-      inv.status = 'paid';
-    } else if (inv.status === 'paid' && !inv.manuallyPaid) {
-      // Only revert if NOT manually marked paid by admin
-      inv.status = 'pending';
-    }
+    if(inv.status==='draft') return;
+    const totalCollected = (state.collections||[])
+      .filter(r=>(r.invoices||[]).includes(inv.id)||r.invoice===inv.id)
+      .reduce((s,r)=>s+(r.amount||0),0);
+    if(totalCollected>=inv.amount) inv.status='paid';
+    else if(inv.status==='paid'&&!inv.manuallyPaid) inv.status='pending';
   });
-}
-
-function filterCollectionInvoices() {
-  const custName = document.getElementById('col-cust')?.value;
-  const invSel   = document.getElementById('col-inv');
-  const hint     = document.getElementById('col-inv-hint');
-  if(!invSel) return;
-
-  if(!custName) {
-    invSel.innerHTML = '<option value="">— select customer first —</option>';
-    if(hint) hint.textContent = '(select customer first)';
-    return;
-  }
-
-  // Filter invoices by selected customer that are not yet paid
-  const custInvoices = (state.invoices||[]).filter(i =>
-    (i.customer === custName) && i.status !== 'paid'
-  );
-
-  if(!custInvoices.length) {
-    invSel.innerHTML = '<option value="">— no outstanding invoices for this customer —</option>';
-    if(hint) hint.textContent = '(no outstanding invoices)';
-    return;
-  }
-
-  invSel.innerHTML = '<option value="">— select invoice —</option>' +
-    custInvoices.map(i => {
-      const balance = getInvoiceBalance(i.id);
-      const overdue = i.due && i.due < today();
-      return `<option value="${i.id}">${i.id} — ${fmt(i.amount)} (balance: ${fmt(balance)}) [${i.status}]${overdue?' ⚠ OVERDUE':''}</option>`;
-    }).join('');
-
-  if(hint) hint.textContent = `(${custInvoices.length} outstanding invoice${custInvoices.length!==1?'s':''})`;
-}
-
-function fillCollectionAmount() {
-  const invId = document.getElementById('col-inv')?.value;
-  const amtEl = document.getElementById('col-amt');
-  if(!invId || !amtEl) return;
-  const balance = getInvoiceBalance(invId);
-  if(balance > 0) {
-    amtEl.value = balance.toFixed(2);
-    calcCWT();
+  // Accounts Payable balance
+  const apAcc = (state.accounts||[]).find(a=>{
+    const n=String(a.name||'').toLowerCase();
+    return n.includes('accounts payable')||n.includes('trade payable')||(n.includes('payable')&&!n.includes('tax')&&!n.includes('withholding')&&!n.includes('cwt'));
+  });
+  if(apAcc) {
+    const totalPOAP = (state.purchaseOrders||[])
+      .filter(po=>po.status==='received'&&po.paymentTerms&&!['cod','cod_check','prepaid'].includes(po.paymentTerms))
+      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+    const paidPOs = new Set((state.journal||[]).filter(j=>j.poRef&&!j.cancelled).map(j=>j.poRef));
+    const paidAP = (state.purchaseOrders||[])
+      .filter(po=>paidPOs.has(po.id))
+      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+    apAcc.balance = Math.max(0, totalPOAP - paidAP);
   }
 }
 
@@ -5681,10 +5712,65 @@ function getInvoiceBalance(invId) {
   const inv = (state.invoices||[]).find(i=>i.id===invId);
   if(!inv) return 0;
   const totalPaid = (state.collections||[])
-    .filter(c=>c.invoice===invId)
+    .filter(c => (c.invoices||[]).includes(invId) || c.invoice===invId)
     .reduce((s,c)=>s+(c.netCash||c.amount||0),0);
   return Math.max(0, (inv.amount||0) - totalPaid);
 }
+
+function filterCollectionInvoices() {
+  const custName = document.getElementById('col-cust')?.value;
+  const list = document.getElementById('col-inv-list');
+  const hint = document.getElementById('col-inv-hint');
+  if(!list) return;
+  if(!custName || custName==='__add_new__') {
+    list.innerHTML = '<div style="padding:10px 14px;color:var(--text-tertiary);font-size:12px">— select customer first —</div>';
+    if(hint) hint.textContent = '(select customer first)';
+    return;
+  }
+  const custInvoices = (state.invoices||[]).filter(i=>i.customer===custName && i.status!=='paid');
+  if(!custInvoices.length) {
+    list.innerHTML = '<div style="padding:10px 14px;color:var(--text-tertiary);font-size:12px">No outstanding invoices for this customer.</div>';
+    if(hint) hint.textContent = '(no outstanding invoices)';
+    return;
+  }
+  if(hint) hint.textContent = `(${custInvoices.length} outstanding — check all that apply)`;
+  list.innerHTML = custInvoices.map(i => {
+    const balance = getInvoiceBalance(i.id);
+    const overdue = i.due && i.due < today();
+    return `<label style="display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+      <input type="checkbox" value="${i.id}" onchange="fillCollectionAmount()" style="width:16px;height:16px;cursor:pointer;flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;display:flex;justify-content:space-between">
+          <span class="mono">${i.id}</span>
+          <span style="color:${overdue?'var(--red)':'var(--text-primary)'}">${fmt(i.amount)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary);display:flex;justify-content:space-between;margin-top:2px">
+          <span>${i.date} ${overdue?'<span style="color:var(--red)">⚠ OVERDUE</span>':''}</span>
+          <span style="color:var(--accent)">Balance: ${fmt(balance)}</span>
+        </div>
+      </div>
+    </label>`;
+  }).join('');
+}
+
+function fillCollectionAmount() {
+  const list   = document.getElementById('col-inv-list');
+  const amtEl  = document.getElementById('col-amt');
+  const totalEl= document.getElementById('col-selected-total');
+  if(!list||!amtEl) return;
+  const checked = Array.from(list.querySelectorAll('input[type="checkbox"]:checked'));
+  const selected = checked.map(cb=>cb.value);
+  const total = selected.reduce((s,id)=>s+getInvoiceBalance(id),0);
+  if(selected.length>0) {
+    amtEl.value = total.toFixed(2);
+    if(totalEl) totalEl.textContent = `${selected.length} invoice${selected.length>1?'s':''} selected — Total balance: ${fmt(total)}`;
+    calcCWT();
+  } else {
+    amtEl.value = '';
+    if(totalEl) totalEl.textContent = '';
+  }
+}
+
 
 function calcCWT() {
   const rateEl = document.getElementById('col-cwt-rate');
@@ -5708,7 +5794,9 @@ function calcCWT() {
 function saveCollection() {
   const date       = document.getElementById('col-date').value;
   const customer   = document.getElementById('col-cust').value;
-  const invoice    = document.getElementById('col-inv').value || '—';
+  const list = document.getElementById('col-inv-list');
+  const selectedInvoices = list ? Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value) : [];
+  const invoice    = selectedInvoices.length > 0 ? selectedInvoices.join(', ') : '—';
   const amount     = parseFloat(document.getElementById('col-amt').value) || 0;
   const mode       = document.getElementById('col-mode2').value;
   const reference  = document.getElementById('col-ref').value || '—';
@@ -5716,10 +5804,11 @@ function saveCollection() {
   const cwtAmt     = parseFloat(document.getElementById('col-cwt-amt')?.value)||0;
   const cwtRateEl  = document.getElementById('col-cwt-rate');
   const cwtRate    = cwtRateEl ? cwtRateEl.value : '0';
-  if (!amount) { alert('Please enter the amount received.'); return; }
+  if(!customer) { alert('Please select a customer.'); return; }
+  if(!amount) { alert('Please enter the amount received.'); return; }
 
   const id = 'OR-' + String(state.collections.length + 1).padStart(3, '0');
-  const rec = { id, date, customer, invoice, amount, mode, reference, receivedBy };
+  const rec = { id, date, customer, invoice, invoices: selectedInvoices, amount, mode, reference, receivedBy };
   if(cwtAmt > 0) { rec.cwtAmount = cwtAmt; rec.cwtRate = cwtRate; rec.netCash = amount - cwtAmt; }
   state.collections.push(rec);
 
@@ -6997,33 +7086,35 @@ function saveMovement(itemId) {
 }
 
 function showReceiveFromPO() {
-  // List only approved POs that haven't been received yet
   const eligiblePOs = (state.purchaseOrders||[]).filter(po=>po.status==='approved');
   if(!eligiblePOs.length) {
-    alert('No approved Purchase Orders available to receive.\nApprove a PO first, then come back to receive it.');
+    alert('No approved Purchase Orders available to receive.\nApprove a PO first in the Purchase Orders tab.');
     return;
   }
   const poOpts = eligiblePOs.map(po=>{
     const poTotal = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-    return `<option value="${po.id}">${po.id} — ${po.supplier} (${po.lines.length} items, ${fmt(poTotal)})</option>`;
+    return `<option value="${po.id}">${po.id} — ${po.supplier} (${po.lines.length} items · ${fmt(poTotal)})</option>`;
   }).join('');
 
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px"></i>Receive Inventory from PO</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="padding:10px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--green)">
-  <i class="ti ti-info-circle" style="margin-right:5px"></i>
-  Receiving a PO will add the ordered quantities to inventory and create stock movement records automatically.
-</div>
+<div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px;color:var(--green)"></i>Receive Inventory from PO</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-group"><label>Select Purchase Order</label>
-  <select id="recv-po" onchange="previewPOReceive()" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+  <select id="recv-po-sel" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
     <option value="">— select PO —</option>${poOpts}
   </select>
 </div>
-<div id="recv-po-preview" style="margin-bottom:14px"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="confirmReceivePO()"><i class="ti ti-check"></i>Receive & Update Inventory</button>
+  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="openReceivePOFromInventory()"><i class="ti ti-arrow-right"></i>Continue</button>
 </div>`);
+}
+
+function openReceivePOFromInventory() {
+  const poId = document.getElementById('recv-po-sel')?.value;
+  if(!poId) { alert('Please select a Purchase Order.'); return; }
+  closeModal();
+  // Use the same receivePO modal which requires supplier invoice + DR
+  setTimeout(()=>receivePO(poId), 100);
 }
 
 function previewPOReceive() {
@@ -8608,17 +8699,17 @@ function renderSalesOrders(c, ta) {
 
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
-  <div class="kpi" onclick="window._soStatusFilter='';window._soFilter='';renderPage('salesorders')" style="cursor:pointer" title="Show all"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='pending'?'':'pending';renderPage('salesorders')" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='approved'?'':'approved';renderPage('salesorders')" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='delivered'?'':'delivered';renderPage('salesorders')" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='delivered'?'2px solid var(--green)':'none'}" title="Filter delivered"><div class="kpi-label">Delivered</div><div class="kpi-value" style="color:var(--green)">${byStatus('delivered')}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter='';window._soFilter='';render()" style="cursor:pointer" title="Show all"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='pending'?'':'pending';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='approved'?'':'approved';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='delivered'?'':'delivered';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='delivered'?'2px solid var(--green)':'none'}" title="Filter delivered"><div class="kpi-label">Delivered</div><div class="kpi-value" style="color:var(--green)">${byStatus('delivered')}</div></div>
   <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value pos">${fmt(total)}</div></div>
 </div>
-${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> orders only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._soStatusFilter='';renderPage('salesorders')">Clear</button></div>`:''}
+${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> orders only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._soStatusFilter='';render()">Clear</button></div>`:''}
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
     value="${window._soFilter||''}"
-    oninput="window._soFilter=this.value;renderPage('salesorders')"
+    oninput="window._soFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -9265,16 +9356,16 @@ function renderPurchaseOrders(c, ta) {
 
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-  <div class="kpi" onclick="window._poStatusFilter='';window._poFilter='';renderPage('purchaseorders')" style="cursor:pointer" title="Show all"><div class="kpi-label">Total POs</div><div class="kpi-value">${pos.length}</div></div>
-  <div class="kpi" onclick="window._poStatusFilter=window._poStatusFilter==='pending'?'':'pending';renderPage('purchaseorders')" style="cursor:pointer;outline:${(window._poStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
-  <div class="kpi" onclick="window._poStatusFilter=window._poStatusFilter==='approved'?'':'approved';renderPage('purchaseorders')" style="cursor:pointer;outline:${(window._poStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
+  <div class="kpi" onclick="window._poStatusFilter='';window._poFilter='';render()" style="cursor:pointer" title="Show all"><div class="kpi-label">Total POs</div><div class="kpi-value">${pos.length}</div></div>
+  <div class="kpi" onclick="window._poStatusFilter=window._poStatusFilter==='pending'?'':'pending';render()" style="cursor:pointer;outline:${(window._poStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
+  <div class="kpi" onclick="window._poStatusFilter=window._poStatusFilter==='approved'?'':'approved';render()" style="cursor:pointer;outline:${(window._poStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
   <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value neg">${fmt(total)}</div></div>
 </div>
-${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> POs only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._poStatusFilter='';renderPage('purchaseorders')">Clear</button></div>`:''}
+${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> POs only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._poStatusFilter='';render()">Clear</button></div>`:''}
 <div style="margin-bottom:8px">
   <input type="text" placeholder="🔍  Search by PO no., supplier, item, status…"
     value="${window._poFilter||''}"
-    oninput="window._poFilter=this.value;renderPage('purchaseorders')"
+    oninput="window._poFilter=this.value;renderCurrentPage()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
@@ -9308,6 +9399,30 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
   }).join('')}
   </tbody>
 </table>`;
+}
+
+function savePO() {
+  const supplier     = document.getElementById('po-sup').value;
+  const date         = document.getElementById('po-date').value;
+  const deliveryDate = document.getElementById('po-del').value;
+  const notes        = document.getElementById('po-notes')?.value||'';
+  const preparedBy   = document.getElementById('po-by')?.value||currentUser?.name||'';
+  const paymentTerms = document.getElementById('po-payment-terms')?.value||'on_account';
+  const dueDate      = document.getElementById('po-due')?.value||'';
+  const purchaseType = document.getElementById('po-purchase-type')?.value||'merchandise';
+  const category     = document.getElementById('po-category')?.value||'Goods for Resale';
+  const supplierInvoiceNo = document.getElementById('po-inv-no')?.value.trim()||'';
+  if(!supplier||supplier==='__add_new__') { alert('Please select a supplier.'); return; }
+  const lines = (window._poLines||[]).map(l=>({
+    ...l, qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0,
+    lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0),
+    vatExempt:l.vatExempt||false
+  })).filter(l=>l.desc||l.itemId);
+  if(!lines.length) { alert('Add at least one line item.'); return; }
+  const id = nextRefNum('PO', state.purchaseOrders||[]);
+  if(!state.purchaseOrders) state.purchaseOrders=[];
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, status:'pending' });
+  save(); closeModal(); render();
 }
 
 function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(po); } save(); render(); }
@@ -9386,13 +9501,19 @@ function confirmReceivePO(id) {
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO() {
-  const supOpts = '<option value="">— Select supplier —</option>' + (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
-  window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
+  const supOpts = '<option value="">— Select supplier —</option>' +
+    (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
+    '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
+  window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false }];
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
 <div class="modal-head"><h3>New Purchase Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
-  <div class="form-group"><label>Supplier</label><select id="po-sup">${supOpts}</select></div>
+  <div class="form-group"><label>Supplier</label>
+    <select id="po-sup" onchange="handlePOSupSel(this)">
+      ${supOpts}
+    </select>
+  </div>
   <div class="form-group">
     <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
     <input type="text" id="po-by" value="${currentUser?.name||''}" readonly
@@ -9448,32 +9569,121 @@ function showAddPO() {
   </div>
   ${orderLineTableHtml('po')}
 </div>
-<div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier Invoice No. <span style="font-size:10px;color:var(--text-tertiary)">(if available at ordering)</span></label>
+    <input type="text" id="po-inv-no" placeholder="e.g. SI-2026-001">
+  </div>
+  <div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="savePO()">Create Purchase Order</button>
 </div>`);
-  renderOrderLines('po');
+  renderPOLines();
 }
 
-function savePO() {
-  const supplier     = document.getElementById('po-sup').value;
-  const date         = document.getElementById('po-date').value;
-  const deliveryDate = document.getElementById('po-del').value;
-  const notes        = document.getElementById('po-notes').value;
-  const preparedBy   = document.getElementById('po-by').value;
-  const paymentTerms = document.getElementById('po-payment-terms').value;
-  const dueDate      = document.getElementById('po-due').value;
-  const purchaseType = document.getElementById('po-purchase-type')?.value || 'merchandise';
-  const category     = document.getElementById('po-category')?.value || 'Goods for Resale';
-  const lines = window._poLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
-  if(!lines.length){ alert('Add at least one line item.'); return; }
-  const id = nextRefNum('PO', state.purchaseOrders||[]);
-  if(!state.purchaseOrders) state.purchaseOrders = [];
-  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, status:'pending' });
-  save(); closeModal(); render();
+function handlePOSupSel(sel) {
+  if(sel.value === '__add_new__') {
+    sel.value = '';
+    if(confirm('Supplier not in list.\n\nAdd new supplier now? The PO form will re-open after saving.')) {
+      closeModal(); showAddSupplier('po');
+    }
+  }
 }
 
+function renderPOLines() {
+  const tbody = document.getElementById('po-lines-body');
+  if(!tbody) return;
+  const items = state.inventory||[];
+  const dlId = 'po-items-dl';
+  const datalist = `<datalist id="${dlId}">${items.map(it=>`<option value="${it.name}">`).join('')}</datalist>`;
+  tbody.innerHTML = datalist + (window._poLines||[]).map((l,i) => {
+    const item = items.find(it=>String(it.id)===String(l.itemId));
+    const lineTotal = (parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0);
+    const vatAmt = l.vatExempt ? 0 : lineTotal/1.12*0.12;
+    return `<tr>
+      <td style="padding:4px 6px;vertical-align:top">
+        <input type="text" list="${dlId}" value="${item?item.name:(l.desc||'')}" placeholder="Search item…"
+          autocomplete="off" oninput="matchPOItem(${i},this.value)" onchange="matchPOItem(${i},this.value)"
+          style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+      </td>
+      <td style="padding:4px"><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updatePOLine(${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
+      <td style="padding:4px"><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updatePOLine(${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
+      <td style="text-align:center;padding:4px">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;justify-content:center">
+          <input type="checkbox" ${l.vatExempt?'checked':''} onchange="window._poLines[${i}].vatExempt=this.checked;renderPOLines()">
+          <span style="color:${l.vatExempt?'var(--amber)':'var(--text-tertiary)'}">Exempt</span>
+        </label>
+      </td>
+      <td style="text-align:right;padding:4px 8px;font-size:12px;font-weight:500">${fmt(lineTotal)}</td>
+      <td style="text-align:right;padding:4px 8px;font-size:11px;color:var(--amber)">${l.vatExempt?'—':fmt(vatAmt)}</td>
+      <td><button class="je-line-btn" onclick="window._poLines.splice(${i},1);renderPOLines()">×</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function matchPOItem(i, val) {
+  const items = state.inventory||[];
+  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
+  if(match) {
+    window._poLines[i].itemId = match.id;
+    window._poLines[i].desc = match.name;
+    if(!window._poLines[i].unitPrice) window._poLines[i].unitPrice = match.costPrice||0;
+  } else {
+    window._poLines[i].itemId = '';
+    window._poLines[i].desc = val;
+  }
+}
+
+function updatePOLine(i, field, val) {
+  window._poLines[i][field] = val;
+  const qty = parseFloat(window._poLines[i].qty)||0;
+  const price = parseFloat(window._poLines[i].unitPrice)||0;
+  window._poLines[i].lineTotal = qty*price;
+  // Update total cell without full re-render
+  const tbody = document.getElementById('po-lines-body');
+  if(tbody) {
+    const rows = tbody.querySelectorAll('tr');
+    if(rows[i]) {
+      const totalCell = rows[i].querySelectorAll('td')[4];
+      const vatCell   = rows[i].querySelectorAll('td')[5];
+      if(totalCell) totalCell.textContent = fmt(qty*price);
+      if(vatCell) vatCell.textContent = window._poLines[i].vatExempt?'—':fmt(qty*price/1.12*0.12);
+    }
+  }
+}
+
+function addPOLine() {
+  window._poLines = window._poLines||[];
+  window._poLines.push({ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false });
+  renderPOLines();
+}
+
+function orderLineTableHtml(prefix) {
+  if(prefix==='po') return `
+<table class="je-lines">
+  <thead><tr>
+    <th style="width:35%">Item</th>
+    <th style="width:10%">Qty</th>
+    <th style="width:18%">Unit Price</th>
+    <th style="width:12%;text-align:center">VAT</th>
+    <th style="width:15%;text-align:right">Line Total</th>
+    <th style="width:8%;text-align:right">VAT Amt</th>
+    <th style="width:2%"></th>
+  </tr></thead>
+  <tbody id="po-lines-body"></tbody>
+</table>`;
+  return `
+<table class="je-lines">
+  <thead><tr>
+    <th style="width:40%">Item</th><th style="width:12%">Qty</th>
+    <th style="width:22%">Unit Price</th>
+    <th style="width:22%;text-align:right">Line Total</th>
+    <th style="width:4%"></th>
+  </tr></thead>
+  <tbody id="${prefix}-lines-body"></tbody>
+</table>`;
+}
 function viewPO(id) {
   const po = (state.purchaseOrders||[]).find(p=>p.id===id);
   if(!po) return;
@@ -9748,7 +9958,6 @@ ${po.notes?`<div class="notes-box"><strong>Notes:</strong> ${po.notes}</div>`:''
   <div class="sig"><div style="font-size:9px;text-align:center;color:#888;margin-bottom:2px">DIGITALLY SIGNED</div><div id="esig-approved"></div></div>
   <div class="sig"><div class="sig-line"><strong>______________________</strong><br>Supplier acknowledgement / Date</div></div>
 </div>
-<script>
 (async function() {
   async function aesDecrypt(encBase64, password) {
     try {
@@ -9898,7 +10107,7 @@ async function applyUpdate() {
     // This is safe because localStorage is preserved across same-origin navigation.
     try {
       // Save session so user stays logged in
-      const session = localStorage.getItem(SESSION_KEY);
+      const session = localStorage.getItem('anmolpharma_session');
       if(session) localStorage.setItem('anmolpharma_update_session', session);
       // Save current data as extra backup just in case
       const currentData = localStorage.getItem('anmolpharma');
@@ -10308,74 +10517,160 @@ let _chatLastSeen = 0;
 let _chatMode = 'group'; // 'group' or DM recipient name
 let _chatRecipient = null;
 
+function toggleChatPanel() {
+  const panel = document.getElementById('chat-panel');
+  const isOpen = panel.style.display === 'flex';
+  if(isOpen) {
+    panel.style.display = 'none';
+    stopChatListener();
+  } else {
+    panel.style.display = 'flex';
+    updateChatBadge(0);
+    renderChatPanel();
+  }
+}
+
+function renderChatPanel() {
+  const panel = document.getElementById('chat-panel');
+  if(!panel) return;
+  const users = getUsers().filter(u=>u.name && u.name!==currentUser?.name && u.active!==false);
+  const userOpts = users.map(u=>{
+    const initials=u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const hue=[...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
+    const unread=getDMUnread(u.name);
+    return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}');renderChatPanel()"
+      style="padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);font-size:12px;${unread>0?'background:var(--accent-bg);font-weight:600':''}" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':${unread>0?'\'var(--accent-bg)\'':'\'\''}">
+      <div style="position:relative;flex-shrink:0">
+        <div style="width:22px;height:22px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${initials}</div>
+        ${unread>0?`<div style="position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--red)"></div>`:''}
+      </div>
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${u.name}</span>
+      ${unread>0?`<span style="background:var(--red);color:#fff;border-radius:99px;font-size:9px;padding:1px 4px">${unread}</span>`:''}
+    </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+<div style="display:flex;flex-direction:column;height:100%">
+  <!-- Header -->
+  <div style="padding:10px 12px;background:var(--accent);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+    <div style="display:flex;align-items:center;gap:8px">
+      <i class="ti ti-messages" style="color:#fff;font-size:16px"></i>
+      <span id="chat-channel-title" style="font-weight:600;font-size:13px;color:#fff">${_chatMode==='dm'&&_chatRecipient?'💬 '+_chatRecipient:'# general'}</span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span id="chat-status" style="font-size:10px;color:rgba(255,255,255,0.7)">Live</span>
+      <button onclick="toggleChatPanel()" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.8);font-size:18px;padding:2px;line-height:1">×</button>
+    </div>
+  </div>
+  <!-- Body -->
+  <div style="display:flex;flex:1;overflow:hidden">
+    <!-- Sidebar -->
+    <div style="width:110px;flex-shrink:0;background:var(--bg-card);border-right:1px solid var(--border-light);overflow-y:auto;padding:6px 0">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);padding:4px 8px 3px"># General</div>
+      <div id="chat-ch-group" onclick="switchChatChannel('group');renderChatPanel()" style="padding:5px 8px;cursor:pointer;font-size:11px;border-radius:var(--radius-sm);margin:0 4px;${_chatMode==='group'?'background:var(--accent);color:#fff':'color:var(--text-secondary)'}" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'"># general</div>
+      ${users.length?`<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-tertiary);padding:6px 8px 3px;margin-top:4px">Direct</div>${userOpts}`:''}
+    </div>
+    <!-- Messages -->
+    <div id="chat-messages" style="flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:6px;background:var(--bg-secondary)">
+      <div style="text-align:center;color:var(--text-tertiary);font-size:11px;padding:20px">Loading…</div>
+    </div>
+  </div>
+  <!-- Input -->
+  <div style="padding:8px;background:var(--bg-card);border-top:1px solid var(--border-light);display:flex;gap:6px;flex-shrink:0">
+    <input type="text" id="chat-input" placeholder="${_chatMode==='dm'?'Message '+_chatRecipient+'…':'Message #general…'}"
+      style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg()}" maxlength="1000">
+    <button class="btn primary" onclick="sendChatMsg()" style="padding:7px 12px;font-size:12px;flex-shrink:0"><i class="ti ti-send"></i></button>
+  </div>
+</div>`;
+  startChatListener();
+  setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
+}
+
 function renderChat(c, ta) {
   ta.innerHTML = '';
-  _chatLastSeen = Date.now();
   updateChatBadge(0);
 
   const users = getUsers().filter(u => u.name && u.name !== currentUser?.name && u.active !== false);
-  const userOpts = users.map(u => `<option value="${u.name}">${u.name} (${u.role||'user'})</option>`).join('');
+
+  const userList = users.length === 0
+    ? '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">No other users</div>'
+    : users.map(u => {
+        const initials = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+        const hue = [...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
+        const unread = getDMUnread(u.name);
+        const key = u.name.replace(/\s+/g,'_');
+        return `<div id="chat-dm-${key}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}');renderChatContent()"
+          style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;${unread>0?'background:var(--accent-bg);font-weight:600;':''}"
+          onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background='${unread>0?'var(--accent-bg)':''}'">
+          <div style="position:relative">
+            <div style="width:26px;height:26px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
+            ${unread>0?`<div style="position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:var(--red);border:1.5px solid var(--bg-secondary)"></div>`:''}
+          </div>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${u.name}</span>
+          <span id="dm-unread-${key}" style="display:${unread>0?'':'none'};background:var(--red);color:#fff;border-radius:99px;font-size:9px;font-weight:700;padding:1px 5px;min-width:16px;text-align:center">${unread||''}</span>
+        </div>`;
+      }).join('');
 
   c.innerHTML = `
-<div style="display:flex;height:calc(100vh - 120px);max-width:960px;margin:0 auto;gap:0;border:1px solid var(--border-mid);border-radius:var(--radius-md);overflow:hidden">
-
-  <!-- Sidebar: channels + DMs -->
-  <div style="width:200px;flex-shrink:0;background:var(--bg-secondary);border-right:1px solid var(--border-light);display:flex;flex-direction:column">
-    <div style="padding:12px 12px 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary)">Channels</div>
-    <div id="chat-ch-group" onclick="switchChatChannel('group')" style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:7px;border-radius:var(--radius-sm);margin:0 6px;background:var(--accent);color:#fff;font-size:13px;font-weight:500">
+<div style="display:flex;height:calc(100vh - 120px);border:1px solid var(--border-mid);border-radius:var(--radius-md);overflow:hidden">
+  <!-- Sidebar -->
+  <div style="width:210px;flex-shrink:0;background:var(--bg-secondary);border-right:1px solid var(--border-light);display:flex;flex-direction:column">
+    <div style="padding:12px 12px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary)">Channels</div>
+    <div id="chat-ch-group" onclick="switchChatChannel('group');renderChatContent()"
+      style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:7px;border-radius:var(--radius-sm);margin:0 6px;background:${_chatMode==='group'?'var(--accent)':'transparent'};color:${_chatMode==='group'?'#fff':'var(--text-primary)'};font-size:13px;font-weight:500"
+      onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
       <i class="ti ti-hash" style="font-size:13px"></i># general
     </div>
-
-    <div style="padding:12px 12px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-top:8px">Direct Messages</div>
-    <div style="flex:1;overflow-y:auto">
-      ${users.length===0 ? '<div style="padding:8px 12px;font-size:12px;color:var(--text-tertiary)">No other users</div>' :
-        users.map(u => {
-          const initials = u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-          const hue = [...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
-          const unread = getDMUnread(u.name);
-          return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}')"
-            style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;color:var(--text-primary);${unread>0?'background:var(--accent-bg);':''}position:relative" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':${unread>0?'\'var(--accent-bg)\'':'\'\''}">
-            <div style="position:relative">
-              <div style="width:24px;height:24px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
-              ${unread>0?`<div style="position:absolute;top:-4px;right:-4px;width:8px;height:8px;border-radius:50%;background:var(--red);border:1.5px solid var(--bg-secondary)"></div>`:''}
-            </div>
-            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${unread>0?'600':'400'}">${u.name}</span>
-            <span id="dm-unread-${u.name.replace(/\s+/g,'_')}" style="display:${unread>0?'':'none'};margin-left:auto;background:var(--red);color:#fff;border-radius:99px;font-size:9px;font-weight:700;padding:1px 5px;min-width:16px;text-align:center">${unread>0?unread:''}</span>
-          </div>`;
-        }).join('')}
-    </div>
+    <div style="padding:10px 12px 6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-tertiary);margin-top:6px">Direct Messages</div>
+    <div style="flex:1;overflow-y:auto">${userList}</div>
   </div>
-
-  <!-- Main chat area -->
+  <!-- Main -->
   <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-    <!-- Header -->
     <div style="padding:10px 16px;background:var(--bg-card);border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:10px">
       <i class="ti ti-messages" style="font-size:18px;color:var(--accent)"></i>
       <div>
-        <div id="chat-channel-title" style="font-weight:700;font-size:14px"># general</div>
+        <div id="chat-channel-title" style="font-weight:700;font-size:14px">${_chatMode==='dm'&&_chatRecipient?'💬 '+_chatRecipient:'# general'}</div>
         <div id="chat-status" style="font-size:11px;color:var(--text-tertiary)">Connecting…</div>
       </div>
     </div>
-    <!-- Messages -->
     <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px">
-      <div style="text-align:center;color:var(--text-tertiary);font-size:12px">Loading…</div>
+      <div style="text-align:center;color:var(--text-tertiary);font-size:12px;padding:20px">Loading…</div>
     </div>
-    <!-- Input -->
     <div style="padding:10px 12px;background:var(--bg-card);border-top:1px solid var(--border-light);display:flex;gap:8px;align-items:center">
-      <input type="text" id="chat-input" placeholder="Message #general… (Enter to send)"
+      <input type="text" id="chat-input" placeholder="${_chatMode==='dm'&&_chatRecipient?'Message '+_chatRecipient+'…':'Message #general…'}"
         style="flex:1;padding:9px 14px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg()}" maxlength="1000">
-      <button class="btn primary" onclick="sendChatMsg()" style="padding:9px 16px;font-size:13px;flex-shrink:0">
-        <i class="ti ti-send"></i>
-      </button>
+      <button class="btn primary" onclick="sendChatMsg()" style="padding:9px 16px;font-size:13px;flex-shrink:0"><i class="ti ti-send"></i></button>
     </div>
   </div>
 </div>`;
 
-  _chatMode = 'group';
-  _chatRecipient = null;
   startChatListener();
   setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
+}
+
+function renderChatContent() {
+  // Re-render just the chat area when switching channels without full page reload
+  const title = document.getElementById('chat-channel-title');
+  const input = document.getElementById('chat-input');
+  const msgs  = document.getElementById('chat-messages');
+  if(title) title.textContent = _chatMode==='dm'&&_chatRecipient?'💬 '+_chatRecipient:'# general';
+  if(input) input.placeholder = _chatMode==='dm'&&_chatRecipient?'Message '+_chatRecipient+'…':'Message #general…';
+  if(msgs) msgs.innerHTML = '<div style="text-align:center;color:var(--text-tertiary);font-size:12px;padding:20px">Loading…</div>';
+  // Update sidebar active states
+  document.querySelectorAll('[id^="chat-ch-"],[id^="chat-dm-"]').forEach(el=>{
+    el.style.background=''; el.style.color='var(--text-primary)';
+  });
+  if(_chatMode==='group') {
+    const g=document.getElementById('chat-ch-group');
+    if(g){g.style.background='var(--accent)';g.style.color='#fff';}
+  } else if(_chatRecipient) {
+    const d=document.getElementById('chat-dm-'+_chatRecipient.replace(/\s+/g,'_'));
+    if(d) d.style.background='var(--bg-card)';
+  }
+  startChatListener();
+  setTimeout(()=>document.getElementById('chat-input')?.focus(),50);
 }
 
 function switchChatChannel(mode, recipient) {
@@ -10436,29 +10731,27 @@ function getDMChannelId(a, b) {
 }
 
 function startChatListener() {
-  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe = null; }
+  if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe=null; }
   if(!db) {
-    document.getElementById('chat-status').textContent = 'Offline — Firebase not connected';
-    document.getElementById('chat-messages').innerHTML = `<div style="text-align:center;color:var(--amber);font-size:13px;padding:32px"><i class="ti ti-wifi-off" style="display:block;font-size:32px;margin-bottom:8px"></i>Firebase required for chat.</div>`;
+    const statusEl = document.getElementById('chat-status');
+    if(statusEl) statusEl.textContent = 'Offline';
     return;
   }
-  const collection = _chatMode === 'dm'
+  const collection = _chatMode==='dm'
     ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
     : CHAT_COLLECTION;
-
   try {
     _chatUnsubscribe = db.collection(collection)
-      .orderBy('ts', 'asc').limitToLast(100)
+      .orderBy('ts','asc').limitToLast(100)
       .onSnapshot(snap => {
         const statusEl = document.getElementById('chat-status');
-        const label = _chatMode === 'dm' ? `DM with ${_chatRecipient}` : '#general';
-        if(statusEl) statusEl.textContent = `${snap.docs.length} messages · ${label} · Live`;
+        if(statusEl) statusEl.textContent = `${snap.docs.length} msgs · Live`;
         renderChatMessages(snap.docs.map(d=>({id:d.id,...d.data()})));
       }, err => {
         const statusEl = document.getElementById('chat-status');
-        if(statusEl) statusEl.textContent = 'Connection error';
+        if(statusEl) statusEl.textContent = 'Error';
       });
-  } catch(e) { console.error('Chat listener error:', e); }
+  } catch(e) { console.error('Chat error:', e); }
 }
 
 function renderChatMessages(msgs) {
@@ -10492,12 +10785,18 @@ function renderChatMessages(msgs) {
   <div style="width:28px;height:28px;flex-shrink:0;${showAvatar?`border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff`:'opacity:0'}">
     ${showAvatar?initials:''}
   </div>
-  <div style="max-width:65%;display:flex;flex-direction:column;gap:2px;${isMe?'align-items:flex-end':'align-items:flex-start'}">
-    ${showAvatar&&!isMe?`<div style="font-size:11px;color:var(--text-tertiary)">${m.sender||'?'}</div>`:''}
-    <div style="padding:8px 12px;border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isMe?'var(--accent)':'var(--bg-card)'};color:${isMe?'#fff':'var(--text-primary)'};font-size:13px;line-height:1.5;word-break:break-word;border:${isMe?'none':'1px solid var(--border-light)'}">
-      ${escHtml(m.text||'')}
+  <div style="max-width:72%;display:flex;flex-direction:column;gap:2px;${isMe?'align-items:flex-end':'align-items:flex-start'}">
+    ${showAvatar&&!isMe?`<div style="font-size:10px;color:var(--text-tertiary)">${m.sender||'?'}</div>`:''}
+    <div style="padding:7px 11px;border-radius:${isMe?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isMe?'var(--accent)':'var(--bg-card)'};color:${isMe?'#fff':'var(--text-primary)'};font-size:12px;line-height:1.5;word-break:break-word;border:${isMe?'none':'1px solid var(--border-light)'};position:relative">
+      ${escHtml(m.text||'')}${m.edited?'<span style="font-size:9px;opacity:0.6;margin-left:4px">(edited)</span>':''}
     </div>
-    <div style="font-size:10px;color:var(--text-tertiary)">${timeStr}</div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:10px;color:var(--text-tertiary)">${timeStr}</span>
+      ${isMe?`
+        <button onclick="editChatMsg('${m.id}','${(m.text||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n')}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:10px;padding:0" title="Edit"><i class="ti ti-pencil"></i></button>
+        <button onclick="deleteChatMsg('${m.id}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:10px;padding:0" title="Delete"><i class="ti ti-trash"></i></button>
+      `:''}
+    </div>
   </div>
 </div>`;
   }).join('');
@@ -10534,6 +10833,33 @@ function sendChatMsg() {
   });
 }
 
+function editChatMsg(msgId, currentText) {
+  const decoded = (currentText||'').replace(/\\n/g,'\n').replace(/\\'/g,"'").replace(/\\\\/g,'\\');
+  const newText = prompt('Edit message:', decoded);
+  if(newText === null) return;
+  if(!newText.trim()) { if(confirm('Empty message — delete it instead?')) { deleteChatMsg(msgId); } return; }
+  if(newText.trim() === decoded) return; // no change
+  if(!db) return;
+  const collection = _chatMode==='dm'
+    ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
+    : CHAT_COLLECTION;
+  db.collection(collection).doc(msgId).update({
+    text: newText.trim(),
+    edited: true,
+    editedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).catch(err=>alert('Could not edit: '+err.message));
+}
+
+function deleteChatMsg(msgId) {
+  if(!confirm('Delete this message?')) return;
+  if(!db) return;
+  const collection = _chatMode==='dm'
+    ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
+    : CHAT_COLLECTION;
+  db.collection(collection).doc(msgId).delete()
+    .catch(err=>alert('Could not delete: '+err.message));
+}
+
 function updateChatBadge(count) {
   const badge = document.getElementById('chat-unread-badge');
   if(!badge) return;
@@ -10546,7 +10872,7 @@ function stopChatListener() {
 }
 
 function startBackgroundChatListener() {
-  if(!db) return;
+  if(!db || !currentUser) return; // Only run when logged in
   let firstLoad = true;
   db.collection(CHAT_COLLECTION).orderBy('ts','desc').limit(1)
     .onSnapshot(snap => {
@@ -11706,13 +12032,23 @@ function runRestore() {
 }
 
 // ── BOOT ─────────────────────────────────────────────────────────────────────
-// Ensure default admin exists in storage (write directly — do NOT call saveUsers,
-// which would push this default-only list to Firestore before fbLoadMeta() has
-// a chance to fetch the real, complete user list from the cloud).
+// Ensure default admin exists in storage
 (function() {
-  if (!localStorage.getItem(USERS_KEY)) {
+  const _UK = 'anmolpharma_users';
+  // Validate stored users — clear if corrupted
+  try {
+    const d = localStorage.getItem(_UK);
+    if(d) {
+      const parsed = JSON.parse(d);
+      if(!Array.isArray(parsed) || parsed.length === 0) {
+        localStorage.removeItem(_UK); // wipe corrupted data
+      }
+    }
+  } catch(e) { localStorage.removeItem(_UK); }
+
+  if (!localStorage.getItem(_UK)) {
     const defaultUsers = [{ id:'U001', username:'admin', password:'admin123', name:'System Administrator', role:'admin', active:true }];
-    try { localStorage.setItem(USERS_KEY, JSON.stringify(defaultUsers)); } catch(e) {}
+    try { localStorage.setItem(_UK, JSON.stringify(defaultUsers)); } catch(e) {}
   }
   loadLogo();
   // Update version badge
