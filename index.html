@@ -3481,7 +3481,7 @@ function showAddInvoice() {
   <div class="form-group"><label>Customer</label><select id="inv-cust" onchange="handleInvCustSel(this)">${custOpts}</select></div>
 </div>
 <div class="form-row">
-  <div class="form-group"><label>Status</label><select id="inv-status"><option value="draft">Draft</option><option value="pending">Pending</option></select></div>
+  <div class="form-group"><label>Status</label><select id="inv-status"><option value="pending" selected>Pending</option></select></div>
   <div class="form-group"><label>Invoice Date</label><input type="date" id="inv-date" value="${today()}" onchange="autoDueDateInv()"></div>
 </div>
 <div class="form-row">
@@ -5911,13 +5911,12 @@ function recomputeBalances() {
 }
 
 function getInvoiceStatus(inv) {
-  if(inv.status === 'draft') return 'draft';
   const totalCollected = (state.collections||[])
     .filter(r => (r.invoices||[]).includes(inv.id) || r.invoice === inv.id)
     .reduce((s,r) => s + (r.netCash||r.amount||0), 0);
-  if(totalCollected >= (inv.amount||0)) return 'paid';
+  if(totalCollected >= (inv.amount||0) && (inv.amount||0) > 0) return 'paid';
   if(inv.due && inv.due < today()) return 'overdue';
-  return inv.status || 'pending';
+  return 'pending';
 }
 
 function getInvoiceBalance(invId) {
@@ -5939,7 +5938,7 @@ function filterCollectionInvoices() {
     if(hint) hint.textContent = '(select customer first)';
     return;
   }
-  const custInvoices = (state.invoices||[]).filter(i=>i.customer===custName && i.status!=='paid');
+  const custInvoices = (state.invoices||[]).filter(i=>i.customer===custName && getInvoiceStatus(i)!=='paid');
   if(!custInvoices.length) {
     list.innerHTML = '<div style="padding:10px 14px;color:var(--text-tertiary);font-size:12px">No outstanding invoices for this customer.</div>';
     if(hint) hint.textContent = '(no outstanding invoices)';
@@ -9060,14 +9059,15 @@ ${(so.drIssued||[]).length>0?`
   </div>`).join('')}
 </div>`:''}
 
+  const anyApproved = so.lines.some(l=>l.approved);
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print SO</button>
-  ${(so.status==='approved'||so.status==='delivered')
+  ${anyApproved
     ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
-    : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve SO first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
+    : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
-  ${so.status==='approved'&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
+  ${so.status==='approved'&&isAdmin()&&allApproved?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
 </div>`);
 }
 
@@ -9075,29 +9075,21 @@ function showIssueDR(soId) {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
 
-  // Require SO to be approved before issuing DR
-  if(so.status === 'pending') {
-    alert('❌ Cannot issue Delivery Receipt.\n\nThis Sales Order is still PENDING approval.\n\nPlease approve the SO first before issuing a DR.');
-    return;
-  }
-  if(so.status === 'draft') {
-    alert('❌ Cannot issue Delivery Receipt.\n\nThis Sales Order is in DRAFT status. Please approve it first.');
-    return;
-  }
-  // Find lines NOT yet issued in any DR — only approved lines
+  // Build per-line issued qty tracker
   const issuedQtyMap = {};
   (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{
     const k = it.itemId||it.desc;
     issuedQtyMap[k] = (issuedQtyMap[k]||0) + (it.qty||0);
   }));
 
+  // Only show approved lines with remaining qty
   const approvedLines = so.lines.filter(l=>l.approved);
   if(!approvedLines.length) {
-    alert('❌ Cannot issue Delivery Receipt.\n\nNo line items have been approved yet.\n\nPlease approve individual items in the SO first.');
+    alert('❌ Cannot issue Delivery Receipt.\n\nNo items have been approved yet.\n\nIn the SO view, approve individual items first using the ✓ Approve button on each line.');
     return;
   }
 
-  const pendingLines = approvedLines.map((l,i)=>{
+  const pendingLines = approvedLines.map(l=>{
     const k = l.itemId||l.desc;
     const issuedQty = issuedQtyMap[k]||0;
     const remainingQty = (l.qty||0) - issuedQty;
@@ -9296,19 +9288,42 @@ function toggleSOLineApproval(soId, lineIdx, approved) {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
   so.lines[lineIdx].approved = approved;
-
-  // Revert SO status if no items are approved anymore
-  const anyApproved = so.lines.some(l=>l.approved);
-  if(!anyApproved && so.status === 'approved') {
-    so.status = 'pending';
+  if(approved) {
+    so.lines[lineIdx].approvedBy = currentUser?.name||'';
+    so.lines[lineIdx].approvedAt = today();
+  } else {
+    delete so.lines[lineIdx].approvedBy;
+    delete so.lines[lineIdx].approvedAt;
   }
-  // If at least one item is approved and SO is still pending, keep it pending
-  // (SO-level approval is a separate admin action via the Approve button)
+
+  const anyApproved = so.lines.some(l=>l.approved);
+  const allApproved = so.lines.every(l=>l.approved);
+
+  // Auto-set SO status based on approval state
+  if(anyApproved && so.status === 'pending') {
+    so.status = 'approved'; // at least one item approved → SO becomes approved
+    so.approvedBy = currentUser?.name||'';
+  }
+  if(!anyApproved && so.status === 'approved') {
+    so.status = 'pending'; // all unapproved → revert to pending
+    delete so.approvedBy;
+  }
 
   save();
   const container = document.getElementById('so-view-lines');
   const canApproveItems = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
   if(container) container.innerHTML = renderSOViewLines(so, canApproveItems);
+  // Update Issue DR button state dynamically
+  const drBtn = document.querySelector('[onclick*="showIssueDR"]');
+  if(drBtn) {
+    if(anyApproved) {
+      drBtn.disabled = false; drBtn.style.opacity='1'; drBtn.style.cursor='pointer';
+      drBtn.title = '';
+    } else {
+      drBtn.disabled = true; drBtn.style.opacity='0.4'; drBtn.style.cursor='not-allowed';
+      drBtn.title = 'Approve at least one item first';
+    }
+  }
   render();
 }
 
