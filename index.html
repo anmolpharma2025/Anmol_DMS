@@ -9084,19 +9084,25 @@ function showIssueDR(soId) {
     alert('❌ Cannot issue Delivery Receipt.\n\nThis Sales Order is in DRAFT status. Please approve it first.');
     return;
   }
-  // Find lines NOT yet issued in any DR
-  const issuedItemIds = new Set((so.drIssued||[]).flatMap(dr=>dr.items.map(it=>it.itemId+':'+it.qty)));
-  // Build per-line issued qty tracker
+  // Find lines NOT yet issued in any DR — only approved lines
   const issuedQtyMap = {};
   (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{
     const k = it.itemId||it.desc;
     issuedQtyMap[k] = (issuedQtyMap[k]||0) + (it.qty||0);
   }));
-  const pendingLines = so.lines.map((l,i)=>{
+
+  const approvedLines = so.lines.filter(l=>l.approved);
+  if(!approvedLines.length) {
+    alert('❌ Cannot issue Delivery Receipt.\n\nNo line items have been approved yet.\n\nPlease approve individual items in the SO first.');
+    return;
+  }
+
+  const pendingLines = approvedLines.map((l,i)=>{
     const k = l.itemId||l.desc;
     const issuedQty = issuedQtyMap[k]||0;
     const remainingQty = (l.qty||0) - issuedQty;
-    return { ...l, idx:i, issuedQty, remainingQty };
+    const origIdx = so.lines.indexOf(l);
+    return { ...l, idx:origIdx, issuedQty, remainingQty };
   }).filter(l=>l.remainingQty > 0);
 
   if(!pendingLines.length) {
@@ -9125,6 +9131,11 @@ function showIssueDR(soId) {
 <div class="modal-head"><h3><i class="ti ti-truck-delivery" style="margin-right:6px;color:var(--accent)"></i>Issue Delivery Receipt</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--accent)">
   <strong>SO: ${soId}</strong> &nbsp;·&nbsp; Customer: <strong>${so.customer}</strong> &nbsp;·&nbsp; DR No.: <strong class="mono">${drNum}</strong>
+</div>
+<div style="padding:7px 12px;background:var(--green-bg,rgba(16,185,129,0.08));border:1px solid var(--green);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--green)">
+  <i class="ti ti-circle-check" style="margin-right:5px"></i>
+  Showing <strong>${pendingLines.length}</strong> approved item${pendingLines.length!==1?'s':''} with remaining quantity.
+  ${so.lines.filter(l=>!l.approved).length>0?`<span style="color:var(--amber);margin-left:8px"><i class="ti ti-info-circle"></i> ${so.lines.filter(l=>!l.approved).length} unapproved item${so.lines.filter(l=>!l.approved).length!==1?'s are':' is'} excluded.</span>`:''}
 </div>
 <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Select items to include in this delivery:</div>
 ${lineRows}
