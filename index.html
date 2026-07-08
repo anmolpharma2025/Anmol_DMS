@@ -1901,7 +1901,7 @@ function filterTable() {
             const approvedCount=so.lines.filter(l=>l.approved).length;
             return `<tr>
               <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
-              <td style="font-weight:500">${so.customer}</td>
+              <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
               <td style="font-size:12px;color:var(--text-secondary)">${so.lines.map(l=>`${l.desc}×${l.qty}${l.approved?'<span style="color:var(--green);margin-left:3px">✓</span>':''}`).join(', ')}</td>
               <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
               <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
@@ -3281,13 +3281,22 @@ function vatFromGross(gross) { const base = parseFloat((gross / (1 + VAT_RATE)).
 function showSOCustBranch(sel) {
   const name = sel.value;
   const div  = document.getElementById('so-cust-branch');
+  const branchSel = document.getElementById('so-cust-branch-sel');
   if(!div) return;
   const cust = state.customers.find(c=>c.name===name);
-  if(cust && (cust.branch || cust.address)) {
+  if(cust && cust.branch) {
     div.style.display = '';
-    div.innerHTML = `<i class="ti ti-building-store" style="margin-right:4px"></i>${cust.branch?'<strong>'+cust.branch+'</strong> · ':''}${cust.address||''}`;
+    div.innerHTML = `
+      <label style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;display:block">Branch / Clinic</label>
+      <select id="so-branch-sel" style="width:100%;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+        <option value="${cust.branch}">${cust.branch}</option>
+      </select>`;
+  } else if(cust && cust.address) {
+    div.style.display = '';
+    div.innerHTML = `<div style="font-size:12px;color:var(--accent);padding:4px 0"><i class="ti ti-map-pin" style="margin-right:4px"></i>${cust.address}</div>`;
   } else {
     div.style.display = 'none';
+    div.innerHTML = '';
   }
 }
 
@@ -4799,14 +4808,14 @@ function showReport(type) {
   // CASH
   const cashIn     = colInPeriod.reduce((s,r)=>s+(r.amount||0),0);
   const cashOutExp = allExp.filter(e=>e.status==='paid').reduce((s,e)=>s+(e.amount||0),0);
-  const cashOutPur = purEntries.filter(p=>p.status==='paid').reduce((s,p)=>s+(p.amount||0),0);
+  const cashOutPur = (state.purchaseOrders||[]).filter(p=>p.status==='received'&&inPeriod(p.receivedDate||p.date)&&['cod','cod_check'].includes(p.paymentTerms||'')).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   const cashOutPay = payInPeriod.reduce((s,p)=>s+(p.grossPay||0),0);
   const cashOut    = cashOutExp + cashOutPur + cashOutPay;
   const netCashFlow= cashIn - cashOut;
 
   // RECEIVABLES (snapshot — not period filtered)
-  const totalAR    = state.invoices.filter(i=>i.status==='pending'||i.status==='overdue').reduce((s,i)=>s+(i.amount||0),0);
-  const totalAPPur = (state.purchases||[]).filter(p=>p.status==='pending').reduce((s,p)=>s+(p.amount||0),0);
+  const totalAR    = state.invoices.filter(i=>getInvoiceStatus(i)!=='paid').reduce((s,i)=>s+(i.amount||0),0);
+  const totalAPPur = (state.purchaseOrders||[]).filter(p=>p.status==='received'&&p.paymentTerms&&!['cod','cod_check','prepaid'].includes(p.paymentTerms)).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   const totalAPExp = (state.expenses||[]).filter(e=>e.status==='pending').reduce((s,e)=>s+(e.amount||0),0);
   const totalAP    = totalAPPur + totalAPExp;
 
@@ -4835,7 +4844,7 @@ function showReport(type) {
   if (type === 'pnl') {
     // Group revenue by customer
     const revByCustomer = groupBy(
-      state.invoices.filter(i=>i.status!=='draft'),
+      state.invoices.filter(i=>getInvoiceStatus(i)!=='draft'),
       i=>i.customer, i=>i.amount||0
     );
     // Group COS by category
@@ -8979,7 +8988,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     const approvedCount=so.lines.filter(l=>l.approved).length;
     return `<tr>
       <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
-      <td style="font-weight:500">${so.customer}</td>
+      <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${so.lines.map(l=>`${l.desc}×${l.qty}${l.approved?'<span style="color:var(--green);margin-left:3px">✓</span>':''}`).join(', ')}</td>
       <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
@@ -9016,7 +9025,7 @@ function viewSO(id) {
   showModal(`
 <div class="modal-head">
   <div>
-    <h3>${so.id} — ${so.customer}</h3>
+    <h3>${so.id} — ${so.customer}${so.branch?` <span style="font-size:12px;font-weight:400;color:var(--accent)">(${so.branch})</span>`:''}</h3>
     <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">
       Order Date: ${so.date} &nbsp;·&nbsp; Delivery: ${so.deliveryDate||'TBD'} &nbsp;·&nbsp; Prepared by: ${so.preparedBy||'—'}
       ${so.dispatchedDate?` &nbsp;·&nbsp; <span style="color:#a78bfa;font-weight:500"><i class="ti ti-truck" style="font-size:11px"></i> Dispatched: ${so.dispatchedDate} by ${so.dispatchedBy||'—'}</span>`:''}
@@ -9581,16 +9590,18 @@ function removeOrderLine(prefix, i) {
 }
 
 function saveSO() {
-  const customer=document.getElementById('so-cust').value;
-  const date=document.getElementById('so-date').value;
-  const deliveryDate=document.getElementById('so-del').value;
-  const notes=document.getElementById('so-notes').value;
-  const preparedBy=document.getElementById('so-by').value;
-  const lines=window._soLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
+  const customer    = document.getElementById('so-cust').value;
+  const date        = document.getElementById('so-date').value;
+  const deliveryDate= document.getElementById('so-del').value;
+  const notes       = document.getElementById('so-notes').value;
+  const preparedBy  = document.getElementById('so-by').value;
+  const branch      = document.getElementById('so-branch-sel')?.value || '';
+  if(!customer || customer==='__add_new__') { alert('Please select a customer.'); return; }
+  const lines = window._soLines.map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
   if(!lines.length){ alert('Add at least one line item.'); return; }
   const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
-  state.salesOrders.push({id,date,deliveryDate,customer,lines,notes,preparedBy,status:'pending'});
+  state.salesOrders.push({id, date, deliveryDate, customer, branch, lines, notes, preparedBy, status:'pending'});
   save(); closeModal(); render();
 }
 
