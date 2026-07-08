@@ -3281,23 +3281,26 @@ function vatFromGross(gross) { const base = parseFloat((gross / (1 + VAT_RATE)).
 function showSOCustBranch(sel) {
   const name = sel.value;
   const div  = document.getElementById('so-cust-branch');
-  const branchSel = document.getElementById('so-cust-branch-sel');
   if(!div) return;
   const cust = state.customers.find(c=>c.name===name);
-  if(cust && cust.branch) {
-    div.style.display = '';
-    div.innerHTML = `
-      <label style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;display:block">Branch / Clinic</label>
-      <select id="so-branch-sel" style="width:100%;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-        <option value="${cust.branch}">${cust.branch}</option>
-      </select>`;
-  } else if(cust && cust.address) {
-    div.style.display = '';
-    div.innerHTML = `<div style="font-size:12px;color:var(--accent);padding:4px 0"><i class="ti ti-map-pin" style="margin-right:4px"></i>${cust.address}</div>`;
-  } else {
+  if(!cust) { div.style.display='none'; return; }
+
+  // Get branches array (support both legacy string and new array)
+  const branches = cust.branches && cust.branches.length > 0
+    ? cust.branches
+    : cust.branch ? [{ name: cust.branch, address: cust.address||'' }] : [];
+
+  if(branches.length === 0) {
     div.style.display = 'none';
-    div.innerHTML = '';
+    return;
   }
+
+  div.style.display = '';
+  div.innerHTML = `
+    <label style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;display:block"><i class="ti ti-building-store" style="margin-right:4px;color:var(--accent)"></i>Branch / Clinic</label>
+    <select id="so-branch-sel" style="width:100%;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      ${branches.map(b=>`<option value="${b.name}">${b.name}${b.address?' — '+b.address:''}</option>`).join('')}
+    </select>`;
 }
 
 function handleSOCustSel(sel) {
@@ -3455,7 +3458,7 @@ let invLines = [];
 
 function showAddInvoice() {
   const custOpts = '<option value="">— Select customer —</option>' +
-    state.customers.map(cu=>`<option value="${cu.name}">${cu.name}${cu.branch?' — '+cu.branch:''}</option>`).join('') +
+    state.customers.map(cu=>`<option value="${cu.name}">${cu.name}${(cu.branches&&cu.branches.length>1)?' ('+cu.branches.length+' branches)':cu.branch?' — '+cu.branch:''}</option>`).join('') +
     '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
   const due = new Date(); due.setDate(due.getDate() + 30);
   invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
@@ -5821,7 +5824,7 @@ function printOR(id) {
 
 function showAddCollection() {
   const custOpts = '<option value="">— Select customer —</option>' +
-    state.customers.map(c=>`<option value="${c.name}">${c.name}${c.branch?' — '+c.branch:''}</option>`).join('') +
+    state.customers.map(c=>`<option value="${c.name}">${c.name}${(c.branches&&c.branches.length>1)?' ('+c.branches.length+' branches)':c.branch?' — '+c.branch:''}</option>`).join('') +
     '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
   showModal(`
 <div class="modal-head"><h3>Record Collection</h3><button class="close-btn" onclick="closeModal()">×</button></div>
@@ -6346,7 +6349,7 @@ function buildConsignedItems() {
 function showAddConsignment() {
   const items = state.inventory||[];
   const custOpts = '<option value="">— Select customer —</option>' +
-    state.customers.map(c=>`<option value="${c.name}">${c.name}${c.branch?' — '+c.branch:''}</option>`).join('') +
+    state.customers.map(c=>`<option value="${c.name}">${c.name}${(c.branches&&c.branches.length>1)?' ('+c.branches.length+' branches)':c.branch?' — '+c.branch:''}</option>`).join('') +
     '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
   const itemOpts = `<option value="">— select inventory item or type manually —</option>` +
     items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-price="${it.salePrice}" data-qty="${it.qty}">${it.name} (Stock: ${it.qty} ${it.unit})</option>`).join('');
@@ -7900,7 +7903,12 @@ function renderCustomers(c, ta) {
     ${state.customers.map(cu => `<tr>
       <td class="mono">${cu.id}</td>
       <td style="font-weight:500">${cu.name}</td>
-      <td style="font-size:12px;color:var(--accent)">${cu.branch||'—'}</td>
+      <td style="font-size:12px;color:var(--accent)">
+        ${(cu.branches&&cu.branches.length>0
+          ? cu.branches.map(b=>`<div style="margin-bottom:2px"><i class="ti ti-building-store" style="font-size:10px;margin-right:3px"></i>${b.name}${b.address?` <span style="color:var(--text-tertiary);font-size:10px">· ${b.address}</span>`:''}</div>`).join('')
+          : cu.branch ? `<div><i class="ti ti-building-store" style="font-size:10px;margin-right:3px"></i>${cu.branch}</div>` : '—'
+        )}
+      </td>
       <td class="mono" style="color:var(--text-secondary)">${cu.tin||'—'}</td>
       <td style="color:var(--text-secondary);font-size:12px">${cu.email||'—'}</td>
       <td style="color:var(--text-secondary);font-size:12px">${cu.phone||'—'}</td>
@@ -7921,6 +7929,18 @@ function deleteCust(id) { if(!requireAdmin("delete customers")) return; if(confi
 function showEditCustomer(id) {
   const cu = state.customers.find(c=>c.id===id);
   if(!cu) return;
+  // Build branches — migrate legacy single branch field if needed
+  const branches = cu.branches && cu.branches.length > 0
+    ? cu.branches
+    : (cu.branch ? [{ name: cu.branch, address: cu.address||'' }] : []);
+
+  const branchRows = branches.map(b=>`
+<div class="ec-branch-row" style="display:flex;gap:6px;margin-bottom:6px">
+  <input type="text" placeholder="Branch / Clinic name" class="ec-br-name" value="${b.name||''}" style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+  <input type="text" placeholder="Address" class="ec-br-addr" value="${b.address||''}" style="flex:1.5;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+  <button onclick="this.closest('.ec-branch-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:18px;padding:0 4px">×</button>
+</div>`).join('');
+
   showModal(`
 <div class="modal-head"><h3>Edit Customer — ${cu.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
@@ -7928,18 +7948,36 @@ function showEditCustomer(id) {
   <div class="form-group"><label>TIN</label><input type="text" id="ec-tin" value="${cu.tin||''}" placeholder="XXX-XXX-XXX-000"></div>
 </div>
 <div class="form-row">
-  <div class="form-group"><label>Branch / Clinic</label><input type="text" id="ec-branch" value="${cu.branch||''}" placeholder="e.g. Main Branch, Cebu Clinic"></div>
   <div class="form-group"><label>Phone</label><input type="text" id="ec-phone" value="${cu.phone||''}"></div>
-</div>
-<div class="form-row">
   <div class="form-group"><label>Email</label><input type="email" id="ec-email" value="${cu.email||''}"></div>
-  <div class="form-group"><label>Phone</label><input type="text" id="ec-phone" value="${cu.phone||''}"></div>
 </div>
-<div class="form-group"><label>Address</label><input type="text" id="ec-addr" value="${cu.address||''}" placeholder="Street, City, Province"></div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+<div class="form-group"><label>Main Address</label><input type="text" id="ec-addr" value="${cu.address||''}" placeholder="Street, City, Province"></div>
+
+<div style="margin-top:12px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <label style="font-weight:600;font-size:13px"><i class="ti ti-building-store" style="margin-right:5px;color:var(--accent)"></i>Branches / Clinics</label>
+    <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addEcBranchRow()"><i class="ti ti-plus"></i> Add Branch</button>
+  </div>
+  <div id="ec-branches">${branchRows||'<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0">No branches yet. Click Add Branch.</div>'}</div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" onclick="saveEditCustomer('${id}')">Save</button>
+  <button class="btn primary" onclick="saveEditCustomer('${id}')">Save Changes</button>
 </div>`);
+}
+
+function addEcBranchRow(name='', addr='') {
+  const container = document.getElementById('ec-branches');
+  if(!container) return;
+  const row = document.createElement('div');
+  row.className = 'ec-branch-row';
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+  row.innerHTML = `
+    <input type="text" placeholder="Branch / Clinic name" class="ec-br-name" value="${name}" style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <input type="text" placeholder="Address" class="ec-br-addr" value="${addr}" style="flex:1.5;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <button onclick="this.closest('.ec-branch-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:18px;padding:0 4px">×</button>`;
+  container.appendChild(row);
 }
 
 function saveEditCustomer(id) {
@@ -7947,10 +7985,20 @@ function saveEditCustomer(id) {
   if(!cu) return;
   cu.name    = document.getElementById('ec-name').value.trim() || cu.name;
   cu.tin     = document.getElementById('ec-tin').value.trim();
-  cu.branch  = document.getElementById('ec-branch')?.value.trim()||cu.branch||'';
   cu.email   = document.getElementById('ec-email').value.trim();
   cu.phone   = document.getElementById('ec-phone').value.trim();
   cu.address = document.getElementById('ec-addr').value.trim();
+
+  // Save branches array
+  const branches = [];
+  document.querySelectorAll('#ec-branches .ec-branch-row').forEach(row => {
+    const bName = row.querySelector('.ec-br-name')?.value.trim();
+    const bAddr = row.querySelector('.ec-br-addr')?.value.trim();
+    if(bName) branches.push({ name: bName, address: bAddr||'' });
+  });
+  cu.branches = branches;
+  cu.branch   = branches.length > 0 ? branches[0].name : ''; // legacy compat
+
   save(); closeModal(); render();
 }
 
@@ -8110,18 +8158,42 @@ function showAddCustomer(redirectAfter) {
   <div class="form-group"><label>TIN</label><input type="text" id="cu-tin" placeholder="XXX-XXX-XXX-000"></div>
 </div>
 <div class="form-row">
-  <div class="form-group"><label>Branch / Clinic</label><input type="text" id="cu-branch" placeholder="e.g. Main Branch, Cebu Clinic"></div>
   <div class="form-group"><label>Phone</label><input type="text" id="cu-phone" placeholder="+63 9XX XXX XXXX"></div>
-</div>
-<div class="form-row">
   <div class="form-group"><label>Email</label><input type="email" id="cu-email" placeholder="finance@company.ph"></div>
-  <div class="form-group"></div>
 </div>
-<div class="form-group"><label>Address</label><input type="text" id="cu-addr" placeholder="Street, City, Province"></div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+<div class="form-group"><label>Main Address</label><input type="text" id="cu-addr" placeholder="Street, City, Province"></div>
+
+<div style="margin-top:12px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <label style="font-weight:600;font-size:13px"><i class="ti ti-building-store" style="margin-right:5px;color:var(--accent)"></i>Branches / Clinics</label>
+    <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addCuBranchRow()"><i class="ti ti-plus"></i> Add Branch</button>
+  </div>
+  <div id="cu-branches" style="display:flex;flex-direction:column;gap:6px">
+    <div class="cu-branch-row" style="display:flex;gap:6px">
+      <input type="text" placeholder="Branch / Clinic name" class="cu-br-name" style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="text" placeholder="Address (optional)" class="cu-br-addr" style="flex:1.5;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <button onclick="this.closest('.cu-branch-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:18px;padding:0 4px">×</button>
+    </div>
+  </div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveCustomer('${redirectAfter||''}')">Add Customer</button>
 </div>`);
+}
+
+function addCuBranchRow(name='', addr='') {
+  const container = document.getElementById('cu-branches');
+  if(!container) return;
+  const row = document.createElement('div');
+  row.className = 'cu-branch-row';
+  row.style.cssText = 'display:flex;gap:6px';
+  row.innerHTML = `
+    <input type="text" placeholder="Branch / Clinic name" class="cu-br-name" value="${name}" style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <input type="text" placeholder="Address (optional)" class="cu-br-addr" value="${addr}" style="flex:1.5;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <button onclick="this.closest('.cu-branch-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:18px;padding:0 4px">×</button>`;
+  container.appendChild(row);
 }
 
 function saveCustomer(redirectAfter) {
@@ -8130,10 +8202,20 @@ function saveCustomer(redirectAfter) {
   const phone  = document.getElementById('cu-phone').value.trim();
   const tin    = document.getElementById('cu-tin').value.trim();
   const address= document.getElementById('cu-addr').value.trim();
-  const branch = document.getElementById('cu-branch')?.value.trim()||'';
   if (!name) { alert('Name is required.'); return; }
+
+  // Collect branches array
+  const branches = [];
+  document.querySelectorAll('#cu-branches .cu-branch-row').forEach(row => {
+    const bName = row.querySelector('.cu-br-name')?.value.trim();
+    const bAddr = row.querySelector('.cu-br-addr')?.value.trim();
+    if(bName) branches.push({ name: bName, address: bAddr||'' });
+  });
+
   const n = state.customers.length + 1;
-  state.customers.push({ id:'C'+n.toString().padStart(3,'0'), name, tin, email, phone, address, branch, balance:0 });
+  // Keep legacy branch field as first branch name for backward compat
+  const branch = branches.length > 0 ? branches[0].name : '';
+  state.customers.push({ id:'C'+n.toString().padStart(3,'0'), name, tin, email, phone, address, branch, branches, balance:0 });
   save();
   if(redirectAfter==='so') { closeModal(); showAddSO(); }
   else if(redirectAfter==='inv') { closeModal(); showAddInvoice(); }
@@ -9358,7 +9440,7 @@ function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!con
 
 function showAddSO() {
   const custOpts = '<option value="">— Select customer —</option>' +
-    state.customers.map(c=>`<option value="${c.name}">${c.name}${c.branch?' — '+c.branch:''}</option>`).join('') +
+    state.customers.map(c=>`<option value="${c.name}">${c.name}${(c.branches&&c.branches.length>1)?' ('+c.branches.length+' branches)':c.branch?' — '+c.branch:''}</option>`).join('') +
     '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
   window._soLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
   const due = new Date(); due.setDate(due.getDate()+7);
