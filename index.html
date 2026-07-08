@@ -1995,6 +1995,15 @@ function renderCurrentPage() {
 }
 
 function render() {
+  // Always re-apply nav visibility on every render so permission changes take effect immediately
+  if(currentUser) {
+    document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+      el.style.display = canAccess(el.dataset.page) ? '' : 'none';
+    });
+    const adminNav = document.getElementById('admin-nav');
+    if(adminNav) adminNav.style.display = currentUser.role === 'admin' ? '' : 'none';
+  }
+
   const titles = { dashboard:'Dashboard', journal:'General Journal', disbursement:'Disbursement Journal', salesorders:'Sales Orders', invoices:'Invoices', salesreturns:'Sales Returns', purchaseorders:'Purchase Orders', purchases:'Purchases (Cost of Sales)', expenses:'Operating & Admin Expenses', coa:'Chart of Accounts', reports:'Reports', collections:'Collection Report', inventory:'Inventory Tracker', customers:'Customers', suppliers:'Suppliers', users:'User Accounts', company:'Company Profile', employees:'Employees', attendance:'Attendance', payroll:'Payroll' };
   document.getElementById('page-title').textContent = titles[state.page] || state.page;
   document.title = `${titles[state.page]} — ${getCompanyName()}`;
