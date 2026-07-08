@@ -848,16 +848,26 @@ const ACTION_MAP = {
 
 function requireAdmin(action) {
   if(currentUser && currentUser.role === 'admin') return true;
-  // Check action-level permission for non-admin users
+  // Check action-level permission
   const actionKey = ACTION_MAP[action];
-  if(actionKey && canDoAction(actionKey)) return true;
-  if(!actionKey && isAdmin()) return true;
-  // Show permission denied
-  showModal(`<div class="modal-head"><h3>Permission Denied</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+  if(actionKey) {
+    if(canDoAction(actionKey)) return true;
+    // Show permission denied
+    showModal(`<div class="modal-head"><h3>Permission Denied</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="text-align:center;padding:24px 0">
   <i class="ti ti-lock" style="font-size:40px;color:var(--red);display:block;margin-bottom:12px"></i>
   <div style="font-size:14px;font-weight:500;margin-bottom:8px">Permission Required</div>
-  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">You don't have permission to ${action}.<br>Contact your administrator to grant access.</div>
+  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">You don't have permission to <strong>${action}</strong>.<br>Contact your administrator to grant access.</div>
+  <button class="btn" onclick="closeModal()">Close</button>
+</div>`);
+    return false;
+  }
+  // Action not in map — admin-only by default
+  showModal(`<div class="modal-head"><h3>Permission Denied</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="text-align:center;padding:24px 0">
+  <i class="ti ti-lock" style="font-size:40px;color:var(--red);display:block;margin-bottom:12px"></i>
+  <div style="font-size:14px;font-weight:500;margin-bottom:8px">Admin Only</div>
+  <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">This action requires admin access.</div>
   <button class="btn" onclick="closeModal()">Close</button>
 </div>`);
   return false;
@@ -1191,15 +1201,14 @@ function canDoAction(action) {
   const users = getUsers();
   const u = users.find(u=>u.id===currentUser.id);
   if(!u) return false;
-  // Per-user custom actions override role defaults
-  if(u.customActions && u.customActions.length > 0) {
-    return u.customActions.includes(action);
+  // If admin has explicitly set custom actions for this user (even empty = deny all)
+  if(u.customActions !== undefined && u.customActions !== null) {
+    return Array.isArray(u.customActions) && u.customActions.includes(action);
   }
   // Fall back to role defaults
   const roleDef = ROLE_ACTION_DEFAULTS[currentUser.role];
-  if(!roleDef) return true; // unknown role = allow all
-  if(roleDef.allow) return roleDef.allow.includes(action);
-  return true;
+  if(!roleDef || !roleDef.allow) return false; // unknown role or no allow list = deny
+  return roleDef.allow.includes(action);
 }
 
 function getUserEffectivePages(u) {
@@ -1494,16 +1503,16 @@ function setRoleDefaultActions(role) {
 function saveCustomAccess(id) {
   const pages = getCheckedPages('cu');
   if(pages.length === 0) { alert('Select at least one page.'); return; }
-  // Collect checked actions
   const actions = [];
   document.querySelectorAll('.cu-action:checked').forEach(el => actions.push(el.dataset.action));
   const users = getUsers();
   const u = users.find(u=>u.id===id);
   if(!u) return;
   u.customPages   = pages;
-  u.customActions = actions;
+  u.customActions = actions; // save even if empty — empty = deny all actions
   saveUsers(users);
   closeModal();
+  alert(`✅ Permissions saved for ${u.name}.\n\nPages: ${pages.length}\nActions: ${actions.length}`);
   render();
 }
 
