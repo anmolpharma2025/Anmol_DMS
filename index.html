@@ -6087,6 +6087,16 @@ function invTab(type, el) {
   else if(type==='report') body.innerHTML = buildConsolidatedReport();
 }
 
+// ── IN-TRANSIT HELPER ─────────────────────────────────────────────────────────
+function getInTransitQty(branchId) {
+  // Returns qty per itemId that is pending outgoing from this branch
+  const qty = {};
+  (state.inventoryTransfers||[]).filter(t=>t.status==='pending'&&t.fromBranch===branchId).forEach(t=>{
+    t.lines.forEach(l=>{ qty[l.itemId] = (qty[l.itemId]||0) + (l.qty||0); });
+  });
+  return qty;
+}
+
 // ── CONSOLIDATED REPORT (branches + consigned) ─────────────────────────────────
 function buildConsolidatedReport() {
   const items = state.inventory||[];
@@ -6560,11 +6570,15 @@ function buildInventoryTransfers() {
   const pending   = transfers.filter(t=>t.status==='pending').length;
   const received  = transfers.filter(t=>t.status==='received').length;
   return `
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
   <div class="kpi"><div class="kpi-label"><i class="ti ti-arrows-transfer-up"></i>Total Transfers</div><div class="kpi-value">${transfers.length}</div></div>
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-clock"></i>In Transit</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-clock"></i>In Transit (Pending)</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Received</div><div class="kpi-value pos">${received}</div></div>
 </div>
+${pending>0?`<div style="padding:9px 14px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--amber)">
+  <i class="ti ti-info-circle" style="margin-right:5px"></i>
+  <strong>${pending} transfer${pending>1?'s are':' is'} in transit.</strong> Stock is <strong>not deducted from the source</strong> and <strong>not added to the destination</strong> until the receiving branch confirms receipt.
+</div>`:''}
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
   <span class="section-title">Transfer History</span>
   <div style="display:flex;gap:8px">
@@ -6580,7 +6594,7 @@ ${transfers.length===0 ? `<div style="text-align:center;padding:48px;color:var(-
     const fromB=branches.find(b=>b.id===t.fromBranch)||{name:t.fromBranch};
     const toB=branches.find(b=>b.id===t.toBranch)||{name:t.toBranch};
     const totalQty=t.lines.reduce((s,l)=>s+(l.qty||0),0);
-    return `<tr>
+    return `<tr style="${t.status==='pending'?'background:rgba(245,158,11,0.04)':''}">
       <td class="mono">${t.id}</td><td>${t.date}</td>
       <td style="font-weight:500">${fromB.name}</td>
       <td style="font-weight:500;color:var(--accent)">${toB.name}</td>
@@ -6591,10 +6605,14 @@ ${transfers.length===0 ? `<div style="text-align:center;padding:48px;color:var(-
         ${t.receivedBy?`<i class="ti ti-user-check" style="font-size:11px;margin-right:3px"></i>${t.receivedBy}`:'—'}
         ${t.receivedDate?`<div style="font-size:10px;color:var(--text-tertiary)">${t.receivedDate}</div>`:''}
       </td>
-      <td><span class="badge ${t.status==='received'?'paid':'pending'}">${t.status}</span></td>
+      <td>
+        ${t.status==='received'
+          ? `<span class="badge paid">Received</span>`
+          : `<span class="badge pending" style="background:rgba(245,158,11,0.15);color:var(--amber);border:1px solid var(--amber)">🚚 In Transit</span>`}
+      </td>
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewTransfer('${t.id}')"><i class="ti ti-eye"></i>View</button>
-        ${t.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="receiveTransfer('${t.id}')"><i class="ti ti-check"></i>Received</button>`:''}
+        ${t.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="receiveTransfer('${t.id}')"><i class="ti ti-check"></i>Mark Received</button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteTransfer('${t.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -6622,22 +6640,29 @@ function getBranchStock(branchId) {
   const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
   const stock = {};
   const items = state.inventory||[];
-  items.forEach(it => { stock[it.id] = (branchId === mainId) ? it.qty : 0; });
+  // Start with base stock
+  items.forEach(it => { stock[it.id] = (branchId === mainId) ? (it.qty||0) : 0; });
 
   (state.inventoryTransfers||[]).forEach(t => {
     t.lines.forEach(l => {
       if(!l.itemId) return;
       const qty = l.qty||0;
-      // Outgoing from this branch reduces its stock — applies the moment the transfer is created (pending or received)
-      if(t.fromBranch === branchId && t.fromBranch !== mainId) {
-        stock[l.itemId] = (stock[l.itemId]||0) - qty;
-      }
-      // Incoming to this branch only adds once RECEIVED (confirmed arrival)
-      if(t.toBranch === branchId && t.status === 'received') {
-        stock[l.itemId] = (stock[l.itemId]||0) + qty;
+      // Only deduct from source AND add to destination when transfer is RECEIVED
+      // While pending — stock stays at source, destination doesn't get it yet
+      if(t.status === 'received') {
+        if(t.fromBranch === branchId && t.fromBranch !== mainId) {
+          // Branch-to-branch: deduct from source branch
+          stock[l.itemId] = (stock[l.itemId]||0) - qty;
+        }
+        if(t.toBranch === branchId && t.toBranch !== mainId) {
+          // Add to destination branch
+          stock[l.itemId] = (stock[l.itemId]||0) + qty;
+        }
       }
     });
   });
+
+  // Show in-transit stock as separate for awareness (pending outgoing)
   return stock;
 }
 
@@ -6763,29 +6788,19 @@ function saveTransfer() {
   const toB=branches.find(b=>b.id===toId)||{name:toId};
   const fromB=branches.find(b=>b.id===fromId)||{name:fromId};
   const txNum=String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
-
-  // Only deduct from state.inventory (main warehouse) when the source IS main.
-  // For branch-to-branch transfers, the source branch's effective stock is
-  // computed dynamically by getBranchStock() from the transfer history itself —
-  // no separate deduction needed, it's automatically reflected once this transfer is saved.
-  if(fromId === mainId) {
-    lines.forEach(l=>{
-      const it=(state.inventory||[]).find(i=>i.id===l.itemId); if(!it) return;
-      it.qty=Math.max(0,it.qty-l.qty);
-      const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
-      if(!state.inventoryMovements) state.inventoryMovements=[];
-      state.inventoryMovements.push({id:movId,date,item:l.itemId,type:'out',qty:l.qty,ref:'TX-'+txNum,note:'Transfer to '+toB.name});
-    });
-  } else {
-    // Branch-to-branch: log a movement note for traceability, but don't touch state.inventory
-    lines.forEach(l=>{
-      const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
-      if(!state.inventoryMovements) state.inventoryMovements=[];
-      state.inventoryMovements.push({id:movId,date,item:l.itemId,type:'out',qty:l.qty,ref:'TX-'+txNum,note:'Transfer from '+fromB.name+' to '+toB.name});
-    });
-  }
-
   const id='TX-'+txNum;
+
+  // DO NOT deduct inventory yet — stock only moves when receiving branch confirms receipt
+  // Log a movement note for traceability
+  lines.forEach(l=>{
+    const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+    if(!state.inventoryMovements) state.inventoryMovements=[];
+    state.inventoryMovements.push({
+      id:movId, date, item:l.itemId, type:'transfer_out_pending', qty:l.qty,
+      ref:id, note:`Transfer initiated: ${fromB.name} → ${toB.name} (pending receipt)`
+    });
+  });
+
   if(!state.inventoryTransfers) state.inventoryTransfers=[];
   state.inventoryTransfers.push({id,date,fromBranch:fromId,toBranch:toId,lines:[...lines],notes,transferredBy:by,status:'pending'});
   save(); closeModal(); render();
@@ -6857,23 +6872,32 @@ function receiveTransfer(id) {
   if(!confirm('Confirm receipt of '+totalQty+' units at destination?\n\nThis will be stamped under your name: '+currentUser.name)) return;
   t.status='received';
   t.receivedDate=today();
-  t.receivedBy=currentUser.name;  // ← auto-stamp
+  t.receivedBy=currentUser.name;
   const branches=getBranches();
   const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
   const fromB=branches.find(b=>b.id===t.fromBranch)||{name:t.fromBranch};
   const toB=branches.find(b=>b.id===t.toBranch)||{name:t.toBranch};
+
   t.lines.forEach(l=>{
-    // If receiving back into Main Warehouse, add the qty into state.inventory
-    // (branch stock is computed dynamically from transfer history, but main's
-    // stock is the literal state.inventory.qty value, so it needs the add-back)
-    if(t.toBranch === mainId) {
-      const it=(state.inventory||[]).find(i=>i.id===l.itemId);
-      if(it) it.qty = (it.qty||0) + (l.qty||0);
+    const it=(state.inventory||[]).find(i=>i.id===l.itemId);
+    if(it) {
+      // Deduct from source if it's the main warehouse
+      if(t.fromBranch === mainId) {
+        it.qty = Math.max(0, (it.qty||0) - (l.qty||0));
+      }
+      // Add to destination if it's the main warehouse
+      if(t.toBranch === mainId) {
+        it.qty = (it.qty||0) + (l.qty||0);
+      }
+      // Branch-to-branch: getBranchStock handles stock dynamically from transfer history
     }
+    // Log movement
     const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
     if(!state.inventoryMovements) state.inventoryMovements=[];
-    state.inventoryMovements.push({id:movId,date:t.receivedDate,item:l.itemId,type:'transfer',qty:l.qty,ref:id,
-      note:'Received at '+toB.name+' from '+fromB.name+' — confirmed by '+currentUser.name});
+    state.inventoryMovements.push({
+      id:movId, date:t.receivedDate, item:l.itemId, type:'transfer_received', qty:l.qty, ref:id,
+      note:`Received at ${toB.name} from ${fromB.name} — confirmed by ${currentUser.name}`
+    });
   });
   save(); render();
   setTimeout(()=>{ const tabs=document.querySelectorAll('#inv-tabs .tab'); if(tabs[3]){ tabs.forEach(t=>t.classList.remove('active')); tabs[3].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildInventoryTransfers(); } },100);
