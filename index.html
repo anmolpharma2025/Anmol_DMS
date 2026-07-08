@@ -1968,12 +1968,12 @@ function filterTable() {
             return `<tr>
               <td class="mono">${inv.id}</td><td>${inv.date}</td>
               <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
-              <td style="${inv.due&&inv.due<today()&&inv.status!=='paid'?'color:var(--red);font-weight:500':''}">${inv.due||'—'}${inv.due&&inv.due<today()&&inv.status!=='paid'?' <span style="font-size:10px">⚠</span>':''}</td>
+              <td style="${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?'color:var(--red);font-weight:500':''}">${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}</td>
               <td>${inv.customer}</td>
               <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
               <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
               <td style="text-align:right;font-weight:500">${fmt(inv.amount||0)}</td>
-              <td><span class="badge ${inv.status}">${inv.status}</span></td>
+              <td><span class="badge ${getInvoiceStatus(inv)}">${getInvoiceStatus(inv).toUpperCase()}</span></td>
               <td><div class="action-btns">
                 <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
                 <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
@@ -3403,14 +3403,14 @@ function renderInvoices(c, ta) {
     return `<tr>
       <td class="mono">${inv.id}</td><td>${inv.date}</td>
       <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
-      <td style="${inv.due&&inv.due<today()&&inv.status!=='paid'?'color:var(--red);font-weight:500':''}">
-        ${inv.due||'—'}${inv.due&&inv.due<today()&&inv.status!=='paid'?' <span style="font-size:10px">⚠</span>':''}
+      <td style="${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?'color:var(--red);font-weight:500':''}">
+        ${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}
       </td>
       <td>${inv.customer}</td>
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
-      <td><span class="badge ${inv.status}">${inv.status}</span></td>
+      <td><span class="badge ${getInvoiceStatus(inv)}">${getInvoiceStatus(inv).toUpperCase()}</span></td>
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
@@ -5890,21 +5890,34 @@ function recomputeBalances() {
     cu.balance = Math.max(0, totalInvoiced - totalCollected - totalReturns);
   });
 
-  // Accounts Payable balance
+  // Accounts Payable balance — from journal entries
   const apAcc = (state.accounts||[]).find(a=>{
     const n = String(a.name||'').toLowerCase();
-    return n.includes('accounts payable')||n.includes('trade payable')||(n.includes('payable')&&!n.includes('tax')&&!n.includes('withholding')&&!n.includes('cwt'));
+    return n.includes('accounts payable') || n.includes('trade payable') ||
+      (n.includes('payable') && !n.includes('tax') && !n.includes('withholding') && !n.includes('cwt') && !n.includes('output'));
   });
   if(apAcc) {
-    const totalPOAP = (state.purchaseOrders||[])
-      .filter(po=>po.status==='received'&&po.paymentTerms&&!['cod','cod_check','prepaid'].includes(po.paymentTerms))
-      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
-    const paidPOs = new Set((state.journal||[]).filter(j=>j.poRef&&!j.cancelled).map(j=>j.poRef));
-    const paidAP  = (state.purchaseOrders||[])
-      .filter(po=>paidPOs.has(po.id))
-      .reduce((s,po)=>s+(po.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
-    apAcc.balance = Math.max(0, totalPOAP - paidAP);
+    const jrnl = (state.journal||[]).filter(j=>!j.cancelled);
+    // Credits to AP = increase liability (purchase on credit)
+    const apCredits = jrnl
+      .filter(j=>j.credit && String(j.credit)===String(apAcc.id))
+      .reduce((s,j)=>s+(j.amount||0),0);
+    // Debits to AP = decrease liability (payment made)
+    const apDebits = jrnl
+      .filter(j=>j.debit && String(j.debit)===String(apAcc.id))
+      .reduce((s,j)=>s+(j.amount||0),0);
+    apAcc.balance = Math.max(0, apCredits - apDebits);
   }
+}
+
+function getInvoiceStatus(inv) {
+  if(inv.status === 'draft') return 'draft';
+  const totalCollected = (state.collections||[])
+    .filter(r => (r.invoices||[]).includes(inv.id) || r.invoice === inv.id)
+    .reduce((s,r) => s + (r.netCash||r.amount||0), 0);
+  if(totalCollected >= (inv.amount||0)) return 'paid';
+  if(inv.due && inv.due < today()) return 'overdue';
+  return inv.status || 'pending';
 }
 
 function getInvoiceBalance(invId) {
