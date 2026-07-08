@@ -9059,15 +9059,14 @@ ${(so.drIssued||[]).length>0?`
   </div>`).join('')}
 </div>`:''}
 
-  const anyApproved = so.lines.some(l=>l.approved);
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print SO</button>
-  ${anyApproved
+  ${so.lines.some(l=>l.approved)
     ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
     : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
-  ${so.status==='approved'&&isAdmin()&&allApproved?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
+  ${allApproved&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
 </div>`);
 }
 
