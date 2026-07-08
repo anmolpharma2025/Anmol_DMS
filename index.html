@@ -648,7 +648,15 @@ function fbListenMeta() {
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
     if(meta.branches && meta.branches.length > 0)
       try { localStorage.setItem('anmolpharma_branches', JSON.stringify(meta.branches)); } catch(e) {}
-    if(typeof render === 'function') render();
+    if(typeof render === 'function') {
+      // Re-apply nav visibility in case permissions changed for current user
+      document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+        el.style.display = canAccess(el.dataset.page) ? '' : 'none';
+      });
+      const adminNav = document.getElementById('admin-nav');
+      if(adminNav && currentUser) adminNav.style.display = currentUser.role==='admin'?'':'none';
+      render();
+    }
     showFbToast('Settings synced from another device');
   }, e => console.error('fbListenMeta:', e));
 }
@@ -775,11 +783,23 @@ function getUsers() {
 function saveUsers(users) {
   try { localStorage.setItem(USERS_KEY, JSON.stringify(users)); } catch(e) {}
   fbSaveMeta();
-  // Re-apply nav visibility so permission changes take effect immediately
+  // Re-apply nav visibility immediately for the current session
   if(typeof currentUser !== 'undefined' && currentUser) {
     document.querySelectorAll('.nav-item[data-page]').forEach(el => {
       el.style.display = canAccess(el.dataset.page) ? '' : 'none';
     });
+    // Show/hide nav section headers
+    document.querySelectorAll('.nav-section').forEach(sec => {
+      let el = sec.nextElementSibling;
+      let hasVisible = false;
+      while(el && !el.classList.contains('nav-section') && !el.id?.includes('admin-nav')) {
+        if(el.classList.contains('nav-item') && el.style.display !== 'none') hasVisible = true;
+        el = el.nextElementSibling;
+      }
+      sec.style.display = hasVisible ? '' : 'none';
+    });
+    const adminNav = document.getElementById('admin-nav');
+    if(adminNav) adminNav.style.display = currentUser.role === 'admin' ? '' : 'none';
   }
 }
 
