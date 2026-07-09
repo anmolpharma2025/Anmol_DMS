@@ -3465,10 +3465,7 @@ function showAddInvoice() {
   window._invVatType = 'inclusive';
   window._invLinkedSO = null;
 
-  // SOs eligible for invoicing:
-  // - has at least one approved item
-  // - not yet invoiced (no invoice with this soRef exists), OR allow multiple invoices per SO
-  // - not delivered
+  // SOs eligible for invoicing: has items, not yet invoiced, not delivered
   const invoicedSOs = new Set((state.invoices||[]).map(i=>i.soRef).filter(Boolean));
   const eligibleSOs = (state.salesOrders||[]).filter(so =>
     so.lines && so.lines.length > 0 &&
@@ -3478,7 +3475,7 @@ function showAddInvoice() {
   const soOpts = '<option value="">— none / manual entry —</option>' +
     eligibleSOs.map(so => {
       const total = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-      return `<option value="${so.id}">${so.id} — ${so.customer} (${so.lines.length} item${so.lines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
+      return `<option value="${so.id}">${so.id} — ${so.customer}${so.branch?' ('+so.branch+')':''} (${so.lines.length} item${so.lines.length!==1?'s':''} · ${fmt(total)}) [${so.status}]</option>`;
     }).join('');
 
   document.getElementById('modal').style.display = 'flex';
@@ -6316,7 +6313,9 @@ function buildConsignedItems() {
         <div style="font-weight:500">${c.itemDesc||item?.name||'—'}</div>
         ${c.itemId?`<div class="mono" style="font-size:10px;color:var(--text-tertiary)">${c.itemId}</div>`:''}
       </td>
-      <td style="text-align:right;font-weight:500">${c.qty}</td>
+      <td style="text-align:right;font-weight:500">${c.qty}
+        ${(c.qtySold||0) > 0 && c.status !== 'sold' ? `<div style="font-size:10px;color:var(--green);margin-top:2px">Sold: ${c.qtySold} / Rem: ${c.qty-(c.qtySold||0)}</div>` : ''}
+      </td>
       <td style="text-align:right">${fmt(c.unitPrice||0)}</td>
       <td style="text-align:right;font-weight:500">${fmt(totalVal)}</td>
       <td style="color:${isOverdue?'var(--red)':'var(--text-secondary)'}">
@@ -6328,7 +6327,7 @@ function buildConsignedItems() {
       <td style="font-size:12px;color:var(--text-secondary);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${c.notes||''}">${c.notes||'—'}</td>
       <td><div class="action-btns">
         ${c.status==='active'?`
-          <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="markConsignmentSold('${c.id}')"><i class="ti ti-check"></i>Sold</button>
+          <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="markConsignmentSold('${c.id}')"><i class="ti ti-cash"></i>Sold</button>
           <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="markConsignmentReturned('${c.id}')"><i class="ti ti-arrow-back-up"></i>Return</button>
         `:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteConsignment('${c.id}')"><i class="ti ti-trash"></i></button>
@@ -6448,20 +6447,87 @@ function saveConsignment() {
 
 function markConsignmentSold(id) {
   if(!requireAdmin('mark consignment as sold')) return;
-  const c=(state.consignedItems||[]).find(c=>c.id===id);
+  const c=(state.consignedItems||[]).find(x=>x.id===id);
   if(!c) return;
-  if(!confirm(`Mark "${c.itemDesc}" (×${c.qty}) consigned to ${c.consignee} as SOLD?\n\nTotal value: ${fmt((c.qty||0)*(c.unitPrice||0))}`)) return;
-  c.status='sold';
-  c.soldDate=today();
-  c.soldBy=currentUser.name;
-  // Log as sold movement (already deducted from inventory when consigned)
+
+  const remaining = (c.qty||0) - (c.qtySold||0);
+  if(remaining <= 0) { alert('All items already sold.'); return; }
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-cash" style="margin-right:6px;color:var(--green)"></i>Record Consignment Sale</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px">
+  <strong>${c.itemDesc}</strong> &nbsp;·&nbsp; Consignee: <strong>${c.consignee}</strong><br>
+  <span style="color:var(--text-secondary)">Total consigned: ${c.qty} · Already sold: ${c.qtySold||0} · <strong style="color:var(--accent)">Remaining: ${remaining}</strong></span>
+</div>
+<div class="form-row">
+  <div class="form-group">
+    <label>Qty Sold <span style="color:var(--red)">*</span></label>
+    <input type="number" id="cs-qty-sold" min="1" max="${remaining}" value="${remaining}"
+      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;font-family:var(--font);text-align:center"
+      oninput="document.getElementById('cs-sold-value').textContent=fmt((parseFloat(this.value)||0)*(${c.unitPrice||0}))">
+  </div>
+  <div class="form-group">
+    <label>Unit Price</label>
+    <input type="number" id="cs-unit-price" value="${c.unitPrice||0}" step="0.01"
+      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;font-family:var(--font)">
+  </div>
+</div>
+<div style="text-align:right;font-size:13px;color:var(--green);font-weight:600;margin-bottom:12px">
+  Sale Value: <span id="cs-sold-value">${fmt(remaining*(c.unitPrice||0))}</span>
+</div>
+<div class="form-group">
+  <label>Remarks <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
+  <input type="text" id="cs-remarks" placeholder="e.g. partial sale, customer name">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="confirmConsignmentSold('${id}')"><i class="ti ti-cash"></i>Confirm Sale</button>
+</div>`);
+}
+
+function confirmConsignmentSold(id) {
+  const c = (state.consignedItems||[]).find(x=>x.id===id);
+  if(!c) return;
+  const qtySold   = parseInt(document.getElementById('cs-qty-sold')?.value)||0;
+  const unitPrice = parseFloat(document.getElementById('cs-unit-price')?.value)||c.unitPrice||0;
+  const remarks   = document.getElementById('cs-remarks')?.value.trim()||'';
+  const remaining = (c.qty||0) - (c.qtySold||0);
+
+  if(qtySold <= 0 || qtySold > remaining) {
+    alert(`Qty sold must be between 1 and ${remaining}.`); return;
+  }
+
+  c.qtySold = (c.qtySold||0) + qtySold;
+  c.unitPrice = unitPrice;
+  if(c.qtySold >= c.qty) {
+    c.status = 'sold';
+    c.soldDate = today();
+    c.soldBy = currentUser.name;
+  }
+
+  // Track sales history
+  if(!c.salesHistory) c.salesHistory = [];
+  c.salesHistory.push({
+    date: today(), qty: qtySold, unitPrice, amount: qtySold*unitPrice,
+    by: currentUser.name, remarks
+  });
+
+  // Log movement
   if(c.itemId) {
     const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
     if(!state.inventoryMovements) state.inventoryMovements=[];
-    state.inventoryMovements.push({id:movId,date:today(),item:c.itemId,type:'out',qty:0,ref:c.id,note:`Consignment sold — ${c.consignee} (confirmed by ${currentUser.name})`});
+    state.inventoryMovements.push({
+      id:movId, date:today(), item:c.itemId, type:'out', qty:qtySold, ref:c.id,
+      note:`Consignment partial sale ×${qtySold} — ${c.consignee}${remarks?' ('+remarks+')':''} by ${currentUser.name}`
+    });
   }
-  save(); render();
-  setTimeout(()=>{ const tabs=document.querySelectorAll('#inv-tabs .tab'); if(tabs[5]){ tabs.forEach(t=>t.classList.remove('active')); tabs[5].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildConsignedItems(); } },100);
+
+  save(); closeModal();
+  setTimeout(()=>{
+    const tabs=document.querySelectorAll('#inv-tabs .tab');
+    if(tabs[5]){ tabs.forEach(t=>t.classList.remove('active')); tabs[5].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildConsignedItems(); }
+  },100);
+  render();
 }
 
 function markConsignmentReturned(id) {
@@ -9157,7 +9223,12 @@ ${(so.drIssued||[]).length>0?`
     ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
     : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
-  ${allApproved&&isAdmin()?`<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`:''}
+  ${allApproved&&isAdmin()?(()=>{
+    const hasInvoice = (state.invoices||[]).some(i=>i.soRef===so.id);
+    return hasInvoice
+      ? `<button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();deliverSO('${so.id}')"><i class="ti ti-check"></i>Mark Delivered</button>`
+      : `<button class="btn" style="opacity:0.45;cursor:not-allowed" title="Create an invoice first before marking delivered" disabled><i class="ti ti-check"></i>Mark Delivered</button>`;
+  })():''}
 </div>`);
 }
 
@@ -9435,7 +9506,26 @@ function approveAllSOItems(soId) {
 
 function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(so); } save(); render(); }
 function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; stampUpdate(so); } save(); render(); }
-function deliverSO(id) { if(!requireAdmin('mark sales orders delivered')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='delivered'; so.deliveredDate=today(); stampUpdate(so); } save(); render(); }
+function deliverSO(id) {
+  if(!requireAdmin('mark sales orders delivered')) return;
+  const so = (state.salesOrders||[]).find(s=>s.id===id);
+  if(!so) return;
+
+  // Require at least one invoice before marking delivered
+  const hasInvoice = (state.invoices||[]).some(i=>i.soRef===id);
+  if(!hasInvoice) {
+    alert('❌ Cannot mark as Delivered.\n\nNo invoice has been issued for this Sales Order yet.\n\nPlease create an invoice first before marking it as delivered.');
+    return;
+  }
+
+  if(!confirm(`Mark SO ${id} as DELIVERED?\n\nThis will close the order. Make sure all items have been delivered and invoiced.`)) return;
+
+  so.status = 'delivered';
+  so.deliveredDate = today();
+  so.deliveredBy = currentUser?.name||'';
+  stampUpdate(so);
+  save(); render();
+}
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
 
 function showAddSO() {
