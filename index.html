@@ -4674,22 +4674,26 @@ function renderCOA(c, ta) {
   const types = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
   const allRows = types.map(type => {
     const accs = state.accounts.filter(a => a.type === type);
-    const total = accs.reduce((s,a) => s + a.balance, 0);
+    const total = accs.reduce((s,a) => s + (a.balance||0), 0);
     const typeRow = `<tr>
-      <td colspan="5" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">
+      <td colspan="6" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">
         ${type}s
         <span style="float:right;font-weight:500;font-size:12px;color:var(--text-primary)">${fmt(total)}</span>
       </td>
     </tr>`;
     const accRows = accs.map(a => `<tr>
       <td class="mono">${a.id}</td>
-      <td>${a.name}</td>
-      <td><span class="badge" style="background:var(--accent-bg);color:var(--accent)">${a.type}</span></td>
-      <td style="text-align:right;font-weight:500">${fmt(a.balance)}</td>
-      <td><button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAccount('${a.id}')"><i class="ti ti-trash"></i></button></td>
+      <td style="font-weight:500">${a.name}</td>
+      <td><span class="badge" style="background:var(--accent-bg);color:var(--accent);font-size:11px">${a.type}</span></td>
+      <td style="font-size:11px;color:var(--text-secondary)">${a.subType||'—'}</td>
+      <td style="text-align:right;font-weight:500">${fmt(a.balance||0)}</td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAccount('${a.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAccount('${a.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
     </tr>`).join('');
     const totalRow = `<tr style="background:var(--bg-card)">
-      <td colspan="3" style="padding:6px 12px;font-size:12px;color:var(--text-secondary)">Total ${type}s</td>
+      <td colspan="4" style="padding:6px 12px;font-size:12px;color:var(--text-secondary)">Total ${type}s</td>
       <td style="text-align:right;padding:6px 12px;font-weight:600">${fmt(total)}</td>
       <td></td>
     </tr>`;
@@ -4698,23 +4702,39 @@ function renderCOA(c, ta) {
 
   c.innerHTML = `<table>
     <thead><tr>
-      <th>Code</th><th>Account Name</th><th>Type</th>
-      <th style="text-align:right">Balance</th><th></th>
+      <th>Code</th><th>Account Name</th><th>Type</th><th>Sub-Type</th>
+      <th style="text-align:right">Balance</th><th>Actions</th>
     </tr></thead>
     <tbody>${allRows}</tbody>
   </table>`;
 }
 
-function deleteAccount(id) { if(!requireAdmin("delete accounts")) return; if(confirm('Remove this account?')) { state.accounts = state.accounts.filter(a => a.id !== id); save(); render(); } }
+function deleteAccount(id) {
+  if(!requireAdmin('delete accounts')) return;
+  const inUse = (state.journal||[]).some(j=>String(j.debit)===String(id)||String(j.credit)===String(id));
+  if(inUse && !confirm(`This account has journal entries linked to it.\n\nDeleting it may affect reports and journal history.\n\nDelete anyway?`)) return;
+  if(!inUse && !confirm('Remove this account?')) return;
+  state.accounts = state.accounts.filter(a => String(a.id) !== String(id));
+  save(); render();
+}
 
 function showAddAccount() {
   showModal(`
 <div class="modal-head"><h3>Add Account</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-row">
   <div class="form-group"><label>Account Code</label><input type="text" id="acc-id" placeholder="e.g. 1050"></div>
-  <div class="form-group"><label>Type</label><select id="acc-type"><option>Asset</option><option>Liability</option><option>Equity</option><option>Revenue</option><option>Expense</option></select></div>
+  <div class="form-group"><label>Type</label>
+    <select id="acc-type" onchange="updateSubTypes('acc-subtype','acc-type')">
+      <option>Asset</option><option>Liability</option><option>Equity</option><option>Revenue</option><option>Expense</option>
+    </select>
+  </div>
 </div>
-<div class="form-group"><label>Account Name</label><input type="text" id="acc-name" placeholder="e.g. Short-term Investments"></div>
+<div class="form-row">
+  <div class="form-group"><label>Account Name</label><input type="text" id="acc-name" placeholder="e.g. Short-term Investments"></div>
+  <div class="form-group"><label>Sub-Type <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
+    <input type="text" id="acc-subtype" placeholder="e.g. Current Asset, Operating Expense">
+  </div>
+</div>
 <div class="form-group"><label>Opening Balance (₱)</label><input type="number" id="acc-bal" placeholder="0.00" min="0" step="0.01" value="0"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
@@ -4723,13 +4743,63 @@ function showAddAccount() {
 }
 
 function saveAccount() {
-  const id = document.getElementById('acc-id').value.trim();
-  const name = document.getElementById('acc-name').value.trim();
-  const type = document.getElementById('acc-type').value;
+  const id      = document.getElementById('acc-id').value.trim();
+  const name    = document.getElementById('acc-name').value.trim();
+  const type    = document.getElementById('acc-type').value;
+  const subType = document.getElementById('acc-subtype')?.value.trim()||'';
   const balance = parseFloat(document.getElementById('acc-bal').value) || 0;
   if (!id || !name) { alert('Account code and name are required.'); return; }
-  if (state.accounts.find(a => a.id === id)) { alert('Account code already exists.'); return; }
-  state.accounts.push({ id, name, type, balance });
+  if (state.accounts.find(a => String(a.id) === String(id))) { alert('Account code already exists.'); return; }
+  state.accounts.push({ id, name, type, subType, balance });
+  save(); closeModal(); render();
+}
+
+function showEditAccount(id) {
+  const a = state.accounts.find(a=>String(a.id)===String(id));
+  if(!a) return;
+  showModal(`
+<div class="modal-head"><h3>Edit Account — ${a.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Account Code</label>
+    <input type="text" id="eacc-id" value="${a.id}"
+      style="padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-secondary);font-family:var(--font);font-size:13px;width:100%;cursor:not-allowed" readonly>
+    <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">Account code cannot be changed (linked to journal entries)</div>
+  </div>
+  <div class="form-group"><label>Type</label>
+    <select id="eacc-type">
+      ${['Asset','Liability','Equity','Revenue','Expense'].map(t=>`<option ${a.type===t?'selected':''}>${t}</option>`).join('')}
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Account Name</label><input type="text" id="eacc-name" value="${a.name}"></div>
+  <div class="form-group"><label>Sub-Type <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
+    <input type="text" id="eacc-subtype" value="${a.subType||''}" placeholder="e.g. Current Asset, Operating Expense">
+  </div>
+</div>
+<div class="form-group"><label>Opening / Manual Balance (₱)
+  <span style="font-size:10px;color:var(--text-tertiary);font-weight:400"> — this is overridden by journal entries for AP/AR accounts</span>
+</label>
+  <input type="number" id="eacc-bal" value="${a.balance||0}" step="0.01">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditAccount('${a.id}')">Save Changes</button>
+</div>`);
+}
+
+function saveEditAccount(id) {
+  const a = state.accounts.find(a=>String(a.id)===String(id));
+  if(!a) return;
+  const name    = document.getElementById('eacc-name').value.trim();
+  const type    = document.getElementById('eacc-type').value;
+  const subType = document.getElementById('eacc-subtype')?.value.trim()||'';
+  const balance = parseFloat(document.getElementById('eacc-bal').value)||0;
+  if(!name) { alert('Account name is required.'); return; }
+  a.name    = name;
+  a.type    = type;
+  a.subType = subType;
+  a.balance = balance;
   save(); closeModal(); render();
 }
 
