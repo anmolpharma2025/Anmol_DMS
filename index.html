@@ -7463,29 +7463,58 @@ function buildInventoryItems() {
 }
 
 function buildInventoryMovements() {
-  if(!state.inventoryMovements.length) return `<div style="text-align:center;padding:40px;color:var(--text-tertiary)">No movements recorded yet</div>`;
-  return `<table>
-    <thead><tr><th>ID</th><th>Date</th><th>Item</th><th>Type</th><th style="text-align:right">Qty</th><th>Reference</th><th>Notes</th></tr></thead>
-    <tbody>
-    ${[...state.inventoryMovements].reverse().map(m => {
-      const it = state.inventory.find(i=>i.id===m.item);
-      return `<tr>
-        <td class="mono">${m.id}</td><td>${m.date}</td>
-        <td style="font-weight:500">${it?it.name:m.item}</td>
-        <td><span class="badge ${m.type==='in'?'paid':'pending'}">${m.type==='in'?'Stock In':'Stock Out'}</span></td>
-        <td style="text-align:right;font-weight:500;color:${m.type==='in'?'var(--green)':'var(--amber)'}">
-          ${m.type==='in'?'+':'-'}${m.qty}
-        </td>
-        <td class="mono" style="font-size:12px">${m.ref}</td>
-        <td style="color:var(--text-secondary);font-size:12px">${m.note}</td>
-      </tr>`;
-    }).join('')}
-    </tbody>
-  </table>`;
+  const movements = (state.inventoryMovements||[]).filter(m => {
+    // Only show movements for existing items
+    return state.inventory.find(i=>i.id===m.item);
+  });
+  if(!movements.length) return `<div style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="ti ti-history" style="font-size:36px;display:block;margin-bottom:12px"></i>No stock movements recorded yet</div>`;
+  return `
+<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+  <button class="btn danger" style="font-size:12px;padding:4px 12px" onclick="clearAllMovements()"><i class="ti ti-trash"></i> Clear All Movements</button>
+</div>
+<table>
+  <thead><tr><th>ID</th><th>Date</th><th>Item</th><th>Type</th><th style="text-align:right">Qty</th><th>Reference</th><th>Notes</th></tr></thead>
+  <tbody>
+  ${[...movements].reverse().map(m => {
+    const it = state.inventory.find(i=>i.id===m.item);
+    const typeLabel = m.type==='in'||m.type==='transfer_received' ? 'Stock In'
+      : m.type==='transfer_out_pending' ? 'In Transit'
+      : 'Stock Out';
+    const typeColor = m.type==='in'||m.type==='transfer_received' ? 'var(--green)'
+      : m.type==='transfer_out_pending' ? 'var(--amber)'
+      : 'var(--red)';
+    return `<tr>
+      <td class="mono">${m.id}</td><td>${m.date}</td>
+      <td style="font-weight:500">${it?it.name:'—'}</td>
+      <td><span class="badge" style="background:${typeColor}22;color:${typeColor}">${typeLabel}</span></td>
+      <td style="text-align:right;font-weight:500;color:${typeColor}">
+        ${m.type==='in'||m.type==='transfer_received'?'+':m.type==='transfer_out_pending'?'⟳':'-'}${m.qty}
+      </td>
+      <td class="mono" style="font-size:12px">${m.ref||'—'}</td>
+      <td style="color:var(--text-secondary);font-size:12px">${m.note||'—'}</td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
 }
 
-function deleteItem(id) { if(!requireAdmin("delete inventory items")) return;
-  if(confirm('Remove this item?')) { state.inventory=state.inventory.filter(i=>i.id!==id); save(); render(); }
+function clearAllMovements() {
+  if(!requireAdmin('clear stock movements')) return;
+  if(!confirm('Clear ALL stock movement records?\n\nThis only removes the movement history log — it does NOT change current inventory quantities.\n\nContinue?')) return;
+  state.inventoryMovements = [];
+  save();
+  const body = document.getElementById('inv-body');
+  if(body) body.innerHTML = buildInventoryMovements();
+}
+
+function deleteItem(id) {
+  if(!requireAdmin('delete inventory items')) return;
+  if(confirm('Remove this item and all its stock movement records?')) {
+    state.inventory = state.inventory.filter(i=>i.id!==id);
+    // Remove movements for this item
+    state.inventoryMovements = (state.inventoryMovements||[]).filter(m=>m.item!==id);
+    save(); render();
+  }
 }
 
 function showEditItem(id) {
