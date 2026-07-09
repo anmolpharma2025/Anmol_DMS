@@ -4855,13 +4855,57 @@ function showReport(type) {
   const payrollTotal = payInPeriod.reduce((s,p)=>s+(p.netPay||0),0);
   const netIncome = grossProfit - totalExp - payrollTotal;
 
-  // CASH
-  const cashIn     = colInPeriod.reduce((s,r)=>s+(r.amount||0),0);
-  const cashOutExp = allExp.filter(e=>e.status==='paid').reduce((s,e)=>s+(e.amount||0),0);
-  const cashOutPur = (state.purchaseOrders||[]).filter(p=>p.status==='received'&&inPeriod(p.receivedDate||p.date)&&['cod','cod_check'].includes(p.paymentTerms||'')).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
-  const cashOutPay = payInPeriod.reduce((s,p)=>s+(p.grossPay||0),0);
-  const cashOut    = cashOutExp + cashOutPur + cashOutPay;
-  const netCashFlow= cashIn - cashOut;
+  // ── CASH FLOW — from actual journal entries + collections ─────────────────────
+  // CASH IN: Collections received in period
+  const cashIn       = colInPeriod.reduce((s,r)=>s+(r.netCash||r.amount||0),0);
+  const cashInByMode = {};
+  colInPeriod.forEach(r=>{ cashInByMode[r.mode||'Other']=(cashInByMode[r.mode||'Other']||0)+(r.netCash||r.amount||0); });
+
+  // CASH OUT: Disbursement journal entries (credit = cash/bank accounts)
+  const cashKeywords = ['cash','bank','petty','drawing'];
+  const disbJournal  = (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&inPeriod(j.date));
+  // Get unique group IDs and sum the credit (drawn-from) line per group
+  const disbGroups   = {};
+  disbJournal.forEach(j=>{
+    if(j.credit) {
+      const acc = state.accounts.find(a=>String(a.id)===String(j.credit));
+      if(acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k))) {
+        if(!disbGroups[j.group||j.id]) disbGroups[j.group||j.id] = 0;
+        disbGroups[j.group||j.id] += (j.amount||0);
+      }
+    }
+  });
+  const cashOutDisb = Object.values(disbGroups).reduce((s,v)=>s+v, 0);
+
+  // Break down disbursements by payee for display
+  const disbByPayee = {};
+  disbJournal.filter(j=>j.credit&&state.accounts.find(a=>String(a.id)===String(j.credit)&&cashKeywords.some(k=>a.name.toLowerCase().includes(k))))
+    .forEach(j=>{
+      const payee = j.payee || 'Various';
+      disbByPayee[payee] = (disbByPayee[payee]||0) + (j.amount||0);
+    });
+
+  // General journal debits to cash = cash out (e.g. adjustments)
+  const genJournal   = (state.journal||[]).filter(j=>j.type==='general'&&!j.cancelled&&inPeriod(j.date));
+  const cashOutGen   = genJournal.filter(j=>{
+    if(!j.credit) return false;
+    const acc = state.accounts.find(a=>String(a.id)===String(j.credit));
+    return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
+  }).reduce((s,j)=>s+(j.amount||0),0);
+
+  // General journal credits to cash = cash in (e.g. adjustments/receipts)
+  const cashInGen    = genJournal.filter(j=>{
+    if(!j.debit) return false;
+    const acc = state.accounts.find(a=>String(a.id)===String(j.debit));
+    return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
+  }).reduce((s,j)=>s+(j.amount||0),0);
+
+  // Payroll
+  const cashOutPay   = payInPeriod.reduce((s,p)=>s+(p.grossPay||0),0);
+
+  const totalCashIn  = cashIn + cashInGen;
+  const totalCashOut = cashOutDisb + cashOutGen + cashOutPay;
+  const netCashFlow  = totalCashIn - totalCashOut;
 
   // RECEIVABLES (snapshot — not period filtered)
   const totalAR    = state.invoices.filter(i=>getInvoiceStatus(i)!=='paid').reduce((s,i)=>s+(i.amount||0),0);
@@ -5001,24 +5045,30 @@ function showReport(type) {
       <div class="report-section-title">Cash Flow Statement — ${periodLabel}</div>
       <table class="report-table">
         ${sectionHeader('Operating Activities — Cash Inflows')}
-        ${Object.entries(byMode).map(([mode,amt])=>row('Collections — '+mode, amt, 'pos', true)).join('')}
-        ${Object.keys(byMode).length===0 ? row('No collections recorded','—','') : ''}
-        ${totalRow('Total Cash Received', cashIn, 'pos')}
+        ${Object.entries(cashInByMode).map(([mode,amt])=>row('Collections — '+mode, amt, 'pos', true)).join('')}
+        ${Object.keys(cashInByMode).length===0 ? row('Collections', 0, 'pos', true) : ''}
+        ${cashInGen>0?row('Other cash receipts (GJ)', cashInGen, 'pos', true):''}
+        ${totalRow('Total Cash Received', totalCashIn, 'pos')}
 
         ${sectionHeader('Operating Activities — Cash Outflows')}
-        ${row('Paid purchases (COS)', cashOutPur, 'neg', true)}
-        ${row('Paid expenses (admin & operating)', cashOutExp, 'neg', true)}
-        ${payrollTotal>0?row('Released payroll', cashOutPay, 'neg', true):''}
-        ${totalRow('Total Cash Paid Out', cashOut, 'neg')}
+        ${cashOutDisb>0?row('Disbursements (DV)', cashOutDisb, 'neg', true):''}
+        ${cashOutGen>0?row('Other cash payments (GJ)', cashOutGen, 'neg', true):''}
+        ${cashOutPay>0?row('Payroll released', cashOutPay, 'neg', true):''}
+        ${totalRow('Total Cash Paid Out', totalCashOut, 'neg')}
 
         <tr style="border-top:2px solid var(--border-mid)">
-          <td style="padding:8px 0;font-weight:700">Net Cash from Operations</td>
-          <td style="text-align:right;font-weight:700" class="${netCashFlow>=0?'pos':'neg'}">${fmtS(netCashFlow)}</td>
+          <td style="padding:10px 0;font-weight:700;font-size:14px">Net Cash from Operations</td>
+          <td style="text-align:right;font-weight:700;font-size:14px" class="${netCashFlow>=0?'pos':'neg'}">${fmtS(netCashFlow)}</td>
         </tr>
 
         ${sectionHeader('Pending / Uncollected')}
         ${row('Outstanding accounts receivable', totalAR, 'neg', true)}
         ${row('Unpaid accounts payable', totalAP, 'neg', true)}
+
+        ${Object.keys(disbByPayee).length>0?`
+        ${sectionHeader('Disbursement Breakdown by Payee')}
+        ${Object.entries(disbByPayee).sort((a,b)=>b[1]-a[1]).map(([p,a])=>row(p,a,'neg',true)).join('')}
+        `:''}
       </table>
     </div>`;
 
@@ -5484,14 +5534,19 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     // Schedule 1 — Sales: one row per invoice (with date and invoice no.)
     const salesRows = invInPeriod.sort((a,b)=>a.date.localeCompare(b.date)).map(inv => {
       const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
+      const isExempt = inv.vatType==='exempt'||inv.vatExempt;
+      const taxable  = isExempt ? 0 : (inv.vatBase??inv.amount??0);
+      const vat      = isExempt ? 0 : (inv.vat||0);
+      const exempt   = isExempt ? (inv.amount||0) : 0;
       return `<tr>
         <td style="white-space:nowrap">${inv.date}</td>
         <td class="mono" style="white-space:nowrap">${inv.id}</td>
         <td class="mono" style="font-size:11px">${cust?.tin||'N/A'}</td>
         <td style="font-weight:500">${cust?.name||inv.customer||'N/A'}</td>
         <td style="font-size:11px;color:var(--text-secondary);min-width:150px">${cust?.address||'—'}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(inv.vatBase??inv.amount??0)}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(inv.vat||0)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(taxable)}</td>
+        <td style="text-align:right;white-space:nowrap">${vat>0?fmt(vat):'—'}</td>
+        <td style="text-align:right;white-space:nowrap;color:${isExempt?'var(--amber)':'var(--text-tertiary)'}">${isExempt?fmt(exempt):'—'}</td>
         <td style="text-align:right;font-weight:500;white-space:nowrap">${fmt(inv.amount||0)}</td>
       </tr>`;
     }).join('');
@@ -5500,24 +5555,31 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const purRows2 = [...purInPeriod,...expInPeriod].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(p => {
       const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
       const po  = (state.purchaseOrders||[]).find(x=>x.id===p.id);
+      const isExempt = p.vatExempt||p.vatType==='exempt';
+      const taxable  = isExempt ? 0 : (p.vatBase??p.amount??0);
+      const vat      = isExempt ? 0 : (p.vat||0);
+      const exempt   = isExempt ? (p.amount||0) : 0;
       return `<tr>
         <td style="white-space:nowrap">${p.date||'—'}</td>
         <td class="mono" style="font-size:11px;white-space:nowrap">${po?.supplierInvoiceNo||p.id||'—'}</td>
         <td class="mono" style="font-size:11px">${sup?.tin||'N/A'}</td>
         <td style="font-weight:500">${sup?.name||p.vendor||'N/A'}</td>
         <td style="font-size:11px;color:var(--text-secondary);min-width:150px">${sup?.address||'—'}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(p.vatBase??p.amount??0)}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(p.vat||0)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(taxable)}</td>
+        <td style="text-align:right;white-space:nowrap">${vat>0?fmt(vat):'—'}</td>
+        <td style="text-align:right;white-space:nowrap;color:${isExempt?'var(--amber)':'var(--text-tertiary)'}">${isExempt?fmt(exempt):'—'}</td>
         <td style="text-align:right;font-weight:500;white-space:nowrap">${fmt(p.amount||0)}</td>
       </tr>`;
     }).join('');
 
-    const totSalesBase = invInPeriod.reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
-    const totSalesVAT  = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
-    const totSalesGross= invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
+    const totSalesBase   = invInPeriod.filter(i=>i.vatType!=='exempt'&&!i.vatExempt).reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
+    const totSalesVAT    = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
+    const totSalesExempt = invInPeriod.filter(i=>i.vatType==='exempt'||i.vatExempt).reduce((s,i)=>s+(i.amount||0),0);
+    const totSalesGross  = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
     const allPur2 = [...purInPeriod,...expInPeriod];
-    const totPurBase  = allPur2.reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
-    const totPurVAT   = allPur2.reduce((s,p)=>s+(p.vat||0),0);
+    const totPurBase   = allPur2.filter(p=>!p.vatExempt&&p.vatType!=='exempt').reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
+    const totPurVAT    = allPur2.reduce((s,p)=>s+(p.vat||0),0);
+    const totPurExempt = allPur2.filter(p=>p.vatExempt||p.vatType==='exempt').reduce((s,p)=>s+(p.amount||0),0);
     const totPurGross  = allPur2.reduce((s,p)=>s+(p.amount||0),0);
 
     rb.innerHTML = `
@@ -5533,18 +5595,20 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     SCHEDULE 1 — Summary List of Sales (SLS)
   </div>
   <div style="overflow-x:auto">
-  <table class="report-table" style="font-size:12px;min-width:850px;width:100%">
+  <table class="report-table" style="font-size:12px;min-width:900px;width:100%">
     <thead><tr>
       <th>Date</th><th>Invoice No.</th><th>TIN</th><th>Customer Name</th><th>Address</th>
-      <th style="text-align:right">Taxable Amount</th>
+      <th style="text-align:right">Taxable Sales</th>
       <th style="text-align:right">Output VAT</th>
+      <th style="text-align:right;color:var(--amber)">Exempt Sales</th>
       <th style="text-align:right">Gross Amount</th>
     </tr></thead>
-    <tbody>${salesRows||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
+    <tbody>${salesRows||'<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary)">No sales in period</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;background:var(--bg-card)">
       <td colspan="5">TOTAL</td>
       <td style="text-align:right">${fmt(totSalesBase)}</td>
       <td style="text-align:right">${fmt(totSalesVAT)}</td>
+      <td style="text-align:right;color:var(--amber)">${fmt(totSalesExempt)}</td>
       <td style="text-align:right">${fmt(totSalesGross)}</td>
     </tr></tfoot>
   </table>
@@ -5554,18 +5618,20 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     SCHEDULE 2 — Summary List of Purchases (SLP)
   </div>
   <div style="overflow-x:auto">
-  <table class="report-table" style="font-size:12px;min-width:850px;width:100%">
+  <table class="report-table" style="font-size:12px;min-width:900px;width:100%">
     <thead><tr>
       <th>Date</th><th>Supplier Invoice No.</th><th>TIN</th><th>Supplier Name</th><th>Address</th>
-      <th style="text-align:right">Taxable Amount</th>
+      <th style="text-align:right">Taxable Purchases</th>
       <th style="text-align:right">Input VAT</th>
+      <th style="text-align:right;color:var(--amber)">Exempt</th>
       <th style="text-align:right">Gross Amount</th>
     </tr></thead>
-    <tbody>${purRows2||'<tr><td colspan="8" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tbody>${purRows2||'<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;background:var(--bg-card)">
       <td colspan="5">TOTAL</td>
       <td style="text-align:right">${fmt(totPurBase)}</td>
       <td style="text-align:right">${fmt(totPurVAT)}</td>
+      <td style="text-align:right;color:var(--amber)">${fmt(totPurExempt)}</td>
       <td style="text-align:right">${fmt(totPurGross)}</td>
     </tr></tfoot>
   </table>
@@ -5576,6 +5642,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     Output VAT: <strong>${fmt(totSalesVAT)}</strong> &nbsp;|&nbsp;
     Input VAT: <strong>${fmt(totPurVAT)}</strong> &nbsp;|&nbsp;
     VAT Payable: <strong style="color:${totSalesVAT-totPurVAT>=0?'var(--red)':'var(--green)'}">${fmt(Math.abs(totSalesVAT-totPurVAT))} ${totSalesVAT-totPurVAT>=0?'(Payable)':'(Creditable)'}</strong>
+    ${totSalesExempt>0||totPurExempt>0?`&nbsp;|&nbsp; Exempt Sales: <strong style="color:var(--amber)">${fmt(totSalesExempt)}</strong> · Exempt Purchases: <strong style="color:var(--amber)">${fmt(totPurExempt)}</strong>`:''}
   </div>
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
