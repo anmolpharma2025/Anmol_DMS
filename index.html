@@ -1902,7 +1902,13 @@ function filterTable() {
             return `<tr>
               <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
               <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
-              <td style="font-size:12px;color:var(--text-secondary)">${so.lines.map(l=>`${l.desc}×${l.qty}${l.approved?'<span style="color:var(--green);margin-left:3px">✓</span>':''}`).join(', ')}</td>
+              <td style="font-size:12px;color:var(--text-secondary)">${(()=>{
+  const issuedMap={};
+  (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{const k=it.itemId||it.desc;issuedMap[k]=(issuedMap[k]||0)+(it.qty||0);}));
+  const undelivered=so.lines.filter(l=>{const k=l.itemId||l.desc;return((l.qty||0)-(issuedMap[k]||0))>0;});
+  if(!undelivered.length) return '<span style="color:var(--green);font-size:11px">✓ All delivered</span>';
+  return undelivered.map(l=>{const k=l.itemId||l.desc;const rem=(l.qty||0)-(issuedMap[k]||0);return `${l.desc}×${rem}${l.approved?'<span style="color:var(--green);margin-left:2px">✓</span>':''}`;}).join(', ');
+})()}</td>
               <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
               <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
                 ${approvedCount>0&&so.status!=='delivered'?`<span style="font-size:10px;color:var(--green);display:block;margin-top:2px">${approvedCount}/${so.lines.length} approved</span>`:''}
@@ -5134,24 +5140,26 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const cp = getCompanyProfile();
     const rows = invInPeriod.sort((a,b)=>a.date.localeCompare(b.date)).map(inv => {
       const cust = state.customers.find(c=>String(c.id)===String(inv.customer)||c.name===inv.customer);
-      const vatBase = inv.vatBase ?? inv.amount;
-      const vat = inv.vat ?? 0;
-      const exempt = 0;
+      const isExempt = inv.vatType === 'exempt' || inv.vatExempt;
+      const vatBase  = isExempt ? 0 : (inv.vatBase ?? inv.amount);
+      const exempt   = isExempt ? (inv.amount||0) : 0;
+      const vat      = isExempt ? 0 : (inv.vat ?? 0);
       return `<tr>
         <td style="white-space:nowrap">${inv.date}</td>
         <td class="mono" style="white-space:nowrap">${inv.id}</td>
         <td style="font-weight:500">${cust?.name||inv.customer||'—'}</td>
         <td class="mono" style="font-size:11px;white-space:nowrap">${cust?.tin||'—'}</td>
         <td style="font-size:11px;color:var(--text-secondary);min-width:160px">${cust?.address||'—'}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(inv.amount)}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(vatBase)}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(vat)}</td>
-        <td style="text-align:right;white-space:nowrap">${fmt(exempt)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(inv.amount||0)}</td>
+        <td style="text-align:right;white-space:nowrap;color:${isExempt?'var(--text-tertiary)':'inherit'}">${isExempt?'—':fmt(vatBase)}</td>
+        <td style="text-align:right;white-space:nowrap;color:${isExempt?'var(--text-tertiary)':'inherit'}">${isExempt?'—':fmt(vat)}</td>
+        <td style="text-align:right;white-space:nowrap;color:${isExempt?'var(--amber)':'var(--text-tertiary)'}">${isExempt?fmt(exempt):'—'}</td>
       </tr>`;
     }).join('');
-    const totAmt  = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
-    const totBase = invInPeriod.reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
-    const totVAT  = invInPeriod.reduce((s,i)=>s+(i.vat||0),0);
+    const totAmt    = invInPeriod.reduce((s,i)=>s+(i.amount||0),0);
+    const totBase   = invInPeriod.filter(i=>i.vatType!=='exempt'&&!i.vatExempt).reduce((s,i)=>s+(i.vatBase??i.amount??0),0);
+    const totVAT    = invInPeriod.filter(i=>i.vatType!=='exempt'&&!i.vatExempt).reduce((s,i)=>s+(i.vat||0),0);
+    const totExempt = invInPeriod.filter(i=>i.vatType==='exempt'||i.vatExempt).reduce((s,i)=>s+(i.amount||0),0);
     rb.innerHTML = `
 <div class="report-section" style="max-width:100%;overflow-x:auto">
   <div style="text-align:center;margin-bottom:12px">
@@ -5179,7 +5187,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
       <td style="text-align:right">${fmt(totAmt)}</td>
       <td style="text-align:right">${fmt(totBase)}</td>
       <td style="text-align:right">${fmt(totVAT)}</td>
-      <td style="text-align:right">—</td>
+      <td style="text-align:right;color:var(--amber)">${fmt(totExempt)}</td>
     </tr></tfoot>
   </table>
   </div>
@@ -5192,23 +5200,27 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const allPur = [...purInPeriod, ...expInPeriod].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
     const rows = allPur.map(p => {
       const sup = state.suppliers?.find(s=>s.id===p.vendor||s.name===p.vendor);
-      const vatBase = p.vatBase ?? p.amount;
-      const vat = p.vat ?? 0;
+      const isExempt = p.vatExempt || p.vatType==='exempt';
+      const vatBase  = isExempt ? 0 : (p.vatBase ?? p.amount);
+      const vat      = isExempt ? 0 : (p.vat ?? 0);
+      const exempt   = isExempt ? (p.amount||0) : 0;
       return `<tr>
-        <td>${p.date||'—'}</td>
+        <td style="white-space:nowrap">${p.date||'—'}</td>
         <td class="mono">${p.id}</td>
         <td>${sup?.name||p.vendor||'—'}</td>
         <td class="mono" style="font-size:11px">${sup?.tin||p.tin||'—'}</td>
         <td style="font-size:11px;color:var(--text-secondary)">${sup?.address||'—'}</td>
         <td style="text-align:right">${fmt(p.amount||0)}</td>
-        <td style="text-align:right">${fmt(vatBase)}</td>
-        <td style="text-align:right">${fmt(vat)}</td>
+        <td style="text-align:right;color:${isExempt?'var(--text-tertiary)':'inherit'}">${isExempt?'—':fmt(vatBase)}</td>
+        <td style="text-align:right;color:${isExempt?'var(--text-tertiary)':'inherit'}">${isExempt?'—':fmt(vat)}</td>
+        <td style="text-align:right;color:${isExempt?'var(--amber)':'var(--text-tertiary)'}">${isExempt?fmt(exempt):'—'}</td>
         <td>${p.category||'—'}</td>
       </tr>`;
     }).join('');
-    const totAmt = allPur.reduce((s,p)=>s+(p.amount||0),0);
-    const totBase = allPur.reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
-    const totVAT = allPur.reduce((s,p)=>s+(p.vat||0),0);
+    const totAmt    = allPur.reduce((s,p)=>s+(p.amount||0),0);
+    const totBase   = allPur.filter(p=>!p.vatExempt&&p.vatType!=='exempt').reduce((s,p)=>s+(p.vatBase??p.amount??0),0);
+    const totVAT    = allPur.filter(p=>!p.vatExempt&&p.vatType!=='exempt').reduce((s,p)=>s+(p.vat||0),0);
+    const totExemptP= allPur.filter(p=>p.vatExempt||p.vatType==='exempt').reduce((s,p)=>s+(p.amount||0),0);
     rb.innerHTML = `
 <div class="report-section" style="max-width:1000px">
   <div style="text-align:center;margin-bottom:12px">
@@ -5217,23 +5229,27 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     <div style="font-size:13px;font-weight:600;margin-top:6px">PURCHASES BOOK (BIR)</div>
     <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
   </div>
-  <table class="report-table" style="font-size:12px">
+  <div style="overflow-x:auto">
+  <table class="report-table" style="font-size:12px;min-width:1000px;width:100%">
     <thead><tr>
       <th>Date</th><th>Invoice No.</th><th>Supplier Name</th><th>TIN</th><th>Address</th>
       <th style="text-align:right">Gross Amount</th>
       <th style="text-align:right">VAT Purchases</th>
       <th style="text-align:right">Input VAT</th>
+      <th style="text-align:right">Exempt</th>
       <th>Category</th>
     </tr></thead>
-    <tbody>${rows||'<tr><td colspan="9" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
+    <tbody>${rows||'<tr><td colspan="10" style="text-align:center;color:var(--text-tertiary)">No purchases in period</td></tr>'}</tbody>
     <tfoot><tr style="font-weight:700;background:var(--bg-card)">
       <td colspan="5">TOTAL</td>
       <td style="text-align:right">${fmt(totAmt)}</td>
       <td style="text-align:right">${fmt(totBase)}</td>
       <td style="text-align:right">${fmt(totVAT)}</td>
+      <td style="text-align:right;color:var(--amber)">${fmt(totExemptP)}</td>
       <td></td>
     </tr></tfoot>
   </table>
+  </div>
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
   }
@@ -6533,23 +6549,57 @@ function confirmConsignmentSold(id) {
 function markConsignmentReturned(id) {
   const canDo = currentUser&&(currentUser.role==='admin'||currentUser.role==='warehouse');
   if(!canDo){ alert('Only Admin or Warehouse staff can process returns.'); return; }
-  const c=(state.consignedItems||[]).find(c=>c.id===id);
+  const c=(state.consignedItems||[]).find(x=>x.id===id);
   if(!c) return;
-  if(!confirm(`Mark "${c.itemDesc}" (×${c.qty}) as RETURNED from ${c.consignee}?\n\nItems will be added back to inventory.`)) return;
-  c.status='returned';
-  c.returnedDate=today();
-  c.returnedBy=currentUser.name;
-  // Return qty to inventory
+  const remaining = (c.qty||0) - (c.qtySold||0) - (c.qtyReturned||0);
+  if(remaining <= 0) { alert('No remaining items to return.'); return; }
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-arrow-back-up" style="margin-right:6px;color:var(--amber)"></i>Return Consigned Items</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px">
+  <strong>${c.itemDesc}</strong> &nbsp;·&nbsp; Consignee: <strong>${c.consignee}</strong><br>
+  <span style="color:var(--text-secondary)">Total: ${c.qty} · Sold: ${c.qtySold||0} · Returned: ${c.qtyReturned||0} · <strong style="color:var(--accent)">Returnable: ${remaining}</strong></span>
+</div>
+<div class="form-group">
+  <label>Qty to Return <span style="color:var(--red)">*</span></label>
+  <input type="number" id="cr-qty" min="1" max="${remaining}" value="${remaining}"
+    style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:15px;font-family:var(--font);text-align:center">
+</div>
+<div class="form-group">
+  <label>Remarks <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
+  <input type="text" id="cr-remarks" placeholder="Good condition, damaged, expired…">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" style="background:var(--amber);border-color:var(--amber)" onclick="confirmConsignmentReturn('${c.id}')"><i class="ti ti-arrow-back-up"></i>Confirm Return</button>
+</div>`);
+}
+
+function confirmConsignmentReturn(id) {
+  const c = (state.consignedItems||[]).find(x=>x.id===id);
+  if(!c) return;
+  const qtyReturn = parseInt(document.getElementById('cr-qty')?.value)||0;
+  const remarks   = document.getElementById('cr-remarks')?.value.trim()||'';
+  const remaining = (c.qty||0) - (c.qtySold||0) - (c.qtyReturned||0);
+  if(qtyReturn <= 0 || qtyReturn > remaining) { alert(`Qty must be between 1 and ${remaining}.`); return; }
+  c.qtyReturned = (c.qtyReturned||0) + qtyReturn;
+  if(c.qtyReturned >= (c.qty||0) - (c.qtySold||0)) {
+    c.status='returned'; c.returnedDate=today(); c.returnedBy=currentUser.name;
+  }
+  if(!c.returnHistory) c.returnHistory=[];
+  c.returnHistory.push({ date:today(), qty:qtyReturn, by:currentUser.name, remarks });
   if(c.itemId) {
     const it=(state.inventory||[]).find(i=>i.id===c.itemId);
-    if(it) it.qty=(it.qty||0)+c.qty;
+    if(it) it.qty=(it.qty||0)+qtyReturn;
     const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
     if(!state.inventoryMovements) state.inventoryMovements=[];
-    state.inventoryMovements.push({id:movId,date:today(),item:c.itemId,type:'in',qty:c.qty,ref:c.id,note:`Consignment returned from ${c.consignee} — received by ${currentUser.name}`});
+    state.inventoryMovements.push({id:movId,date:today(),item:c.itemId,type:'in',qty:qtyReturn,ref:c.id,
+      note:`Consignment return ×${qtyReturn} from ${c.consignee}${remarks?' ('+remarks+')':''} by ${currentUser.name}`});
   }
-  save(); render();
+  save(); closeModal();
   setTimeout(()=>{ const tabs=document.querySelectorAll('#inv-tabs .tab'); if(tabs[5]){ tabs.forEach(t=>t.classList.remove('active')); tabs[5].classList.add('active'); const body=document.getElementById('inv-body'); if(body) body.innerHTML=buildConsignedItems(); } },100);
+  render();
 }
+
 
 function deleteConsignment(id) {
   if(!requireAdmin('delete consignment records')) return;
@@ -9137,7 +9187,13 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     return `<tr>
       <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
       <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
-      <td style="font-size:12px;color:var(--text-secondary)">${so.lines.map(l=>`${l.desc}×${l.qty}${l.approved?'<span style="color:var(--green);margin-left:3px">✓</span>':''}`).join(', ')}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${(()=>{
+  const issuedMap={};
+  (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{const k=it.itemId||it.desc;issuedMap[k]=(issuedMap[k]||0)+(it.qty||0);}));
+  const undelivered=so.lines.filter(l=>{const k=l.itemId||l.desc;return((l.qty||0)-(issuedMap[k]||0))>0;});
+  if(!undelivered.length) return '<span style="color:var(--green);font-size:11px">✓ All delivered</span>';
+  return undelivered.map(l=>{const k=l.itemId||l.desc;const rem=(l.qty||0)-(issuedMap[k]||0);return `${l.desc}×${rem}${l.approved?'<span style="color:var(--green);margin-left:2px">✓</span>':''}`;}).join(', ');
+})()}</td>
       <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
         ${approvedCount>0&&so.status!=='delivered'?`<span style="font-size:10px;color:var(--green);display:block;margin-top:2px">${approvedCount}/${so.lines.length} items approved</span>`:''}
