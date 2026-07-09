@@ -2893,9 +2893,9 @@ function loadPOIntoJournal() {
           '<br><small style="color:var(--text-tertiary)">Debit: Expense/Asset account · Credit: Fund account selected above</small>'}`;
     }
   } else {
-    // GENERAL JOURNAL: Setup Accounts Payable
-    // Debit = Inventory/Expense, Credit = Accounts Payable
+    // GENERAL JOURNAL: DR Inventory/Expense + DR Input VAT | CR Accounts Payable
     const isInventory = po.purchaseType === 'merchandise' || !po.purchaseType;
+
     const debitAcc = state.accounts.find(a => {
       const n = a.name.toLowerCase();
       return isInventory
@@ -2904,21 +2904,65 @@ function loadPOIntoJournal() {
     });
     const apAcc = state.accounts.find(a => {
       const n = a.name.toLowerCase();
-      return n.includes('accounts payable') || n.includes('trade payable') || (n.includes('payable') && !n.includes('tax') && !n.includes('withholding'));
+      return n.includes('accounts payable') || n.includes('trade payable') ||
+        (n.includes('payable') && !n.includes('tax') && !n.includes('withholding') && !n.includes('cwt') && !n.includes('output'));
     });
-    jeLines = [{
+    const inputVatAcc = state.accounts.find(a => {
+      const n = a.name.toLowerCase();
+      return n.includes('input vat') || n.includes('input tax') ||
+        (n.includes('vat') && (n.includes('input') || n.includes('creditable')));
+    });
+
+    // Check if any lines are vatable
+    const hasVatable = (po.lines||[]).some(l=>!l.vatExempt);
+    const vatableAmt = (po.lines||[]).filter(l=>!l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+    const exemptAmt  = (po.lines||[]).filter(l=>l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+
+    // VAT-exclusive base (net of VAT) for vatable lines
+    const vatBase  = vatableAmt / 1.12;
+    const inputVat = vatableAmt - vatBase;
+    const netBase  = parseFloat(vatBase.toFixed(2)) + exemptAmt;
+    const vatAmt   = parseFloat(inputVat.toFixed(2));
+
+    // Build journal lines
+    jeLines = [];
+
+    // DR: Inventory or Expense (net of VAT for vatable items)
+    jeLines.push({
       debit: debitAcc ? String(debitAcc.id) : '',
+      credit: '',
+      amount: parseFloat(netBase.toFixed(2)),
+      desc: `${isInventory?'Inventory Purchase':'Expense'} — ${po.supplier} (${poId})`
+    });
+
+    // DR: Input VAT (if vatable lines exist and account found)
+    if(hasVatable && vatAmt > 0 && inputVatAcc) {
+      jeLines.push({
+        debit: String(inputVatAcc.id),
+        credit: '',
+        amount: vatAmt,
+        desc: `Input VAT 12% — ${po.supplier} (${poId})`
+      });
+    }
+
+    // CR: Accounts Payable (total gross)
+    jeLines.push({
+      debit: '',
       credit: apAcc ? String(apAcc.id) : '',
-      amount: total
-    }];
+      amount: total,
+      desc: `Accounts Payable — ${po.supplier} (${poId})`
+    });
+
     renderJeLines();
+
     if(banner) {
       banner.style.display = 'block';
-      banner.innerHTML = `<i class="ti ti-truck-delivery" style="margin-right:5px"></i>
-        <strong>${poId}</strong> — ${po.supplier} — Total: <strong>${fmt(total)}</strong>
+      banner.innerHTML = `<i class="ti ti-file-invoice" style="margin-right:5px"></i>
+        <strong>${poId}</strong> — ${po.supplier} — Gross: <strong>${fmt(total)}</strong>
+        ${hasVatable?`· Net: ${fmt(netBase)} · Input VAT: <strong style="color:var(--accent)">${fmt(vatAmt)}</strong>`:'(VAT Exempt)'}
         <br><small style="color:var(--text-tertiary)">
-          Debit: ${debitAcc?debitAcc.name:'[Inventory/Expense — select account]'} &nbsp;|&nbsp;
-          Credit: ${apAcc?apAcc.name:'[Accounts Payable — select account]'}
+          DR: ${debitAcc?debitAcc.name:'[select account]'} ${hasVatable&&inputVatAcc?`+ ${inputVatAcc.name}`:''}
+          &nbsp;|&nbsp; CR: ${apAcc?apAcc.name:'[Accounts Payable — select account]'}
         </small>`;
     }
   }
