@@ -2043,7 +2043,16 @@ function renderDashboard(c, ta) {
   const grossProfit= totalRev - totalPur;
   const netIncome  = totalRev - totalCost;
   const ar = state.invoices.filter(i=>i.status!=='paid').reduce((s,i)=>s+(i.amount||0),0);
-  const ap = (state.purchaseOrders||[]).filter(p=>p.status==='pending'||p.status==='approved').reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+  // AP from journal: credits to AP account minus debits (payments)
+  const apAcc = (state.accounts||[]).find(a=>{
+    const n = String(a.name||'').toLowerCase();
+    return n.includes('accounts payable')||n.includes('trade payable')||
+      (n.includes('payable')&&!n.includes('tax')&&!n.includes('withholding')&&!n.includes('cwt')&&!n.includes('output'));
+  });
+  const jrnl = (state.journal||[]).filter(j=>!j.cancelled);
+  const apCredits = apAcc ? jrnl.filter(j=>j.credit&&String(j.credit)===String(apAcc.id)).reduce((s,j)=>s+(j.amount||0),0) : 0;
+  const apDebits  = apAcc ? jrnl.filter(j=>j.debit&&String(j.debit)===String(apAcc.id)).reduce((s,j)=>s+(j.amount||0),0) : 0;
+  const ap = Math.max(0, apCredits - apDebits);
   // ── Real monthly data from actual records ──
   const now = new Date();
   const currentYear = now.getFullYear();
