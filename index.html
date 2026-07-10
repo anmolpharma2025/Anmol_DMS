@@ -290,6 +290,7 @@
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
     <div class="nav-item" title="Purchase Orders" data-page="purchaseorders"><i class="ti ti-truck-delivery"></i><span>Purchase Orders</span></div>
     <div class="nav-item" title="Expenses" data-page="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></div>
+    <div class="nav-item" title="Deposit Transactions" data-page="deposits"><i class="ti ti-building-bank"></i><span>Deposits</span></div>
     <div class="nav-item" title="Lapsing Schedule" data-page="lapsing"><i class="ti ti-calendar-stats"></i><span>Lapsing Schedule</span></div>
 
     <div class="nav-section">Accounting</div>
@@ -1152,6 +1153,7 @@ const ALL_PAGES = [
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
   { id:'purchaseorders',label:'Purchase Orders',     section:'Transactions' },
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
+  { id:'deposits',    label:'Deposit Transactions',  section:'Transactions' },
   { id:'lapsing',     label:'Lapsing Schedule',      section:'Transactions' },
   { id:'coa',         label:'Chart of Accounts',     section:'Accounting' },
   { id:'reports',     label:'Reports',               section:'Accounting' },
@@ -1997,7 +1999,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2030,7 +2032,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -11598,18 +11600,24 @@ function renderChatMessages(msgs) {
       const att = m.attachment;
       if(att.isImage) {
         return `<div style="margin-top:5px">
-          <img src="${att.data}" alt="${att.name}" style="max-width:180px;max-height:160px;border-radius:6px;cursor:pointer;display:block;border:1px solid rgba(255,255,255,0.2)" onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',this.src)" title="Click to download">
-          <div style="font-size:10px;opacity:0.7;margin-top:3px;cursor:pointer" onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',this.previousElementSibling.src)"><i class="ti ti-download" style="font-size:10px"></i> ${att.name}</div>
+          <img src="${att.data}" alt="${att.name}" style="max-width:180px;max-height:160px;border-radius:6px;cursor:pointer;display:block;border:1px solid rgba(255,255,255,0.2)" onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',this.src)" title="Click to preview">
+          <div style="font-size:10px;opacity:0.7;margin-top:3px;display:flex;gap:8px">
+            <span style="cursor:pointer" onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',this.parentElement.previousElementSibling.src)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</span>
+            <span style="cursor:pointer" onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',this.parentElement.previousElementSibling.src)"><i class="ti ti-download" style="font-size:10px"></i> Download</span>
+          </div>
         </div>`;
       }
       const icon = att.name.endsWith('.pdf')?'ti-file-type-pdf':att.name.match(/\.xlsx?$/)?'ti-file-spreadsheet':att.name.match(/\.docx?$/)?'ti-file-word':'ti-file';
-      return `<div style="margin-top:5px;padding:7px 9px;background:${isMe?'rgba(255,255,255,0.15)':'var(--bg-secondary)'};border-radius:6px;display:flex;align-items:center;gap:8px;cursor:pointer" onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',\`${att.data}\`)">
+      return `<div style="margin-top:5px;padding:7px 9px;background:${isMe?'rgba(255,255,255,0.15)':'var(--bg-secondary)'};border-radius:6px;display:flex;align-items:center;gap:8px">
         <i class="ti ${icon}" style="font-size:20px;color:${isMe?'#fff':'var(--accent)'}"></i>
         <div style="flex:1;min-width:0">
           <div style="font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${att.name}</div>
-          <div style="font-size:10px;opacity:0.7">${(att.size/1024).toFixed(1)}KB · tap to download</div>
+          <div style="font-size:10px;opacity:0.7">${(att.size/1024).toFixed(1)}KB</div>
         </div>
-        <i class="ti ti-download" style="font-size:13px;opacity:0.6;flex-shrink:0"></i>
+        <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+          <button onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--accent)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</button>
+          <button onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--text-secondary)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-download" style="font-size:10px"></i> Save</button>
+        </div>
       </div>`;
     })() : '';
 
@@ -11671,6 +11679,46 @@ function sendChatFile(input) {
       .catch(err=>alert('Failed to send file: '+err.message));
   };
   reader.readAsDataURL(file);
+}
+
+function previewChatFile(name, type, data) {
+  // Create a fullscreen overlay preview
+  const existing = document.getElementById('chat-file-preview');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'chat-file-preview';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  overlay.onclick = e => { if(e.target===overlay) overlay.remove(); };
+
+  let content = '';
+  if(type && type.startsWith('image/')) {
+    content = `<img src="${data}" style="max-width:90vw;max-height:80vh;border-radius:8px;object-fit:contain;box-shadow:0 8px 40px rgba(0,0,0,0.6)">`;
+  } else if(name.endsWith('.pdf') || type==='application/pdf') {
+    content = `<iframe src="${data}" style="width:90vw;height:80vh;border:none;border-radius:8px;background:#fff"></iframe>`;
+  } else {
+    content = `<div style="background:var(--bg-card);border-radius:12px;padding:40px;text-align:center;max-width:400px">
+      <i class="ti ti-file" style="font-size:60px;color:var(--accent);display:block;margin-bottom:16px"></i>
+      <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:8px">${name}</div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">This file type cannot be previewed in the browser.</div>
+      <button onclick="downloadChatFile('${name.replace(/'/g,"\\'")}',\`${data}\`)" class="btn primary" style="padding:10px 24px"><i class="ti ti-download"></i> Download to Open</button>
+    </div>`;
+  }
+
+  overlay.innerHTML = `
+    <div style="position:absolute;top:16px;right:16px;display:flex;gap:8px">
+      <button onclick="downloadChatFile('${name.replace(/'/g,"\\'")}',\`${data}\`)" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:8px 14px;color:#fff;cursor:pointer;font-size:13px;font-family:var(--font);display:flex;align-items:center;gap:6px"><i class="ti ti-download"></i> Download</button>
+      <button onclick="document.getElementById('chat-file-preview').remove()" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:8px 14px;color:#fff;cursor:pointer;font-size:20px;font-family:var(--font)">×</button>
+    </div>
+    <div style="color:rgba(255,255,255,0.6);font-size:12px;position:absolute;top:22px;left:20px">${name}</div>
+    ${content}
+    <div style="color:rgba(255,255,255,0.4);font-size:11px;margin-top:12px">Click outside to close</div>`;
+
+  document.body.appendChild(overlay);
+
+  // Close on Escape key
+  const closeOnEsc = e => { if(e.key==='Escape') { overlay.remove(); document.removeEventListener('keydown',closeOnEsc); } };
+  document.addEventListener('keydown', closeOnEsc);
 }
 
 function downloadChatFile(name, data) {
@@ -11809,6 +11857,202 @@ function showChatToast(sender, text, mode) {
     document.head.appendChild(style);
   }
   setTimeout(()=>toast?.remove(),5000);
+}
+
+// ── DEPOSIT TRANSACTIONS ──────────────────────────────────────────────────────
+function renderDeposits(c, ta) {
+  if(!state.deposits) state.deposits = [];
+  ta.innerHTML = `<button class="btn primary" onclick="showAddDeposit()"><i class="ti ti-plus"></i>New Deposit</button>`;
+
+  const deps = state.deposits;
+  const total    = deps.reduce((s,d)=>s+(d.amount||0),0);
+  const thisMonth= today().slice(0,7);
+  const monthDeps= deps.filter(d=>(d.date||'').startsWith(thisMonth)).reduce((s,d)=>s+(d.amount||0),0);
+  const byBank   = {};
+  deps.forEach(d=>{ byBank[d.bankAccount||'Other']=(byBank[d.bankAccount||'Other']||0)+(d.amount||0); });
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-building-bank"></i>Total Deposits</div><div class="kpi-value pos">${fmt(total)}</div></div>
+  <div class="kpi"><div class="kpi-label">This Month</div><div class="kpi-value pos">${fmt(monthDeps)}</div></div>
+  <div class="kpi"><div class="kpi-label">No. of Transactions</div><div class="kpi-value">${deps.length}</div></div>
+  <div class="kpi"><div class="kpi-label">Bank Accounts</div><div class="kpi-value">${Object.keys(byBank).length}</div></div>
+</div>
+<table>
+  <thead><tr>
+    <th>Ref No.</th><th>Date</th><th>Bank Account</th><th>Deposited By</th>
+    <th>Source</th><th>Description</th>
+    <th style="text-align:right">Amount</th><th>Status</th><th>Actions</th>
+  </tr></thead>
+  <tbody>
+  ${deps.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)"><i class="ti ti-building-bank" style="font-size:36px;display:block;margin-bottom:8px;opacity:0.3"></i>No deposit transactions yet.</td></tr>`:''}
+  ${[...deps].reverse().map(d=>`<tr>
+    <td class="mono">${d.id}</td>
+    <td>${d.date}</td>
+    <td style="font-weight:500"><i class="ti ti-building-bank" style="margin-right:4px;color:var(--accent);font-size:12px"></i>${d.bankAccount||'—'}</td>
+    <td>${d.depositedBy||'—'}</td>
+    <td style="font-size:12px;color:var(--text-secondary)">${d.source||'—'}</td>
+    <td style="font-size:12px;color:var(--text-secondary);max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.description||'—'}</td>
+    <td style="text-align:right;font-weight:600;color:var(--green)">${fmt(d.amount||0)}</td>
+    <td><span class="badge ${d.status==='verified'?'paid':'pending'}">${d.status||'pending'}</span></td>
+    <td><div class="action-btns">
+      <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditDeposit('${d.id}')"><i class="ti ti-edit"></i></button>
+      ${d.status!=='verified'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="verifyDeposit('${d.id}')"><i class="ti ti-check"></i>Verify</button>`:''}
+      <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteDeposit('${d.id}')"><i class="ti ti-trash"></i></button>
+    </div></td>
+  </tr>`).join('')}
+  </tbody>
+  ${deps.length>0?`<tfoot><tr style="font-weight:700;background:var(--bg-card)">
+    <td colspan="6">TOTAL</td>
+    <td style="text-align:right;color:var(--green)">${fmt(total)}</td>
+    <td colspan="2"></td>
+  </tr></tfoot>`:''}
+</table>`;
+}
+
+function showAddDeposit() {
+  const cashAccs = (state.accounts||[]).filter(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('cash')||n.includes('bank'); });
+  const bankOpts = cashAccs.map(a=>`<option value="${a.name}">${a.name}</option>`).join('');
+  const colOpts  = (state.collections||[]).map(c=>`<option value="${c.id}">${c.id} — ${c.customer} — ${fmt(c.amount||0)}</option>`).join('');
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-building-bank" style="margin-right:6px;color:var(--accent)"></i>New Deposit Transaction</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Date</label><input type="date" id="dep-date" value="${today()}"></div>
+  <div class="form-group"><label>Bank Account / Deposited To <span style="color:var(--red)">*</span></label>
+    <select id="dep-bank" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="">— select bank account —</option>
+      ${bankOpts}
+      <option value="__custom__">Other (type below)</option>
+    </select>
+    <input type="text" id="dep-bank-custom" placeholder="e.g. BDO Current Account #123" style="display:none;margin-top:6px;width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)" oninput="document.getElementById('dep-bank').value='__custom__'">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Amount (₱) <span style="color:var(--red)">*</span></label>
+    <input type="number" id="dep-amount" step="0.01" min="0" placeholder="0.00">
+  </div>
+  <div class="form-group"><label>Source of Deposit</label>
+    <select id="dep-source" onchange="handleDepositSource(this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="collection">Collection from Customer</option>
+      <option value="cash_sales">Cash Sales</option>
+      <option value="loan">Loan Proceeds</option>
+      <option value="capital">Capital Contribution</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+</div>
+<div id="dep-collection-wrap" class="form-group">
+  <label>Link to Collection <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
+  <select id="dep-col-ref" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <option value="">— none —</option>${colOpts}
+  </select>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Bank Reference / Slip No.</label>
+    <input type="text" id="dep-ref" placeholder="e.g. Dep Slip #001, Ref #TXN123"></div>
+  <div class="form-group"><label>Deposited By</label>
+    <input type="text" id="dep-by" value="${currentUser?.name||''}" placeholder="Name of depositor"></div>
+</div>
+<div class="form-group"><label>Description / Notes</label>
+  <input type="text" id="dep-desc" placeholder="e.g. Collections from ABC Pharma week of July 7-11"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveDeposit()"><i class="ti ti-building-bank"></i>Record Deposit</button>
+</div>`);
+  document.getElementById('dep-bank').addEventListener('change', function() {
+    document.getElementById('dep-bank-custom').style.display = this.value==='__custom__' ? '' : 'none';
+  });
+}
+
+function handleDepositSource(val) {
+  const wrap = document.getElementById('dep-collection-wrap');
+  if(wrap) wrap.style.display = val==='collection' ? '' : 'none';
+}
+
+function saveDeposit() {
+  const date       = document.getElementById('dep-date').value;
+  const bankSel    = document.getElementById('dep-bank').value;
+  const bankCustom = document.getElementById('dep-bank-custom')?.value.trim();
+  const bankAccount= bankSel==='__custom__' ? bankCustom : bankSel;
+  const amount     = parseFloat(document.getElementById('dep-amount').value)||0;
+  const source     = document.getElementById('dep-source').value;
+  const colRef     = document.getElementById('dep-col-ref')?.value||'';
+  const ref        = document.getElementById('dep-ref').value.trim();
+  const depositedBy= document.getElementById('dep-by').value.trim();
+  const description= document.getElementById('dep-desc').value.trim();
+
+  if(!bankAccount) { alert('Please select or enter a bank account.'); return; }
+  if(!amount)      { alert('Please enter the deposit amount.'); return; }
+
+  if(!state.deposits) state.deposits = [];
+  const id = 'DEP-' + String(state.deposits.length+1).padStart(3,'0');
+  state.deposits.push({ id, date, bankAccount, amount, source, colRef, ref, depositedBy, description, status:'pending', createdBy:currentUser?.name||'' });
+
+  // Auto-create journal entry: DR Bank/Cash | CR AR or Revenue
+  const bankAcc = (state.accounts||[]).find(a=>String(a.name||'').toLowerCase()===bankAccount.toLowerCase()||a.name===bankAccount);
+  if(bankAcc && confirm('Auto-create General Journal entry?\n(DR: '+bankAccount+' | CR: Accounts Receivable/Revenue)')) {
+    const crAcc = source==='collection'
+      ? (state.accounts||[]).find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts receivable')||n.includes('trade receivable'); })
+      : (state.accounts||[]).find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('sales')||n.includes('revenue'); });
+    if(crAcc) {
+      const groupId = nextRefNum('JV', state.journal.filter(j=>j.type==='general'), 'group');
+      state.journal.push({ id:groupId, group:groupId, date, ref:id, desc:`Deposit — ${bankAccount}${description?' ('+description+')':''}`, debit:String(bankAcc.id), credit:null, amount, type:'general', preparedBy:currentUser?.name||'System', approvedBy:'', autoGenerated:true });
+      state.journal.push({ id:groupId+'-2', group:groupId, date, ref:id, desc:`Deposit — ${bankAccount}`, debit:null, credit:String(crAcc.id), amount, type:'general', preparedBy:currentUser?.name||'System', approvedBy:'', autoGenerated:true });
+    }
+  }
+
+  save(); closeModal(); render();
+}
+
+function verifyDeposit(id) {
+  const d = (state.deposits||[]).find(x=>x.id===id);
+  if(!d) return;
+  if(!confirm(`Verify deposit ${id}?\n\nAmount: ${fmt(d.amount)}\nBank: ${d.bankAccount}`)) return;
+  d.status = 'verified';
+  d.verifiedBy = currentUser?.name||'';
+  d.verifiedAt = today();
+  save(); render();
+}
+
+function showEditDeposit(id) {
+  const d = (state.deposits||[]).find(x=>x.id===id);
+  if(!d) return;
+  showModal(`
+<div class="modal-head"><h3>Edit Deposit — ${d.id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Date</label><input type="date" id="edep-date" value="${d.date}"></div>
+  <div class="form-group"><label>Bank Account</label><input type="text" id="edep-bank" value="${d.bankAccount||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Amount (₱)</label><input type="number" id="edep-amount" value="${d.amount||0}" step="0.01"></div>
+  <div class="form-group"><label>Bank Reference</label><input type="text" id="edep-ref" value="${d.ref||''}"></div>
+</div>
+<div class="form-group"><label>Deposited By</label><input type="text" id="edep-by" value="${d.depositedBy||''}"></div>
+<div class="form-group"><label>Description</label><input type="text" id="edep-desc" value="${d.description||''}"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditDeposit('${d.id}')">Save Changes</button>
+</div>`);
+}
+
+function saveEditDeposit(id) {
+  const d = (state.deposits||[]).find(x=>x.id===id);
+  if(!d) return;
+  d.date        = document.getElementById('edep-date').value;
+  d.bankAccount = document.getElementById('edep-bank').value.trim();
+  d.amount      = parseFloat(document.getElementById('edep-amount').value)||0;
+  d.ref         = document.getElementById('edep-ref').value.trim();
+  d.depositedBy = document.getElementById('edep-by').value.trim();
+  d.description = document.getElementById('edep-desc').value.trim();
+  save(); closeModal(); render();
+}
+
+function deleteDeposit(id) {
+  if(!requireAdmin('delete deposit transactions')) return;
+  if(!confirm('Delete this deposit record?')) return;
+  state.deposits = (state.deposits||[]).filter(d=>d.id!==id);
+  save(); render();
 }
 
 // ── EMPLOYEES ─────────────────────────────────────────────────────────────────
