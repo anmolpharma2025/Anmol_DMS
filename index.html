@@ -8279,7 +8279,9 @@ function saveEditSupplier(id) {
 
 // ── CUSTOMERS ─────────────────────────────────────────────────────────────────
 function renderCustomers(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddCustomer()"><i class="ti ti-plus"></i>Add Customer</button>`;
+  ta.innerHTML = `
+    <button class="btn" onclick="emailAllSOA()" style="color:var(--accent);border-color:var(--accent)"><i class="ti ti-mail"></i>Email SOA</button>
+    <button class="btn primary" onclick="showAddCustomer()"><i class="ti ti-plus"></i>Add Customer</button>`;
   c.innerHTML = `<table>
     <thead><tr>
       <th>ID</th><th>Name</th><th>Branch / Clinic</th><th>TIN</th><th>Email</th><th>Phone</th>
@@ -8303,6 +8305,7 @@ function renderCustomers(c, ta) {
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditCustomer('${cu.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printSOA('${cu.id}')"><i class="ti ti-file-text"></i>SOA</button>
+        <button class="btn" style="padding:3px 9px;font-size:11px;color:var(--accent);border-color:var(--accent)" onclick="emailSOA('${cu.id}')" title="Email SOA"><i class="ti ti-mail"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteCust('${cu.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`).join('')}
@@ -12353,88 +12356,223 @@ function savePayroll() {
 }
 
 // ── EMAIL PAYSLIP ──────────────────────────────────────────────────────────────
+function buildPayslipEmailBody(p, emp, cp) {
+  return `Dear ${emp.name},
+
+Please find your payslip details for ${p.period}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${cp.name}
+PAYSLIP — ${p.period}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Payslip No.  : ${p.id}
+Pay Date     : ${p.payDate}
+Employee     : ${emp.name}
+Position     : ${emp.position||'—'}
+Department   : ${emp.department||'—'}
+
+EARNINGS:
+${(p.customEarnings||[{label:'Basic Pay',amount:p.basicPay},{label:'Overtime',amount:p.overtime},{label:'Allowances',amount:p.allowance}]).map(e=>`  ${e.label.padEnd(20)} ${fmt(e.amount||0)}`).join('\n')}
+
+DEDUCTIONS:
+${(p.customDeductions||[{label:'SSS',amount:p.sss},{label:'PhilHealth',amount:p.philhealth},{label:'Pag-IBIG',amount:p.pagibig},{label:'Withholding Tax',amount:p.withholdingTax}]).map(d=>`  ${d.label.padEnd(20)} ${fmt(d.amount||0)}`).join('\n')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GROSS PAY    : ${fmt(p.grossPay||0)}
+DEDUCTIONS   : ${fmt(p.totalDeductions||0)}
+NET PAY      : ${fmt(p.netPay||0)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${cp.name}
+${cp.phone||''} | ${cp.email||''}
+${cp.address||''}
+
+This is an auto-generated payslip. Please contact HR for questions.`;
+}
+
 function emailPayslip(id) {
   const p = (state.payrolls||[]).find(pr=>pr.id===id);
   if(!p) return;
   const emp = (state.employees||[]).find(e=>e.id===p.empId)||{ name:p.empId, email:'' };
   const cp  = getCompanyProfile();
-  const subject = encodeURIComponent(`Payslip ${p.id} — ${p.period}`);
-  const body = encodeURIComponent(
-`Dear ${emp.name},
-
-Please find below your payslip details for ${p.period}.
-
-Payslip ID  : ${p.id}
-Pay Date    : ${p.payDate}
-Gross Pay   : ${fmt(p.grossPay)}
-Deductions  : ${fmt(p.totalDeductions)}
-NET PAY     : ${fmt(p.netPay)}
-
-EARNINGS:
-${(p.customEarnings||[{label:'Basic Pay',amount:p.basicPay},{label:'Overtime',amount:p.overtime},{label:'Allowances',amount:p.allowance}]).map(e=>`  ${e.label}: ${fmt(e.amount||0)}`).join('\n')}
-
-DEDUCTIONS:
-${(p.customDeductions||[{label:'SSS',amount:p.sss},{label:'PhilHealth',amount:p.philhealth},{label:'Pag-IBIG',amount:p.pagibig},{label:'Withholding Tax',amount:p.withholdingTax}]).map(d=>`  ${d.label}: ${fmt(d.amount||0)}`).join('\n')}
-
-For the actual printed payslip, please contact HR.
-
-${cp.name}
-${cp.phone||''} | ${cp.email||''}`
-  );
-  const to = emp.email ? encodeURIComponent(emp.email) : '';
+  const subject = encodeURIComponent(`Payslip — ${p.period} | ${cp.name}`);
+  const body    = encodeURIComponent(buildPayslipEmailBody(p, emp, cp));
+  const to      = emp.email ? encodeURIComponent(emp.email) : '';
   window.open(`mailto:${to}?subject=${subject}&body=${body}`);
 }
 
 function emailAllPayslips() {
-  // Show a modal to pick which payroll batch to email
   const payrolls = (state.payrolls||[]).filter(p=>p.status==='released');
   if(!payrolls.length) { alert('No released payrolls to send. Release payroll entries first.'); return; }
   const periods = [...new Set(payrolls.map(p=>p.period))];
   const periodOpts = periods.map(pd=>`<option value="${pd}">${pd} (${payrolls.filter(p=>p.period===pd).length} employees)</option>`).join('');
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-mail" style="margin-right:6px"></i>Email Payslips</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="padding:10px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--accent)">
+<div class="modal-head"><h3><i class="ti ti-mail" style="margin-right:6px"></i>Bulk Email Payslips</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px">
   <i class="ti ti-info-circle" style="margin-right:5px"></i>
-  This opens your default email client with a pre-filled payslip for each employee. Employee email addresses must be set in the Employees section.
+  Opens your default email app (Outlook, Gmail, etc.) pre-filled for each employee. Employee email addresses must be set in the <strong>Employees</strong> tab.
 </div>
 <div class="form-group"><label>Select Pay Period</label>
-  <select id="email-period" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${periodOpts}</select>
+  <select id="email-period" onchange="previewPayslipRecipients()" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${periodOpts}</select>
 </div>
-<div id="email-preview" style="margin-bottom:14px;font-size:13px;color:var(--text-secondary)">Select a period to preview recipients.</div>
+<div id="email-preview" style="margin-bottom:14px"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" onclick="sendAllPayslipEmails()"><i class="ti ti-send"></i>Open Email for Each Employee</button>
+  <button class="btn primary" onclick="sendAllPayslipEmails()"><i class="ti ti-send"></i>Send All</button>
 </div>`);
-  document.getElementById('email-period').addEventListener('change', function() {
-    const period = this.value;
-    const batch = payrolls.filter(p=>p.period===period);
-    const emps = state.employees||[];
-    document.getElementById('email-preview').innerHTML = `
+  setTimeout(previewPayslipRecipients, 100);
+}
+
+function previewPayslipRecipients() {
+  const period = document.getElementById('email-period')?.value;
+  if(!period) return;
+  const payrolls = (state.payrolls||[]).filter(p=>p.status==='released'&&p.period===period);
+  const emps = state.employees||[];
+  const withEmail    = payrolls.filter(p=>(emps.find(e=>e.id===p.empId)||{}).email);
+  const withoutEmail = payrolls.filter(p=>!(emps.find(e=>e.id===p.empId)||{}).email);
+  document.getElementById('email-preview').innerHTML = `
 <div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:10px 12px;border:1px solid var(--border-light)">
-  <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">${batch.length} recipients</div>
-  ${batch.map(p=>{
+  <div style="display:flex;gap:12px;margin-bottom:10px">
+    <span style="font-size:12px;color:var(--green)"><i class="ti ti-mail"></i> ${withEmail.length} will receive email</span>
+    ${withoutEmail.length>0?`<span style="font-size:12px;color:var(--red)"><i class="ti ti-mail-off"></i> ${withoutEmail.length} no email address</span>`:''}
+  </div>
+  ${payrolls.map(p=>{
     const emp=emps.find(e=>e.id===p.empId)||{name:p.empId,email:''};
-    return `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border-light)">
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12px;border-bottom:0.5px solid var(--border-light)">
       <span style="font-weight:500">${emp.name}</span>
-      <span style="color:${emp.email?'var(--green)':'var(--red)'}">${emp.email||'⚠ no email'}</span>
+      <div style="display:flex;gap:12px;align-items:center">
+        <span style="color:var(--text-secondary)">${fmt(p.netPay||0)} net</span>
+        <span style="color:${emp.email?'var(--green)':'var(--red)'};font-size:11px">${emp.email||'⚠ no email'}</span>
+      </div>
     </div>`;
   }).join('')}
 </div>`;
-  });
 }
 
 function sendAllPayslipEmails() {
-  const period = document.getElementById('email-period').value;
+  const period = document.getElementById('email-period')?.value;
   const payrolls = (state.payrolls||[]).filter(p=>p.status==='released'&&p.period===period);
   let sent=0, skipped=0;
   payrolls.forEach((p,i) => {
     const emp=(state.employees||[]).find(e=>e.id===p.empId)||{};
     if(!emp.email) { skipped++; return; }
-    setTimeout(()=>emailPayslip(p.id), i*800); // stagger to avoid popup blocking
+    setTimeout(()=>emailPayslip(p.id), i*1000); // 1 second stagger to avoid popup blockers
     sent++;
   });
   closeModal();
-  setTimeout(()=>alert(`Done! ${sent} email draft${sent!==1?'s':''} opened.${skipped>0?'\n'+skipped+' skipped (no email address).':''}`), payrolls.length*800+200);
+  alert(`📧 Sending ${sent} payslip email${sent!==1?'s':''}...\n\nYour email client will open ${sent} time${sent!==1?'s':''} (one per employee).\n${skipped>0?'\n⚠ '+skipped+' employee'+( skipped>1?'s':'')+' skipped — no email address set.':''}\n\nAllow popups if your browser blocks them.`);
+}
+
+// ── EMAIL SOA TO CUSTOMERS ────────────────────────────────────────────────────
+function emailSOA(custId) {
+  const cu = state.customers.find(c=>c.id===custId);
+  if(!cu) return;
+  if(!cu.email) {
+    alert(`⚠ No email address set for ${cu.name}.\n\nGo to Customers → Edit to add their email address.`);
+    return;
+  }
+  const cp = getCompanyProfile();
+  const custInvoices = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
+  const totalOutstanding = custInvoices.reduce((s,i)=>s+(i.amount||0),0);
+  const totalCollected   = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.netCash||r.amount||0),0);
+  const netBalance       = Math.max(0, totalOutstanding - totalCollected);
+  const today_str = today();
+
+  const invoiceLines = custInvoices.map(i => {
+    const bal = getInvoiceBalance(i.id);
+    const overdue = i.due && i.due < today_str;
+    return `  ${i.id.padEnd(16)} ${i.date.padEnd(12)} ${(i.due||'—').padEnd(12)} ${fmt(i.amount||0).padStart(14)} ${fmt(bal).padStart(12)}${overdue?' ⚠ OVERDUE':''}`;
+  }).join('\n');
+
+  const subject = encodeURIComponent(`Statement of Account — ${cu.name} | ${cp.name} | As of ${today_str}`);
+  const body = encodeURIComponent(
+`Dear ${cu.name},
+
+Please find your Statement of Account as of ${today_str}.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${cp.name}
+STATEMENT OF ACCOUNT
+As of: ${today_str}
+Customer: ${cu.name}${cu.tin?' | TIN: '+cu.tin:''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+OUTSTANDING INVOICES:
+${'Invoice No.'.padEnd(16)} ${'Date'.padEnd(12)} ${'Due Date'.padEnd(12)} ${'Invoice Amt'.padStart(14)} ${'Balance'.padStart(12)}
+${'-'.repeat(66)}
+${invoiceLines||'  No outstanding invoices.'}
+${'-'.repeat(66)}
+  ${''.padEnd(40)} ${'TOTAL BALANCE'.padStart(14)} ${fmt(netBalance).padStart(12)}
+
+${netBalance > 0 ? `Please settle your outstanding balance at your earliest convenience.
+Payment can be made via bank transfer or check payable to ${cp.name}.` : 'Your account is up to date. Thank you!'}
+
+For inquiries, please contact us at:
+${cp.phone||''} | ${cp.email||''}
+${cp.address||''}
+
+${cp.name}
+Accounts Receivable Department
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This is a system-generated statement. Please do not reply to this email.`
+  );
+
+  window.open(`mailto:${encodeURIComponent(cu.email)}?subject=${subject}&body=${body}`);
+}
+
+function emailAllSOA() {
+  const custs = (state.customers||[]).filter(cu => {
+    const outstanding = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
+    return outstanding.length > 0;
+  });
+  if(!custs.length) { alert('No customers with outstanding balances.'); return; }
+
+  const withEmail    = custs.filter(c=>c.email);
+  const withoutEmail = custs.filter(c=>!c.email);
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-mail" style="margin-right:6px"></i>Bulk Email — Statement of Account</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px">
+  <i class="ti ti-info-circle" style="margin-right:5px"></i>
+  Sends SOA via your default email client to all customers with outstanding balances.
+</div>
+<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:10px 12px;border:1px solid var(--border-light);margin-bottom:14px">
+  <div style="display:flex;gap:16px;margin-bottom:10px">
+    <span style="font-size:12px;color:var(--green)"><i class="ti ti-mail"></i> ${withEmail.length} will receive SOA</span>
+    ${withoutEmail.length>0?`<span style="font-size:12px;color:var(--red)"><i class="ti ti-mail-off"></i> ${withoutEmail.length} no email</span>`:''}
+  </div>
+  ${custs.map(cu=>{
+    const outstanding = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
+    const balance = outstanding.reduce((s,i)=>s+(getInvoiceBalance(i.id)||0),0);
+    const overdue  = outstanding.some(i=>i.due&&i.due<today());
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:12px;border-bottom:0.5px solid var(--border-light)">
+      <span style="font-weight:500">${cu.name}${overdue?' <span style="color:var(--red);font-size:10px">⚠ OVERDUE</span>':''}</span>
+      <div style="display:flex;gap:12px;align-items:center">
+        <span style="color:var(--red);font-weight:500">${fmt(balance)}</span>
+        <span style="font-size:11px;color:${cu.email?'var(--green)':'var(--red)'}">${cu.email||'⚠ no email'}</span>
+      </div>
+    </div>`;
+  }).join('')}
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="sendAllSOAEmails()"><i class="ti ti-send"></i>Send All SOAs</button>
+</div>`);
+}
+
+function sendAllSOAEmails() {
+  const custs = (state.customers||[]).filter(cu => {
+    const outstanding = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
+    return outstanding.length > 0 && cu.email;
+  });
+  let sent = 0;
+  custs.forEach((cu, i) => {
+    setTimeout(()=>emailSOA(cu.id), i*1000);
+    sent++;
+  });
+  closeModal();
+  alert(`📧 Sending ${sent} SOA email${sent!==1?'s':''}...\n\nYour email client will open once per customer.\n\nAllow popups if your browser blocks them.`);
 }
 
 function printPayslip(id) {
