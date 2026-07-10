@@ -180,6 +180,7 @@
   .ss-empty { padding:10px 12px; font-size:12px; color:var(--text-tertiary); }
 
   @keyframes slideIn { from { transform: translateX(120%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   @media print {
     body { background: #fff !important; font-size: 12px; color: #111 !important; }
     .shell, .main { display: block !important; height: auto !important; }
@@ -11457,6 +11458,9 @@ function renderChat(c, ta) {
         <div id="chat-channel-title" style="font-weight:700;font-size:14px">${_chatMode==='dm'&&_chatRecipient?'💬 '+_chatRecipient:'# general'}</div>
         <div id="chat-status" style="font-size:11px;color:var(--text-tertiary)">Connecting…</div>
       </div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        ${isAdmin()?`<button onclick="clearChatChannel()" title="Clear all messages" style="background:none;border:1px solid var(--border-mid);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-tertiary);font-size:11px;padding:4px 8px;font-family:var(--font);display:flex;align-items:center;gap:4px" onmouseover="this.style.color='var(--red)';this.style.borderColor='var(--red)'" onmouseout="this.style.color='var(--text-tertiary)';this.style.borderColor='var(--border-mid)'"><i class="ti ti-trash" style="font-size:12px"></i> Clear Chat</button>`:''}
+      </div>
     </div>
     <div id="chat-messages" style="flex:1;overflow-y:auto;padding:16px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px">
       <div style="text-align:center;color:var(--text-tertiary);font-size:12px;padding:20px">Loading…</div>
@@ -11476,6 +11480,43 @@ function renderChat(c, ta) {
 
   startChatListener();
   setTimeout(()=>document.getElementById('chat-input')?.focus(), 100);
+}
+
+function clearChatChannel() {
+  if(!db) { alert('Firebase not connected.'); return; }
+  const channelName = _chatMode==='dm' ? `DM with ${_chatRecipient}` : '#general';
+  if(!confirm(`Delete ALL messages in ${channelName}?\n\nThis cannot be undone. All messages (including attachments) will be permanently deleted for everyone.`)) return;
+
+  const collection = _chatMode==='dm'
+    ? `companies/anmol/dm_${getDMChannelId(currentUser.name, _chatRecipient)}`
+    : CHAT_COLLECTION;
+
+  const msgs = document.getElementById('chat-messages');
+  if(msgs) msgs.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:12px"><i class="ti ti-loader" style="animation:spin 1s linear infinite;font-size:24px;display:block;margin-bottom:8px"></i>Deleting messages…</div>`;
+
+  // Firestore batch delete (max 500 per batch)
+  db.collection(collection).get().then(snap => {
+    if(snap.empty) {
+      if(msgs) msgs.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:12px">Chat is already empty.</div>`;
+      return;
+    }
+    // Delete in batches of 100
+    const batchDelete = (docs) => {
+      if(!docs.length) return Promise.resolve();
+      const batch = db.batch();
+      docs.splice(0,100).forEach(d => batch.delete(d.ref));
+      return batch.commit().then(()=>batchDelete(docs));
+    };
+    const allDocs = snap.docs.slice();
+    return batchDelete(allDocs);
+  }).then(()=>{
+    // Restart listener — it will render empty state
+    if(_chatUnsubscribe) { _chatUnsubscribe(); _chatUnsubscribe=null; }
+    startChatListener();
+  }).catch(err=>{
+    alert('Failed to clear chat: ' + err.message);
+    startChatListener();
+  });
 }
 
 function renderChatContent() {
