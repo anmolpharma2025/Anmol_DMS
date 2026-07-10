@@ -182,12 +182,65 @@
   @keyframes slideIn { from { transform: translateX(120%); opacity:0; } to { transform: translateX(0); opacity:1; } }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   @media print {
-    body { background: #fff !important; font-size: 12px; color: #111 !important; }
-    .shell, .main { display: block !important; height: auto !important; }
-    .sidebar, .topbar, .no-print { display: none !important; }
-    .content { padding: 0 !important; overflow: visible !important; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
+    body { background: #fff !important; font-size: 11px; color: #111 !important; margin: 0; padding: 0; }
+
+    /* Hide UI chrome */
+    .sidebar, .topbar, .no-print,
+    .chat-float-btn, #ai-panel, #ai-btn,
+    .action-btns, .tab, .btn-row { display: none !important; }
+
+    /* Full-width layout */
+    .shell { display: block !important; height: auto !important; overflow: visible !important; }
+    .main  { display: block !important; height: auto !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; }
+    .content {
+      padding: 0 !important;
+      overflow: visible !important;
+      height: auto !important;
+      max-height: none !important;
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    /* Remove all max-width constraints for printing */
+    .report-section, #report-body, #report-body > *,
+    [style*="max-width"] { max-width: none !important; width: 100% !important; }
+
+    /* Unwrap overflow-x:auto containers */
+    [style*="overflow-x"] { overflow: visible !important; }
+
+    /* Tables */
+    table { width: 100% !important; border-collapse: collapse !important; page-break-inside: auto; }
+    thead { display: table-header-group; }
+    tr    { page-break-inside: avoid; }
+    th, td { padding: 4px 6px !important; font-size: 11px !important; border: 0.5px solid #ccc !important; }
+
+    /* Report tables */
+    .report-table td, .report-table th { padding: 4px 6px !important; }
+
+    /* KPI cards — shrink for print */
+    .kpi-grid { display: grid !important; grid-template-columns: repeat(4,1fr) !important; gap: 6px !important; }
+    .kpi { padding: 8px !important; border: 0.5px solid #ddd !important; border-radius: 4px !important; }
+    .kpi-value { font-size: 14px !important; }
+
+    /* Tabs — hide all tabs, show current content only */
+    .tabs, .tab-bar { display: none !important; }
+
+    /* Section headers */
+    .report-section { border: none !important; padding: 0 !important; margin-bottom: 12px !important; }
+    .report-section-title { font-size: 10px !important; }
+
+    /* Page settings */
+    @page { margin: 12mm 10mm; size: A4 landscape; }
+
+    /* Print doc */
     .print-doc { display: block !important; }
-    @page { margin: 18mm 16mm; }
+
+    /* Grid layouts */
+    .kpi-grid { break-inside: avoid; }
+
+    /* Avoid breaking inside these */
+    .dv-paper, .report-section { page-break-inside: avoid; }
   }
   .print-doc { display: none; }
   .dv-paper { background: var(--bg-card); color: var(--text-primary); font-size: 13px; max-width: 820px; margin: 0 auto; padding: 32px 36px; border: 1px solid var(--border-light); border-radius: var(--radius-md); }
@@ -12925,7 +12978,10 @@ ${cp.address||''}
 This is an auto-generated payslip. Please contact HR for questions.`;
 }
 
+let _emailSending = false;
+
 async function emailPayslip(id) {
+  if(_emailSending) return { success:false, error:'Already sending' };
   const p = (state.payrolls||[]).find(pr=>pr.id===id);
   if(!p) return;
   const emp = (state.employees||[]).find(e=>e.id===p.empId)||{ name:p.empId, email:'' };
@@ -12995,6 +13051,7 @@ function previewPayslipRecipients() {
 }
 
 async function sendAllPayslipEmails() {
+  if(_emailSending) { alert('Already sending emails, please wait.'); return; }
   const period = document.getElementById('email-period')?.value;
   const allPayrolls = (state.payrolls||[]).filter(p=>p.status==='released'&&p.period===period);
 
@@ -13003,22 +13060,32 @@ async function sendAllPayslipEmails() {
   const payrolls = allPayrolls.filter(p=>{ if(seen.has(p.empId)) return false; seen.add(p.empId); return true; });
 
   closeModal();
+  _emailSending = true;
 
   const toast = document.createElement('div');
+  toast.id = 'email-send-toast';
   toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:14px 18px;z-index:9999;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
   toast.innerHTML = `<div style="font-weight:600;margin-bottom:6px">📧 Sending Payslips…</div><div id="email-progress" style="font-size:12px;color:var(--text-secondary)">Preparing…</div>`;
   document.body.appendChild(toast);
 
   let sent=0, failed=0, skipped=0;
+  const toSend = payrolls.filter(p=>(state.employees||[]).find(e=>e.id===p.empId)?.email);
   for(const p of payrolls) {
     const emp=(state.employees||[]).find(e=>e.id===p.empId)||{};
     if(!emp.email) { skipped++; continue; }
-    document.getElementById('email-progress').textContent = `Sending to ${emp.name}… (${sent+failed+1}/${payrolls.filter(x=>(state.employees||[]).find(e=>e.id===x.empId)?.email).length})`;
-    const result = await emailPayslip(p.id);
+    const prog = document.getElementById('email-progress');
+    if(prog) prog.textContent = `Sending to ${emp.name}… (${sent+failed+1}/${toSend.length})`;
+    const result = await sendEmail({
+      to: emp.email,
+      subject: applyTemplate(getEmailTemplate('payslip'),{name:emp.name,company:getCompanyProfile().name||'',period:p.period||'',date:p.payDate||today()}).subject,
+      html: buildPayslipHTML(p, emp, getCompanyProfile()),
+      text: buildPayslipEmailBody(p, emp, getCompanyProfile())
+    });
     if(result?.success) sent++; else failed++;
     await new Promise(r=>setTimeout(r,400));
   }
 
+  _emailSending = false;
   toast.innerHTML = `
     <div style="font-weight:600;margin-bottom:6px">✅ Payslips Sent</div>
     <div style="font-size:12px;color:var(--text-secondary)">
@@ -13026,7 +13093,7 @@ async function sendAllPayslipEmails() {
       ${failed>0?`Failed: <strong style="color:var(--red)">${failed}</strong> &nbsp;`:''}
       ${skipped>0?`Skipped (no email): <strong>${skipped}</strong>`:''}
     </div>`;
-  setTimeout(()=>toast.remove(), 6000);
+  setTimeout(()=>{ const t=document.getElementById('email-send-toast'); if(t) t.remove(); }, 6000);
 }
 
 // ── EMAIL SOA TO CUSTOMERS ────────────────────────────────────────────────────
@@ -13092,33 +13159,39 @@ function emailAllSOA() {
 }
 
 async function sendAllSOAEmails() {
+  if(_emailSending) { alert('Already sending emails, please wait.'); return; }
   const custs = (state.customers||[]).filter(cu => {
     const outstanding = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
     return outstanding.length > 0 && cu.email;
   });
   closeModal();
+  _emailSending = true;
 
   const toast = document.createElement('div');
+  toast.id = 'soa-send-toast';
   toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:14px 18px;z-index:9999;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
   toast.innerHTML = `<div style="font-weight:600;margin-bottom:6px">📧 Sending SOAs…</div><div id="soa-progress" style="font-size:12px;color:var(--text-secondary)">Preparing…</div>`;
   document.body.appendChild(toast);
 
   let sent=0, failed=0;
   for(const cu of custs) {
-    document.getElementById('soa-progress').textContent = `Sending to ${cu.name}… (${sent+failed+1}/${custs.length})`;
+    const prog = document.getElementById('soa-progress');
+    if(prog) prog.textContent = `Sending to ${cu.name}… (${sent+failed+1}/${custs.length})`;
     const result = await emailSOA(cu.id);
     if(result?.success) sent++; else failed++;
-    await new Promise(r=>setTimeout(r,300));
+    await new Promise(r=>setTimeout(r,400));
   }
 
+  _emailSending = false;
   toast.innerHTML = `
     <div style="font-weight:600;margin-bottom:6px">✅ SOAs Sent</div>
     <div style="font-size:12px;color:var(--text-secondary)">
       Sent: <strong style="color:var(--green)">${sent}</strong>
       ${failed>0?` &nbsp; Failed: <strong style="color:var(--red)">${failed}</strong>`:''}
     </div>`;
-  setTimeout(()=>toast.remove(), 5000);
+  setTimeout(()=>{ const t=document.getElementById('soa-send-toast'); if(t) t.remove(); }, 6000);
 }
+
 
 function printPayslip(id) {
   const p = (state.payrolls||[]).find(p=>p.id===id);
