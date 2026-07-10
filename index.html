@@ -12478,6 +12478,35 @@ function deleteReturn(id) {
   save(); render();
 }
 
+function loadInvoiceForReturn() {
+  const custName = document.getElementById('ret-cust')?.value;
+  const invSel   = document.getElementById('ret-inv');
+  if(!invSel || !custName) return;
+  // Filter invoices to selected customer
+  const custInvoices = (state.invoices||[]).filter(i => i.customer === custName);
+  invSel.innerHTML = '<option value="">— select invoice or add manually —</option>' +
+    custInvoices.map(i => `<option value="${i.id}">${i.id} — ${fmt(i.amount||0)} [${getInvoiceStatus(i)}]</option>`).join('');
+}
+
+function loadReturnLinesFromInvoice() {
+  const invId = document.getElementById('ret-inv')?.value;
+  if(!invId) return;
+  const inv = (state.invoices||[]).find(i=>i.id===invId);
+  if(!inv) return;
+  // Pre-fill return lines from invoice lines
+  window._retLines = (inv.lines||[]).map(l=>({
+    itemId: l.itemId||'',
+    desc:   l.desc||'',
+    qty:    l.qty||1,
+    unitPrice: l.unitPrice||0,
+    lineTotal: (l.qty||1)*(l.unitPrice||0)
+  }));
+  if(!window._retLines.length) {
+    window._retLines = [{ itemId:'', desc:'', qty:1, unitPrice: inv.amount||0, lineTotal: inv.amount||0 }];
+  }
+  renderOrderLines('ret');
+}
+
 function showAddReturn() {
   const custOpts = state.customers.map(cu=>`<option value="${cu.name}">${cu.name}</option>`).join('');
   const invOpts = state.invoices.filter(i=>i.status==='paid'||i.status==='pending').map(i=>`<option value="${i.id}">${i.id} — ${i.customer}</option>`).join('');
