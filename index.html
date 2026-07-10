@@ -202,6 +202,16 @@
       max-width: none !important;
     }
 
+    /* Strip ALL backgrounds — white only */
+    *, *::before, *::after {
+      background: transparent !important;
+      background-color: transparent !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      text-shadow: none !important;
+      color: #111 !important;
+    }
+
     /* Remove all max-width constraints for printing */
     .report-section, #report-body, #report-body > *,
     [style*="max-width"] { max-width: none !important; width: 100% !important; }
@@ -212,34 +222,41 @@
     /* Tables */
     table { width: 100% !important; border-collapse: collapse !important; page-break-inside: auto; }
     thead { display: table-header-group; }
-    tr    { page-break-inside: avoid; }
-    th, td { padding: 4px 6px !important; font-size: 11px !important; border: 0.5px solid #ccc !important; }
+    thead tr th { background: #f0f0f0 !important; color: #111 !important; font-weight: 700; }
+    tr { page-break-inside: avoid; }
+    th, td { padding: 4px 6px !important; font-size: 11px !important; border: 0.5px solid #bbb !important; }
 
-    /* Report tables */
-    .report-table td, .report-table th { padding: 4px 6px !important; }
+    /* Zebra rows — light grey only */
+    tbody tr:nth-child(even) td { background: #f8f8f8 !important; }
 
-    /* KPI cards — shrink for print */
+    /* Total/footer rows */
+    tfoot tr td, tfoot tr th { background: #eee !important; font-weight: 700 !important; border-top: 1.5px solid #888 !important; }
+
+    /* Section header rows inside tbody */
+    tr[style*="background"] td { background: #f0f0f0 !important; font-weight: 600 !important; }
+
+    /* KPI cards */
     .kpi-grid { display: grid !important; grid-template-columns: repeat(4,1fr) !important; gap: 6px !important; }
-    .kpi { padding: 8px !important; border: 0.5px solid #ddd !important; border-radius: 4px !important; }
-    .kpi-value { font-size: 14px !important; }
+    .kpi { padding: 8px !important; border: 0.5px solid #bbb !important; border-radius: 0 !important; background: #fff !important; }
+    .kpi-value { font-size: 14px !important; color: #111 !important; }
 
-    /* Tabs — hide all tabs, show current content only */
+    /* Badges — just text */
+    .badge { background: none !important; border: 0.5px solid #999 !important; color: #111 !important; padding: 1px 4px !important; border-radius: 3px !important; font-size: 10px !important; }
+
+    /* Report section */
+    .report-section { border: none !important; padding: 0 !important; margin-bottom: 12px !important; }
+    .report-section-title { font-size: 10px !important; color: #555 !important; }
+
+    /* Tabs — hide */
     .tabs, .tab-bar { display: none !important; }
 
-    /* Section headers */
-    .report-section { border: none !important; padding: 0 !important; margin-bottom: 12px !important; }
-    .report-section-title { font-size: 10px !important; }
-
-    /* Page settings */
+    /* Page settings — landscape for wide tables */
     @page { margin: 12mm 10mm; size: A4 landscape; }
 
     /* Print doc */
     .print-doc { display: block !important; }
 
-    /* Grid layouts */
-    .kpi-grid { break-inside: avoid; }
-
-    /* Avoid breaking inside these */
+    /* Avoid breaking */
     .dv-paper, .report-section { page-break-inside: avoid; }
   }
   .print-doc { display: none; }
