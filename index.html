@@ -12654,6 +12654,130 @@ function savePayroll() {
   save(); closeModal(); render();
 }
 
+// ── RESEND EMAIL VIA CLOUDFLARE WORKER ────────────────────────────────────────
+const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
+
+async function sendEmail({ to, subject, html, text }) {
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Action': 'email' },
+      body: JSON.stringify({ to, subject, html, text })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data?.message || data?.error || `Error ${res.status}`);
+    return { success: true, id: data.id };
+  } catch(err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function buildPayslipHTML(p, emp, cp) {
+  const earnings   = p.customEarnings   || [{label:'Basic Pay',amount:p.basicPay||0},{label:'Overtime Pay',amount:p.overtime||0},{label:'Allowances',amount:p.allowance||0}];
+  const deductions = p.customDeductions || [{label:'SSS',amount:p.sss||0},{label:'PhilHealth',amount:p.philhealth||0},{label:'Pag-IBIG',amount:p.pagibig||0},{label:'Withholding Tax',amount:p.withholdingTax||0}];
+  return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1a1a2e;background:#f8fafc;padding:20px">
+<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+  <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:24px 28px;color:#fff">
+    <div style="font-size:20px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:13px;opacity:0.8;margin-top:4px">PAYSLIP — ${p.period}</div>
+  </div>
+  <div style="padding:24px 28px">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+      <tr><td style="padding:5px 0;font-size:13px;color:#666;width:40%">Payslip No.</td><td style="font-weight:600">${p.id}</td></tr>
+      <tr><td style="padding:5px 0;font-size:13px;color:#666">Pay Date</td><td style="font-weight:600">${p.payDate}</td></tr>
+      <tr><td style="padding:5px 0;font-size:13px;color:#666">Employee</td><td style="font-weight:600">${emp.name}</td></tr>
+      <tr><td style="padding:5px 0;font-size:13px;color:#666">Position</td><td>${emp.position||'—'}</td></tr>
+      <tr><td style="padding:5px 0;font-size:13px;color:#666">Department</td><td>${emp.department||'—'}</td></tr>
+    </table>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div style="background:#f0f4ff;border-radius:8px;padding:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#1a237e;margin-bottom:10px">Earnings</div>
+        ${earnings.map(e=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:0.5px solid #e0e7ff"><span>${e.label}</span><span style="font-weight:500">₱${(e.amount||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></div>`).join('')}
+      </div>
+      <div style="background:#fff7f0;border-radius:8px;padding:16px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#c62828;margin-bottom:10px">Deductions</div>
+        ${deductions.map(d=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:0.5px solid #ffe0e0"><span>${d.label}</span><span style="font-weight:500">₱${(d.amount||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></div>`).join('')}
+      </div>
+    </div>
+    <div style="background:#1a237e;border-radius:8px;padding:16px;color:#fff;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:0.08em">Net Pay</div>
+        <div style="font-size:28px;font-weight:700;margin-top:4px">₱${(p.netPay||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</div>
+      </div>
+      <div style="text-align:right;font-size:12px;opacity:0.7">
+        <div>Gross: ₱${(p.grossPay||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</div>
+        <div>Deductions: ₱${(p.totalDeductions||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</div>
+      </div>
+    </div>
+    <div style="margin-top:20px;font-size:11px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:16px">
+      ${cp.name} &nbsp;|&nbsp; ${cp.phone||''} &nbsp;|&nbsp; ${cp.email||''}<br>
+      This is a system-generated payslip. Please contact HR for inquiries.
+    </div>
+  </div>
+</div></body></html>`;
+}
+
+function buildSOAHTML(cu, cp, custInvoices, netBalance) {
+  const today_str = today();
+  const hasOverdue = custInvoices.some(i=>i.due&&i.due<today_str);
+  return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;color:#1a1a2e;background:#f8fafc;padding:20px">
+<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+  <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:24px 28px;color:#fff">
+    <div style="font-size:20px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+    <div style="font-size:13px;opacity:0.8;margin-top:4px">STATEMENT OF ACCOUNT — As of ${today_str}</div>
+  </div>
+  <div style="padding:24px 28px">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+      <tr><td style="padding:4px 0;font-size:13px;color:#666;width:30%">Customer</td><td style="font-weight:600">${cu.name}</td></tr>
+      ${cu.tin?`<tr><td style="padding:4px 0;font-size:13px;color:#666">TIN</td><td>${cu.tin}</td></tr>`:''}
+      ${cu.address?`<tr><td style="padding:4px 0;font-size:13px;color:#666">Address</td><td>${cu.address}</td></tr>`:''}
+    </table>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px">
+      <thead><tr style="background:#f0f4ff">
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Invoice No.</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Date</th>
+        <th style="padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Due Date</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Amount</th>
+        <th style="padding:8px 10px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Balance</th>
+        <th style="padding:8px 10px;text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#1a237e">Status</th>
+      </tr></thead>
+      <tbody>
+      ${custInvoices.map(i=>{
+        const bal = getInvoiceBalance(i.id);
+        const overdue = i.due && i.due < today_str;
+        return `<tr style="border-bottom:1px solid #eee${overdue?';background:#fff5f5':''}">
+          <td style="padding:8px 10px;font-weight:500">${i.id}</td>
+          <td style="padding:8px 10px;color:#666">${i.date}</td>
+          <td style="padding:8px 10px;color:${overdue?'#c62828':'#666'};font-weight:${overdue?'600':'400'}">${i.due||'—'}${overdue?' ⚠':''}</td>
+          <td style="padding:8px 10px;text-align:right">₱${(i.amount||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+          <td style="padding:8px 10px;text-align:right;font-weight:600;color:${bal>0?'#c62828':'#2e7d32'}">₱${bal.toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+          <td style="padding:8px 10px;text-align:center"><span style="background:${overdue?'#ffebee':bal<=0?'#e8f5e9':'#e3f2fd'};color:${overdue?'#c62828':bal<=0?'#2e7d32':'#1565c0'};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600">${overdue?'OVERDUE':bal<=0?'PAID':'PENDING'}</span></td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+      <tfoot><tr style="background:#1a237e;color:#fff">
+        <td colspan="4" style="padding:10px;font-weight:700">TOTAL OUTSTANDING BALANCE</td>
+        <td colspan="2" style="padding:10px;text-align:right;font-size:16px;font-weight:700">₱${netBalance.toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+      </tr></tfoot>
+    </table>
+    ${netBalance>0?`<div style="background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;padding:14px;font-size:13px;margin-bottom:16px">
+      <strong>Payment Request:</strong> Please settle your outstanding balance at your earliest convenience.<br>
+      Payments may be made via bank transfer or check payable to <strong>${cp.name}</strong>.
+    </div>`:`<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:14px;font-size:13px;margin-bottom:16px">
+      ✅ Your account is fully settled. Thank you for your prompt payment!
+    </div>`}
+    ${hasOverdue?`<div style="background:#ffebee;border:1px solid #ef9a9a;border-radius:8px;padding:14px;font-size:13px;margin-bottom:16px;color:#c62828">
+      ⚠ You have overdue invoices. Please settle them immediately to avoid service disruption.
+    </div>`:''}
+    <div style="font-size:11px;color:#999;text-align:center;border-top:1px solid #eee;padding-top:16px">
+      ${cp.name} &nbsp;|&nbsp; ${cp.phone||''} &nbsp;|&nbsp; ${cp.email||''}<br>
+      ${cp.address||''}<br>
+      This is a system-generated statement. For inquiries, please contact our Accounts Receivable department.
+    </div>
+  </div>
+</div></body></html>`;
+}
+
 // ── EMAIL PAYSLIP ──────────────────────────────────────────────────────────────
 function buildPayslipEmailBody(p, emp, cp) {
   return `Dear ${emp.name},
@@ -12690,15 +12814,19 @@ ${cp.address||''}
 This is an auto-generated payslip. Please contact HR for questions.`;
 }
 
-function emailPayslip(id) {
+async function emailPayslip(id) {
   const p = (state.payrolls||[]).find(pr=>pr.id===id);
   if(!p) return;
   const emp = (state.employees||[]).find(e=>e.id===p.empId)||{ name:p.empId, email:'' };
   const cp  = getCompanyProfile();
-  const subject = encodeURIComponent(`Payslip — ${p.period} | ${cp.name}`);
-  const body    = encodeURIComponent(buildPayslipEmailBody(p, emp, cp));
-  const to      = emp.email ? encodeURIComponent(emp.email) : '';
-  window.open(`mailto:${to}?subject=${subject}&body=${body}`);
+  if(!emp.email) { alert(`⚠ No email address for ${emp.name}.\nAdd it in the Employees tab.`); return; }
+  const result = await sendEmail({
+    to: emp.email,
+    subject: `Payslip — ${p.period} | ${cp.name}`,
+    html: buildPayslipHTML(p, emp, cp),
+    text: buildPayslipEmailBody(p, emp, cp)
+  });
+  return result;
 }
 
 function emailAllPayslips() {
@@ -12749,75 +12877,54 @@ function previewPayslipRecipients() {
 </div>`;
 }
 
-function sendAllPayslipEmails() {
+async function sendAllPayslipEmails() {
   const period = document.getElementById('email-period')?.value;
   const payrolls = (state.payrolls||[]).filter(p=>p.status==='released'&&p.period===period);
-  let sent=0, skipped=0;
-  payrolls.forEach((p,i) => {
-    const emp=(state.employees||[]).find(e=>e.id===p.empId)||{};
-    if(!emp.email) { skipped++; return; }
-    setTimeout(()=>emailPayslip(p.id), i*1000); // 1 second stagger to avoid popup blockers
-    sent++;
-  });
+  const cp = getCompanyProfile();
   closeModal();
-  alert(`📧 Sending ${sent} payslip email${sent!==1?'s':''}...\n\nYour email client will open ${sent} time${sent!==1?'s':''} (one per employee).\n${skipped>0?'\n⚠ '+skipped+' employee'+( skipped>1?'s':'')+' skipped — no email address set.':''}\n\nAllow popups if your browser blocks them.`);
+
+  // Show progress toast
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:14px 18px;z-index:9999;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
+  toast.innerHTML = `<div style="font-weight:600;margin-bottom:6px">📧 Sending Payslips…</div><div id="email-progress" style="font-size:12px;color:var(--text-secondary)">Preparing…</div>`;
+  document.body.appendChild(toast);
+
+  let sent=0, failed=0, skipped=0;
+  for(const p of payrolls) {
+    const emp=(state.employees||[]).find(e=>e.id===p.empId)||{};
+    if(!emp.email) { skipped++; continue; }
+    document.getElementById('email-progress').textContent = `Sending to ${emp.name}… (${sent+failed+1}/${payrolls.length-skipped})`;
+    const result = await emailPayslip(p.id);
+    if(result?.success) sent++; else failed++;
+    await new Promise(r=>setTimeout(r,300)); // small delay between sends
+  }
+
+  toast.innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px">✅ Payslips Sent</div>
+    <div style="font-size:12px;color:var(--text-secondary)">
+      Sent: <strong style="color:var(--green)">${sent}</strong> &nbsp;
+      ${failed>0?`Failed: <strong style="color:var(--red)">${failed}</strong> &nbsp;`:''}
+      ${skipped>0?`Skipped (no email): <strong>${skipped}</strong>`:''}
+    </div>`;
+  setTimeout(()=>toast.remove(), 5000);
 }
 
 // ── EMAIL SOA TO CUSTOMERS ────────────────────────────────────────────────────
-function emailSOA(custId) {
+async function emailSOA(custId) {
   const cu = state.customers.find(c=>c.id===custId);
   if(!cu) return;
-  if(!cu.email) {
-    alert(`⚠ No email address set for ${cu.name}.\n\nGo to Customers → Edit to add their email address.`);
-    return;
-  }
+  if(!cu.email) { alert(`⚠ No email address for ${cu.name}.\nAdd it in the Customers tab.`); return; }
   const cp = getCompanyProfile();
   const custInvoices = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
-  const totalOutstanding = custInvoices.reduce((s,i)=>s+(i.amount||0),0);
-  const totalCollected   = (state.collections||[]).filter(r=>r.customer===cu.name).reduce((s,r)=>s+(r.netCash||r.amount||0),0);
-  const netBalance       = Math.max(0, totalOutstanding - totalCollected);
+  const netBalance = custInvoices.reduce((s,i)=>s+getInvoiceBalance(i.id),0);
   const today_str = today();
-
-  const invoiceLines = custInvoices.map(i => {
-    const bal = getInvoiceBalance(i.id);
-    const overdue = i.due && i.due < today_str;
-    return `  ${i.id.padEnd(16)} ${i.date.padEnd(12)} ${(i.due||'—').padEnd(12)} ${fmt(i.amount||0).padStart(14)} ${fmt(bal).padStart(12)}${overdue?' ⚠ OVERDUE':''}`;
-  }).join('\n');
-
-  const subject = encodeURIComponent(`Statement of Account — ${cu.name} | ${cp.name} | As of ${today_str}`);
-  const body = encodeURIComponent(
-`Dear ${cu.name},
-
-Please find your Statement of Account as of ${today_str}.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${cp.name}
-STATEMENT OF ACCOUNT
-As of: ${today_str}
-Customer: ${cu.name}${cu.tin?' | TIN: '+cu.tin:''}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-OUTSTANDING INVOICES:
-${'Invoice No.'.padEnd(16)} ${'Date'.padEnd(12)} ${'Due Date'.padEnd(12)} ${'Invoice Amt'.padStart(14)} ${'Balance'.padStart(12)}
-${'-'.repeat(66)}
-${invoiceLines||'  No outstanding invoices.'}
-${'-'.repeat(66)}
-  ${''.padEnd(40)} ${'TOTAL BALANCE'.padStart(14)} ${fmt(netBalance).padStart(12)}
-
-${netBalance > 0 ? `Please settle your outstanding balance at your earliest convenience.
-Payment can be made via bank transfer or check payable to ${cp.name}.` : 'Your account is up to date. Thank you!'}
-
-For inquiries, please contact us at:
-${cp.phone||''} | ${cp.email||''}
-${cp.address||''}
-
-${cp.name}
-Accounts Receivable Department
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is a system-generated statement. Please do not reply to this email.`
-  );
-
-  window.open(`mailto:${encodeURIComponent(cu.email)}?subject=${subject}&body=${body}`);
+  const result = await sendEmail({
+    to: cu.email,
+    subject: `Statement of Account — ${cu.name} | As of ${today_str} | ${cp.name}`,
+    html: buildSOAHTML(cu, cp, custInvoices, netBalance),
+    text: `Dear ${cu.name},\n\nOutstanding Balance: ₱${netBalance.toLocaleString('en-PH',{minimumFractionDigits:2})}\n\n${cp.name}`
+  });
+  return result;
 }
 
 function emailAllSOA() {
@@ -12860,18 +12967,33 @@ function emailAllSOA() {
 </div>`);
 }
 
-function sendAllSOAEmails() {
+async function sendAllSOAEmails() {
   const custs = (state.customers||[]).filter(cu => {
     const outstanding = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
     return outstanding.length > 0 && cu.email;
   });
-  let sent = 0;
-  custs.forEach((cu, i) => {
-    setTimeout(()=>emailSOA(cu.id), i*1000);
-    sent++;
-  });
   closeModal();
-  alert(`📧 Sending ${sent} SOA email${sent!==1?'s':''}...\n\nYour email client will open once per customer.\n\nAllow popups if your browser blocks them.`);
+
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--bg-card);border:1px solid var(--accent);border-radius:var(--radius-md);padding:14px 18px;z-index:9999;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.4)';
+  toast.innerHTML = `<div style="font-weight:600;margin-bottom:6px">📧 Sending SOAs…</div><div id="soa-progress" style="font-size:12px;color:var(--text-secondary)">Preparing…</div>`;
+  document.body.appendChild(toast);
+
+  let sent=0, failed=0;
+  for(const cu of custs) {
+    document.getElementById('soa-progress').textContent = `Sending to ${cu.name}… (${sent+failed+1}/${custs.length})`;
+    const result = await emailSOA(cu.id);
+    if(result?.success) sent++; else failed++;
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  toast.innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px">✅ SOAs Sent</div>
+    <div style="font-size:12px;color:var(--text-secondary)">
+      Sent: <strong style="color:var(--green)">${sent}</strong>
+      ${failed>0?` &nbsp; Failed: <strong style="color:var(--red)">${failed}</strong>`:''}
+    </div>`;
+  setTimeout(()=>toast.remove(), 5000);
 }
 
 function printPayslip(id) {
