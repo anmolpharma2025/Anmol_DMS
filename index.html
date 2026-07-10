@@ -121,8 +121,8 @@
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
   .card { background: var(--bg-card); border-radius: var(--radius-md); padding: 18px; border: 1px solid var(--border-light); }
   .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); margin-bottom: 14px; }
-  .overlay { position: fixed; inset: 0; background: rgba(5,10,25,0.75); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
-  .modal { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; border: 1px solid var(--border-mid); box-shadow: 0 16px 48px rgba(0,0,0,0.5); margin: 16px; display: flex; flex-direction: column; }
+  .overlay { position: fixed; inset: 0; background: rgba(5,10,25,0.75); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); padding: 16px; }
+  .modal { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 860px; max-height: 92vh; overflow-y: auto; border: 1px solid var(--border-mid); box-shadow: 0 16px 48px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
   .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
   .modal-head h3 { font-size: 16px; font-weight: 600; }
   .close-btn { background: none; border: none; cursor: pointer; font-size: 20px; color: var(--text-secondary); line-height: 1; padding: 2px 6px; border-radius: 4px; }
@@ -4872,7 +4872,7 @@ function renderReports(c, ta) {
     <button class="btn" style="padding:4px 10px;font-size:11px" onclick="setReportPeriod('all')">All Time</button>
   </div>
 </div>
-<div id="report-body"></div>`;
+<div id="report-body" style="width:100%;overflow-x:auto"></div>`;
   showReport(currentReport);
 }
 
@@ -5051,7 +5051,7 @@ function showReport(type) {
     // Group operating exp by category
     const opByCat    = groupBy(allExp.filter(e=>e.expType==='operating'), e=>e.category, e=>e.vatBase!=null?e.vatBase:e.amount||0);
 
-    rb.innerHTML = `<div class="report-section" style="max-width:580px">
+    rb.innerHTML = `<div class="report-section" style="max-width:860px">
       <div class="report-section-title">Income Statement — ${periodLabel}</div>
       <table class="report-table">
         ${sectionHeader('Revenue (Sales)')}
@@ -5144,7 +5144,7 @@ function showReport(type) {
     // Group cash in by mode
     const byMode = groupBy(state.collections||[], r=>r.mode, r=>r.amount||0);
 
-    rb.innerHTML = `<div class="report-section" style="max-width:560px">
+    rb.innerHTML = `<div class="report-section" style="max-width:860px">
       <div class="report-section-title">Cash Flow Statement — ${periodLabel}</div>
       <table class="report-table">
         ${sectionHeader('Cash Inflows (General Journal — DR Cash/Bank)')}
@@ -5214,7 +5214,7 @@ function showReport(type) {
     </table>
   </div>
 </div>
-<div class="report-section" style="max-width:440px">
+<div class="report-section" style="max-width:720px">
   <div class="report-section-title">VAT Payable / (Creditable) — ${periodLabel}</div>
   <table class="report-table">
     ${row('Output VAT (from sales)', outputVAT, 'pos')}
@@ -5302,7 +5302,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   <div class="kpi"><div class="kpi-label">Pending Release</div><div class="kpi-value" style="color:var(--amber)">${fmt(pending.reduce((s,p)=>s+(p.netPay||0),0))}</div><div class="kpi-sub">${pending.length} entries</div></div>
 </div>
 
-<div class="report-section" style="max-width:600px;margin-bottom:16px">
+<div class="report-section" style="max-width:900px;margin-bottom:16px">
   <div class="report-section-title">Deductions Breakdown (Released Payroll)</div>
   <table class="report-table">
     ${row('SSS Contributions', totalSSS)}
@@ -5428,7 +5428,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     const totVAT    = allPur.filter(p=>!p.vatExempt&&p.vatType!=='exempt').reduce((s,p)=>s+(p.vat||0),0);
     const totExemptP= allPur.filter(p=>p.vatExempt||p.vatType==='exempt').reduce((s,p)=>s+(p.amount||0),0);
     rb.innerHTML = `
-<div class="report-section" style="max-width:1000px">
+<div class="report-section" style="max-width:100%;overflow-x:auto">
   <div style="text-align:center;margin-bottom:12px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
@@ -5554,7 +5554,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     }).join('');
 
     rb.innerHTML = `
-<div class="report-section" style="max-width:1000px">
+<div class="report-section" style="max-width:100%;overflow-x:auto">
   <div style="text-align:center;margin-bottom:12px">
     <div style="font-size:15px;font-weight:700">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
     <div style="font-size:11px;color:var(--text-secondary)">TIN: ${cp.tin||'___-___-___-___'} &nbsp;|&nbsp; ${cp.address||''}</div>
