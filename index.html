@@ -4718,6 +4718,21 @@ function deleteAccount(id) {
   save(); render();
 }
 
+function updateSubTypes(subtypeId, typeId) {
+  // Suggest sub-types based on account type selected
+  const type = document.getElementById(typeId)?.value;
+  const subEl = document.getElementById(subtypeId);
+  if(!subEl) return;
+  const suggestions = {
+    'Asset':     'Current Asset, Fixed Asset, Other Asset',
+    'Liability': 'Current Liability, Long-term Liability, Other Liability',
+    'Equity':    'Owner\'s Equity, Retained Earnings',
+    'Revenue':   'Operating Revenue, Other Income',
+    'Expense':   'Operating Expense, Cost of Sales, Administrative, Selling'
+  };
+  subEl.placeholder = suggestions[type] || '';
+}
+
 function showAddAccount() {
   showModal(`
 <div class="modal-head"><h3>Add Account</h3><button class="close-btn" onclick="closeModal()">×</button></div>
