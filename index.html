@@ -590,13 +590,17 @@ function fbSaveMeta() {
       const mergedRoles = { ...remoteRoles, ...localRoles };
       // Users: use whichever list has more entries (never shrink the user base)
       const finalUsers = (remoteUsers.length > localUsers.length) ? remoteUsers : localUsers;
+      const localEmailTplPayslip = JSON.parse(localStorage.getItem('anmolpharma_email_tpl_payslip') || '{}');
+      const localEmailTplSOA     = JSON.parse(localStorage.getItem('anmolpharma_email_tpl_soa') || '{}');
       const meta = {
-        users:        finalUsers,
-        customRoles:  mergedRoles,
-        company:      localCompany,
-        branches:     localBranches,
-        updatedAt:    Date.now(),
-        deviceId:     FB_DEVICE_ID,
+        users:           finalUsers,
+        customRoles:     mergedRoles,
+        company:         localCompany,
+        branches:        localBranches,
+        emailTplPayslip: localEmailTplPayslip,
+        emailTplSOA:     localEmailTplSOA,
+        updatedAt:       Date.now(),
+        deviceId:        FB_DEVICE_ID,
       };
       await db.doc(FB_META_DOC).set(meta);
       // Update local with merged/final values
@@ -627,6 +631,11 @@ async function fbLoadMeta() {
     }
     if(meta.company && Object.keys(meta.company).length > 0)
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
+    // Email templates — always use Firebase version (source of truth)
+    if(meta.emailTplPayslip && Object.keys(meta.emailTplPayslip).length > 0)
+      try { localStorage.setItem('anmolpharma_email_tpl_payslip', JSON.stringify(meta.emailTplPayslip)); } catch(e) {}
+    if(meta.emailTplSOA && Object.keys(meta.emailTplSOA).length > 0)
+      try { localStorage.setItem('anmolpharma_email_tpl_soa', JSON.stringify(meta.emailTplSOA)); } catch(e) {}
   } catch(e) { console.error('fbLoadMeta:', e); }
 }
 
@@ -651,6 +660,11 @@ function fbListenMeta() {
       try { localStorage.setItem('anmolpharma_company', JSON.stringify(meta.company)); } catch(e) {}
     if(meta.branches && meta.branches.length > 0)
       try { localStorage.setItem('anmolpharma_branches', JSON.stringify(meta.branches)); } catch(e) {}
+    // Sync email templates from other devices
+    if(meta.emailTplPayslip && Object.keys(meta.emailTplPayslip).length > 0)
+      try { localStorage.setItem('anmolpharma_email_tpl_payslip', JSON.stringify(meta.emailTplPayslip)); } catch(e) {}
+    if(meta.emailTplSOA && Object.keys(meta.emailTplSOA).length > 0)
+      try { localStorage.setItem('anmolpharma_email_tpl_soa', JSON.stringify(meta.emailTplSOA)); } catch(e) {}
     if(typeof render === 'function') {
       // Re-apply nav visibility in case permissions changed for current user
       document.querySelectorAll('.nav-item[data-page]').forEach(el => {
@@ -12717,13 +12731,15 @@ function saveEmailTemplate(type) {
     closing:  document.getElementById('tpl-closing').value,
   };
   localStorage.setItem(`anmolpharma_email_tpl_${type}`, JSON.stringify(tpl));
+  fbSaveMeta(); // sync to Firebase so all devices get the updated template
   closeModal();
-  alert(`✅ ${type==='payslip'?'Payslip':'SOA'} email template saved!`);
+  alert(`✅ ${type==='payslip'?'Payslip':'SOA'} email template saved and synced to all devices!`);
 }
 
 function resetEmailTemplate(type) {
-  if(!confirm('Reset to default template?')) return;
+  if(!confirm('Reset to default template? This will reset for all devices.')) return;
   localStorage.removeItem(`anmolpharma_email_tpl_${type}`);
+  fbSaveMeta();
   closeModal();
   showEmailTemplateEditor(type);
 }
