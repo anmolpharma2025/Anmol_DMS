@@ -4952,57 +4952,62 @@ function showReport(type) {
   const payrollTotal = payInPeriod.reduce((s,p)=>s+(p.netPay||0),0);
   const netIncome = grossProfit - totalExp - payrollTotal;
 
-  // ── CASH FLOW — from actual journal entries + collections ─────────────────────
-  // CASH IN: Collections received in period
-  const cashIn       = colInPeriod.reduce((s,r)=>s+(r.netCash||r.amount||0),0);
+  // ── CASH FLOW — from journal entries only ─────────────────────────────────────
+  const cashKeywords = ['cash','bank','petty','drawing'];
+  const allJournal   = (state.journal||[]).filter(j=>!j.cancelled&&inPeriod(j.date));
+  const genJournal   = allJournal.filter(j=>j.type==='general');
+  const disbJournal  = allJournal.filter(j=>j.type==='disbursement');
+
+  // CASH IN: General Journal entries where cash/bank account is DEBITED
+  // (collections auto-create GJ: DR Cash | CR AR — captured here)
+  const cashInGJ = genJournal.filter(j=>{
+    if(!j.debit) return false;
+    const acc = state.accounts.find(a=>String(a.id)===String(j.debit));
+    return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
+  });
+  const cashInBySource = {};
+  cashInGJ.forEach(j=>{
+    const acc = state.accounts.find(a=>String(a.id)===String(j.debit));
+    const key = acc?.name||'Cash/Bank';
+    cashInBySource[key] = (cashInBySource[key]||0) + (j.amount||0);
+  });
+  const totalCashIn = cashInGJ.reduce((s,j)=>s+(j.amount||0),0);
+
+  // Also sum collections directly (for cross-check)
+  const cashInCollections = colInPeriod.reduce((s,r)=>s+(r.netCash||r.amount||0),0);
   const cashInByMode = {};
   colInPeriod.forEach(r=>{ cashInByMode[r.mode||'Other']=(cashInByMode[r.mode||'Other']||0)+(r.netCash||r.amount||0); });
 
-  // CASH OUT: Disbursement journal entries (credit = cash/bank accounts)
-  const cashKeywords = ['cash','bank','petty','drawing'];
-  const disbJournal  = (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&inPeriod(j.date));
-  // Get unique group IDs and sum the credit (drawn-from) line per group
-  const disbGroups   = {};
+  // CASH OUT: Disbursement Journal (credit to cash/bank) — deduplicated by group
+  const disbGroups = {};
   disbJournal.forEach(j=>{
-    if(j.credit) {
-      const acc = state.accounts.find(a=>String(a.id)===String(j.credit));
-      if(acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k))) {
-        if(!disbGroups[j.group||j.id]) disbGroups[j.group||j.id] = 0;
-        disbGroups[j.group||j.id] += (j.amount||0);
-      }
+    if(!j.credit) return;
+    const acc = state.accounts.find(a=>String(a.id)===String(j.credit));
+    if(acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k))) {
+      const g = j.group||j.id;
+      if(!disbGroups[g]) disbGroups[g] = { amount:0, payee: j.payee||'Various' };
+      disbGroups[g].amount += (j.amount||0);
     }
   });
-  const cashOutDisb = Object.values(disbGroups).reduce((s,v)=>s+v, 0);
-
-  // Break down disbursements by payee for display
+  const cashOutDisb = Object.values(disbGroups).reduce((s,v)=>s+v.amount,0);
   const disbByPayee = {};
-  disbJournal.filter(j=>j.credit&&state.accounts.find(a=>String(a.id)===String(j.credit)&&cashKeywords.some(k=>a.name.toLowerCase().includes(k))))
-    .forEach(j=>{
-      const payee = j.payee || 'Various';
-      disbByPayee[payee] = (disbByPayee[payee]||0) + (j.amount||0);
-    });
+  Object.values(disbGroups).forEach(v=>{ disbByPayee[v.payee]=(disbByPayee[v.payee]||0)+v.amount; });
 
-  // General journal debits to cash = cash out (e.g. adjustments)
-  const genJournal   = (state.journal||[]).filter(j=>j.type==='general'&&!j.cancelled&&inPeriod(j.date));
-  const cashOutGen   = genJournal.filter(j=>{
+  // CASH OUT: General Journal credits to cash/bank
+  const cashOutGJ = genJournal.filter(j=>{
     if(!j.credit) return false;
     const acc = state.accounts.find(a=>String(a.id)===String(j.credit));
     return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
   }).reduce((s,j)=>s+(j.amount||0),0);
 
-  // General journal credits to cash = cash in (e.g. adjustments/receipts)
-  const cashInGen    = genJournal.filter(j=>{
-    if(!j.debit) return false;
-    const acc = state.accounts.find(a=>String(a.id)===String(j.debit));
-    return acc && cashKeywords.some(k=>acc.name.toLowerCase().includes(k));
-  }).reduce((s,j)=>s+(j.amount||0),0);
-
   // Payroll
-  const cashOutPay   = payInPeriod.reduce((s,p)=>s+(p.grossPay||0),0);
+  const cashOutPay = payInPeriod.reduce((s,p)=>s+(p.grossPay||0),0);
 
-  const totalCashIn  = cashIn + cashInGen;
-  const totalCashOut = cashOutDisb + cashOutGen + cashOutPay;
+  const totalCashOut = cashOutDisb + cashOutGJ + cashOutPay;
   const netCashFlow  = totalCashIn - totalCashOut;
+  // For legacy cashIn/cashOut used in balance sheet
+  const cashIn = totalCashIn;
+  const cashOut = totalCashOut;
 
   // RECEIVABLES (snapshot — not period filtered)
   const totalAR    = state.invoices.filter(i=>getInvoiceStatus(i)!=='paid').reduce((s,i)=>s+(i.amount||0),0);
@@ -5141,20 +5146,29 @@ function showReport(type) {
     rb.innerHTML = `<div class="report-section" style="max-width:560px">
       <div class="report-section-title">Cash Flow Statement — ${periodLabel}</div>
       <table class="report-table">
-        ${sectionHeader('Operating Activities — Cash Inflows')}
-        ${Object.entries(cashInByMode).map(([mode,amt])=>row('Collections — '+mode, amt, 'pos', true)).join('')}
-        ${Object.keys(cashInByMode).length===0 ? row('Collections', 0, 'pos', true) : ''}
-        ${cashInGen>0?row('Other cash receipts (GJ)', cashInGen, 'pos', true):''}
-        ${totalRow('Total Cash Received', totalCashIn, 'pos')}
+        ${sectionHeader('Cash Inflows (General Journal — DR Cash/Bank)')}
+        ${Object.entries(cashInBySource).map(([acct,amt])=>row(acct, amt, 'pos', true)).join('')}
+        ${Object.keys(cashInBySource).length===0?row('No cash debit entries in GJ for period','—',''):''}
+        ${totalRow('Total Cash Received (GJ)', totalCashIn, 'pos')}
 
-        ${sectionHeader('Operating Activities — Cash Outflows')}
-        ${cashOutDisb>0?row('Disbursements (DV)', cashOutDisb, 'neg', true):''}
-        ${cashOutGen>0?row('Other cash payments (GJ)', cashOutGen, 'neg', true):''}
+        ${cashInCollections>0?`
+        ${sectionHeader('Collections Cross-check')}
+        ${Object.entries(cashInByMode).map(([mode,amt])=>row('Collections — '+mode, amt, 'pos', true)).join('')}
+        ${totalRow('Total Collections', cashInCollections, 'pos')}
+        <tr><td colspan="2" style="padding:6px 12px;font-size:11px;color:${Math.abs(totalCashIn-cashInCollections)<1?'var(--green)':'var(--amber)'}">
+          ${Math.abs(totalCashIn-cashInCollections)<1
+            ? '✅ GJ cash debits match collections total'
+            : `⚠ Difference: ${fmt(Math.abs(totalCashIn-cashInCollections))} — ensure collections have auto-generated GJ entries`}
+        </td></tr>`:''}
+
+        ${sectionHeader('Cash Outflows')}
+        ${cashOutDisb>0?row('Disbursements (Disbursement Journal)', cashOutDisb, 'neg', true):''}
+        ${cashOutGJ>0?row('Other payments (General Journal)', cashOutGJ, 'neg', true):''}
         ${cashOutPay>0?row('Payroll released', cashOutPay, 'neg', true):''}
         ${totalRow('Total Cash Paid Out', totalCashOut, 'neg')}
 
         <tr style="border-top:2px solid var(--border-mid)">
-          <td style="padding:10px 0;font-weight:700;font-size:14px">Net Cash from Operations</td>
+          <td style="padding:10px 0;font-weight:700;font-size:14px">Net Cash Position</td>
           <td style="text-align:right;font-weight:700;font-size:14px" class="${netCashFlow>=0?'pos':'neg'}">${fmtS(netCashFlow)}</td>
         </tr>
 
