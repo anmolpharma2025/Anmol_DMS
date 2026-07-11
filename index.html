@@ -6424,6 +6424,8 @@ function renderInventory(c, ta) {
     <button class="btn" onclick="showTransferInventory()"><i class="ti ti-arrows-transfer-up"></i>Transfer</button>
     <button class="btn" onclick="showAddMovement()"><i class="ti ti-arrow-right-left"></i>Stock Movement</button>
     <button class="btn" onclick="showManageBranches()"><i class="ti ti-building-store"></i>Manage Branches</button>
+    <button class="btn" onclick="exportInventoryCSV()"><i class="ti ti-download"></i>Export</button>
+    <button class="btn" onclick="showImportInventory()"><i class="ti ti-upload"></i>Import</button>
     <button class="btn primary" onclick="showAddItem()"><i class="ti ti-plus"></i>Add Item</button>`;
   const totalValue = state.inventory.reduce((s,it)=>s+(it.qty*it.costPrice),0);
   const lowStock = state.inventory.filter(it=>it.qty<=it.reorderLevel);
@@ -12368,7 +12370,225 @@ function deleteDeposit(id) {
   save(); render();
 }
 
-// ── EMPLOYEES ─────────────────────────────────────────────────────────────────
+// ── INVENTORY EXPORT ──────────────────────────────────────────────────────────
+function exportInventoryCSV() {
+  const headers = ['item_code','name','category','brand','unit','qty','cost_price','sale_price','reorder_level','batch_number','lot_number','expiry_date','location','description'];
+  const rows = (state.inventory||[]).map(it=>[
+    it.id||'', it.name||'', it.category||'', it.brand||'', it.unit||'',
+    it.qty||0, it.costPrice||0, it.salePrice||0, it.reorderLevel||0,
+    it.batchNumber||'', it.lotNumber||'', it.expiryDate||'', it.location||'', it.description||''
+  ].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','));
+
+  const csv = [headers.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `Inventory_Export_${today()}.csv`;
+  a.click();
+}
+
+// ── INVENTORY IMPORT ──────────────────────────────────────────────────────────
+function showImportInventory() {
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-upload" style="margin-right:6px;color:var(--accent)"></i>Import Inventory</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+
+<div style="padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:16px;font-size:12px">
+  <div style="font-weight:600;margin-bottom:6px"><i class="ti ti-info-circle" style="margin-right:4px"></i>CSV Format Required</div>
+  Required columns: <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">item_code</code>, <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">name</code><br>
+  Optional: <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">category</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">brand</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">unit</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">qty</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">cost_price</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">sale_price</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">reorder_level</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">batch_number</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">lot_number</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">expiry_date</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">location</code> <code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px">description</code>
+</div>
+
+<div style="display:flex;gap:8px;margin-bottom:16px">
+  <button class="btn" onclick="downloadInventoryTemplate()"><i class="ti ti-file-download"></i>Download Template CSV</button>
+  <button class="btn" onclick="exportInventoryCSV();closeModal()"><i class="ti ti-download"></i>Export Current Inventory</button>
+</div>
+
+<div class="form-group">
+  <label>Select CSV File</label>
+  <input type="file" id="inv-import-file" accept=".csv,.txt"
+    style="width:100%;padding:10px;border:2px dashed var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;cursor:pointer"
+    onchange="previewImportInventory(this)">
+</div>
+
+<div id="inv-import-preview" style="margin-bottom:12px"></div>
+
+<div class="form-group">
+  <label>Import Mode</label>
+  <select id="inv-import-mode" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <option value="merge">Merge — update existing items, add new ones (keeps data not in CSV)</option>
+    <option value="add">Add only — skip items that already exist (safe)</option>
+    <option value="replace">Replace all — delete existing inventory and replace with CSV</option>
+  </select>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" id="inv-import-btn" onclick="importInventoryCSV()" disabled><i class="ti ti-upload"></i>Import</button>
+</div>`);
+}
+
+function downloadInventoryTemplate() {
+  const headers = 'item_code,name,category,brand,unit,qty,cost_price,sale_price,reorder_level,batch_number,lot_number,expiry_date,location,description';
+  const sample1 = '"ITM-001","Paracetamol 500mg","Medicine","Unilab","box","100","12.50","25.00","20","B-2026-001","LOT-001","2027-12-31","Shelf A","500mg tablets"';
+  const sample2 = '"ITM-002","Amoxicillin 250mg","Medicine","GSK","box","50","45.00","90.00","10","B-2026-002","LOT-002","2027-06-30","Shelf B","250mg capsules"';
+  const csv = [headers, sample1, sample2].join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Inventory_Import_Template.csv';
+  a.click();
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n').filter(l=>l.trim());
+  if(lines.length < 2) return { headers:[], rows:[] };
+  const parseRow = row => {
+    const result = [];
+    let cur = '', inQ = false;
+    for(let i=0;i<row.length;i++) {
+      const ch = row[i];
+      if(ch==='"') { if(inQ && row[i+1]==='"') { cur+='"'; i++; } else inQ=!inQ; }
+      else if(ch===',' && !inQ) { result.push(cur.trim()); cur=''; }
+      else cur+=ch;
+    }
+    result.push(cur.trim());
+    return result;
+  };
+  const headers = parseRow(lines[0]).map(h=>h.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,''));
+  const rows = lines.slice(1).map(l=>parseRow(l));
+  return { headers, rows };
+}
+
+window._importedInventory = [];
+
+function previewImportInventory(input) {
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const { headers, rows } = parseCSV(e.target.result);
+    const preview = document.getElementById('inv-import-preview');
+    const btn = document.getElementById('inv-import-btn');
+
+    if(!headers.includes('name') && !headers.includes('item_name')) {
+      preview.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px;background:rgba(239,68,68,0.08);border-radius:var(--radius-md)">❌ Missing required column: <strong>name</strong></div>`;
+      btn.disabled = true;
+      return;
+    }
+
+    // Parse rows into items
+    const getCol = (row, ...names) => {
+      for(const n of names) {
+        const idx = headers.indexOf(n);
+        if(idx !== -1 && row[idx] !== undefined) return row[idx].replace(/^"|"$/g,'').trim();
+      }
+      return '';
+    };
+
+    window._importedInventory = rows.filter(r=>r.some(c=>c.trim())).map((row, i) => ({
+      id:           getCol(row,'item_code','id','sku') || `IMP-${String(i+1).padStart(3,'0')}`,
+      name:         getCol(row,'name','item_name','description') || '(no name)',
+      category:     getCol(row,'category'),
+      brand:        getCol(row,'brand','manufacturer'),
+      unit:         getCol(row,'unit','uom') || 'pc',
+      qty:          parseFloat(getCol(row,'qty','quantity','opening_qty'))||0,
+      costPrice:    parseFloat(getCol(row,'cost_price','cost','unit_cost'))||0,
+      salePrice:    parseFloat(getCol(row,'sale_price','price','selling_price'))||0,
+      reorderLevel: parseFloat(getCol(row,'reorder_level','reorder','minimum_stock'))||5,
+      batchNumber:  getCol(row,'batch_number','batch'),
+      lotNumber:    getCol(row,'lot_number','lot'),
+      expiryDate:   getCol(row,'expiry_date','expiry','expiration_date'),
+      location:     getCol(row,'location','storage_location'),
+      description:  getCol(row,'description','remarks','notes'),
+    }));
+
+    const existing = window._importedInventory.filter(i=>(state.inventory||[]).find(x=>x.id===i.id));
+    const newItems = window._importedInventory.filter(i=>!(state.inventory||[]).find(x=>x.id===i.id));
+
+    preview.innerHTML = `
+<div style="background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-md);padding:12px;font-size:12px">
+  <div style="display:flex;gap:16px;margin-bottom:10px">
+    <span style="color:var(--green)"><i class="ti ti-file-check"></i> ${window._importedInventory.length} rows found</span>
+    <span style="color:var(--accent)"><i class="ti ti-plus"></i> ${newItems.length} new items</span>
+    ${existing.length>0?`<span style="color:var(--amber)"><i class="ti ti-refresh"></i> ${existing.length} existing (will update)</span>`:''}
+  </div>
+  <div style="max-height:200px;overflow-y:auto">
+  <table style="width:100%;font-size:11px;border-collapse:collapse">
+    <thead><tr style="background:var(--bg-secondary)">
+      <th style="padding:4px 6px;text-align:left">Code</th>
+      <th style="padding:4px 6px;text-align:left">Name</th>
+      <th style="padding:4px 6px;text-align:left">Category</th>
+      <th style="padding:4px 6px;text-align:right">Qty</th>
+      <th style="padding:4px 6px;text-align:right">Cost</th>
+      <th style="padding:4px 6px;text-align:right">Sale</th>
+      <th style="padding:4px 6px;text-align:center">Status</th>
+    </tr></thead>
+    <tbody>
+    ${window._importedInventory.slice(0,20).map(it=>{
+      const isExisting = (state.inventory||[]).find(x=>x.id===it.id);
+      return `<tr style="border-bottom:0.5px solid var(--border-light)">
+        <td style="padding:3px 6px;font-family:monospace">${it.id}</td>
+        <td style="padding:3px 6px;font-weight:500">${it.name}</td>
+        <td style="padding:3px 6px;color:var(--text-secondary)">${it.category||'—'}</td>
+        <td style="padding:3px 6px;text-align:right">${it.qty}</td>
+        <td style="padding:3px 6px;text-align:right">${it.costPrice>0?fmt(it.costPrice):'—'}</td>
+        <td style="padding:3px 6px;text-align:right">${it.salePrice>0?fmt(it.salePrice):'—'}</td>
+        <td style="padding:3px 6px;text-align:center">
+          <span style="font-size:10px;background:${isExisting?'rgba(245,158,11,0.15)':'rgba(16,185,129,0.15)'};color:${isExisting?'var(--amber)':'var(--green)'};padding:1px 6px;border-radius:99px">
+            ${isExisting?'Update':'New'}
+          </span>
+        </td>
+      </tr>`;
+    }).join('')}
+    ${window._importedInventory.length>20?`<tr><td colspan="7" style="padding:6px;text-align:center;color:var(--text-tertiary)">…and ${window._importedInventory.length-20} more</td></tr>`:''}
+    </tbody>
+  </table>
+  </div>
+</div>`;
+    btn.disabled = false;
+  };
+  reader.readAsText(file);
+}
+
+function importInventoryCSV() {
+  const items = window._importedInventory;
+  if(!items || !items.length) { alert('No data to import.'); return; }
+  const mode = document.getElementById('inv-import-mode')?.value || 'merge';
+
+  let added=0, updated=0, skipped=0;
+
+  if(mode === 'replace') {
+    if(!confirm(`⚠️ REPLACE MODE\n\nThis will DELETE all ${state.inventory.length} existing inventory items and replace with ${items.length} items from your CSV.\n\nThis cannot be undone. Continue?`)) return;
+    state.inventory = items;
+    added = items.length;
+  } else {
+    items.forEach(item => {
+      const existing = (state.inventory||[]).find(x=>x.id===item.id);
+      if(existing) {
+        if(mode === 'add') { skipped++; return; }
+        // Merge — update fields from CSV, keep any extra fields not in CSV
+        Object.assign(existing, item);
+        updated++;
+      } else {
+        if(!state.inventory) state.inventory = [];
+        state.inventory.push(item);
+        added++;
+      }
+    });
+  }
+
+  save();
+  closeModal();
+  render();
+
+  setTimeout(()=>alert(
+    `✅ Import Complete!\n\n` +
+    `Added: ${added} new item${added!==1?'s':''}\n` +
+    (updated>0?`Updated: ${updated} existing item${updated!==1?'s':''}\n`:'') +
+    (skipped>0?`Skipped: ${skipped} (already exist)\n`:'') +
+    `\nTotal inventory: ${(state.inventory||[]).length} items`
+  ), 200);
+}
 function renderEmployees(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddEmployee()"><i class="ti ti-plus"></i>Add Employee</button>`;
   const emps = state.employees || [];
