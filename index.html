@@ -9634,7 +9634,14 @@ ${canApproveItems?`<div style="padding:8px 12px;background:var(--accent-bg);bord
     ${canApproveItems&&!allApproved?`<button class="btn primary" onclick="approveAllSOItems('${so.id}')"><i class="ti ti-check-all"></i>Approve All Available</button>`:''}
     ${allApproved?`<span style="color:var(--green);font-weight:600"><i class="ti ti-circle-check"></i> All items approved</span>`:''}
   </div>
-  <div style="font-size:15px;font-weight:700">Total: ${fmt(soTotal)}</div>
+  <div style="text-align:right">
+    ${(()=>{
+      const vatBase = soTotal / 1.12;
+      const vat = soTotal - vatBase;
+      return `<div style="font-size:11px;color:var(--text-secondary)">VAT Base: <strong>${fmt(vatBase)}</strong> &nbsp;+&nbsp; Output VAT: <strong>${fmt(vat)}</strong></div>
+      <div style="font-size:20px;font-weight:700;color:var(--accent);margin-top:2px">Total: ${fmt(soTotal)}</div>`;
+    })()}
+  </div>
 </div>
 
 ${(so.drIssued||[]).length>0?`
@@ -10804,10 +10811,34 @@ function viewPO(id) {
 </div>
 ${canReceive && (po.status==='approved'||po.status==='partial')?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Mark each line as <strong>Delivered</strong> when received. Delivered items are added to inventory immediately. You can also enter a partial quantity.</div>`:''}
 <div id="po-view-lines">${renderPOViewLines(po, canReceive)}</div>
-<div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--border-light);padding-top:12px;margin-top:4px">
-  <div style="font-size:15px;font-weight:700">Total: ${fmt(poTotal)}</div>
-  ${po.status==='received'?'<span style="color:var(--green);font-weight:600"><i class="ti ti-check-all"></i> All items received</span>':''}
-  ${po.status==='partial'?'<span style="color:var(--amber);font-weight:600"><i class="ti ti-clock"></i> Partial delivery in progress</span>':''}
+<div style="border-top:1px solid var(--border-light);padding-top:12px;margin-top:4px">
+  ${(()=>{
+    const vatableLines = po.lines.filter(l=>!l.vatExempt);
+    const exemptLines  = po.lines.filter(l=>l.vatExempt);
+    const vatableAmt   = vatableLines.reduce((s,l)=>s+(l.lineTotal||0),0);
+    const exemptAmt    = exemptLines.reduce((s,l)=>s+(l.lineTotal||0),0);
+    const vatBase      = vatableAmt / 1.12;
+    const inputVat     = vatableAmt - vatBase;
+    return `
+    <div style="display:flex;justify-content:flex-end">
+      <table style="font-size:12px;border-collapse:collapse;min-width:280px">
+        ${vatableAmt>0?`
+        <tr><td style="padding:3px 12px;color:var(--text-secondary)">Taxable Amount (ex VAT)</td><td style="padding:3px 0;text-align:right;font-weight:500">${fmt(vatBase)}</td></tr>
+        <tr><td style="padding:3px 12px;color:var(--text-secondary)">Input VAT (12%)</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--accent)">${fmt(inputVat)}</td></tr>`:''}
+        ${exemptAmt>0?`<tr><td style="padding:3px 12px;color:var(--text-secondary)">VAT Exempt Amount</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--amber)">${fmt(exemptAmt)}</td></tr>`:''}
+        <tr style="border-top:1.5px solid var(--border-mid)">
+          <td style="padding:8px 12px;font-weight:700;font-size:15px">TOTAL AMOUNT</td>
+          <td style="padding:8px 0;text-align:right;font-weight:700;font-size:18px;color:var(--accent)">${fmt(poTotal)}</td>
+        </tr>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <div>
+        ${po.status==='received'?'<span style="color:var(--green);font-weight:600"><i class="ti ti-check-all"></i> All items received</span>':''}
+        ${po.status==='partial'?'<span style="color:var(--amber);font-weight:600"><i class="ti ti-clock"></i> Partial delivery in progress</span>':''}
+      </div>
+    </div>`;
+  })()}
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal();render()">Close</button>
