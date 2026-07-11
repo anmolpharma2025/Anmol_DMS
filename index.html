@@ -11468,6 +11468,7 @@ function renderChatPanel() {
     </div>
     <div style="display:flex;gap:6px;align-items:center">
       <span id="chat-status" style="font-size:10px;color:rgba(255,255,255,0.7)">Live</span>
+      ${isAdmin()?`<button onclick="clearChatChannel()" title="Clear all messages" style="background:none;border:1px solid rgba(255,255,255,0.4);border-radius:4px;cursor:pointer;color:rgba(255,255,255,0.8);font-size:10px;padding:2px 6px;font-family:var(--font);display:flex;align-items:center;gap:3px" onmouseover="this.style.background='rgba(255,0,0,0.3)'" onmouseout="this.style.background='none'"><i class="ti ti-trash" style="font-size:11px"></i> Clear</button>`:''}
       <button onclick="toggleChatPanel()" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.8);font-size:18px;padding:2px;line-height:1">×</button>
     </div>
   </div>
@@ -11485,7 +11486,11 @@ function renderChatPanel() {
     </div>
   </div>
   <!-- Input -->
-  <div style="padding:8px;background:var(--bg-card);border-top:1px solid var(--border-light);display:flex;gap:6px;flex-shrink:0">
+  <div style="padding:8px;background:var(--bg-card);border-top:1px solid var(--border-light);display:flex;gap:6px;flex-shrink:0;align-items:center">
+    <label title="Attach file" style="cursor:pointer;padding:6px;color:var(--text-tertiary);border:1px solid var(--border-mid);border-radius:var(--radius-md);display:flex;align-items:center;flex-shrink:0" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-tertiary)'">
+      <i class="ti ti-paperclip" style="font-size:14px"></i>
+      <input type="file" id="chat-file-input" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onchange="sendChatFile(this)">
+    </label>
     <input type="text" id="chat-input" placeholder="${_chatMode==='dm'?'Message '+_chatRecipient+'…':'Message #general…'}"
       style="flex:1;padding:7px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none"
       onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg()}" maxlength="1000">
