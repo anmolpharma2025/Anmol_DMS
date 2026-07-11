@@ -12844,16 +12844,31 @@ function applyTemplate(tpl, vars) {
 const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
 
 async function sendEmail({ to, subject, html, text }) {
+  // Validate email address
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const toAddr = Array.isArray(to) ? to[0] : to;
+  if(!toAddr || !emailRegex.test(toAddr.trim())) {
+    const msg = `Invalid email address: "${toAddr}"\n\nPlease check the email in the customer/employee profile.`;
+    alert('⚠ ' + msg);
+    return { success: false, error: msg };
+  }
+
   try {
     const res = await fetch(WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Action': 'email' },
-      body: JSON.stringify({ to, subject, html, text })
+      body: JSON.stringify({ to: toAddr.trim(), subject, html, text })
     });
     const data = await res.json();
-    if(!res.ok) throw new Error(data?.message || data?.error || `Error ${res.status}`);
+    if(!res.ok) {
+      const errMsg = data?.message || data?.error || data?.name || `Error ${res.status}`;
+      console.error('Resend error:', data);
+      alert(`❌ Email failed to send.\n\nError: ${errMsg}\n\nTo: ${toAddr}`);
+      return { success: false, error: errMsg };
+    }
     return { success: true, id: data.id };
   } catch(err) {
+    alert(`❌ Email failed.\n\nNetwork error: ${err.message}`);
     return { success: false, error: err.message };
   }
 }
@@ -13120,9 +13135,13 @@ async function sendAllPayslipEmails() {
 
 // ── EMAIL SOA TO CUSTOMERS ────────────────────────────────────────────────────
 async function emailSOA(custId) {
+  // Re-read from state to get the latest saved email
   const cu = state.customers.find(c=>c.id===custId);
-  if(!cu) return;
-  if(!cu.email) { alert(`⚠ No email address for ${cu.name}.\nAdd it in the Customers tab.`); return; }
+  if(!cu) { alert('Customer not found.'); return; }
+  if(!cu.email || !cu.email.trim()) {
+    alert(`⚠ No email address for ${cu.name}.\n\nGo to Customers → Edit to add their email address.`);
+    return;
+  }
   const cp = getCompanyProfile();
   const custInvoices = (state.invoices||[]).filter(i=>i.customer===cu.name&&getInvoiceStatus(i)!=='paid');
   const netBalance = custInvoices.reduce((s,i)=>s+getInvoiceBalance(i.id),0);
@@ -13131,7 +13150,7 @@ async function emailSOA(custId) {
   const vars = { customer:cu.name, company:cp.name||'', date:today_str, amount:fmt(netBalance) };
   const t    = applyTemplate(tpl, vars);
   const result = await sendEmail({
-    to: cu.email,
+    to: cu.email.trim(),
     subject: t.subject,
     html: buildSOAHTML(cu, cp, custInvoices, netBalance, t),
     text: `${t.greeting}\n\n${t.intro}\n\nOutstanding Balance: ${fmt(netBalance)}\n\n${t.footer}\n\n${t.closing}`
