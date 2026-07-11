@@ -9965,7 +9965,20 @@ function showAddSO() {
   window._soLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
-<div class="modal-head"><h3>New Sales Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="modal-head">
+  <h3>New Sales Order</h3>
+  <div style="display:flex;gap:8px;align-items:center">
+    <label id="scan-po-btn" title="Upload a PO photo/scan to auto-fill this form" style="cursor:pointer;display:flex;align-items:center;gap:5px;padding:5px 10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:var(--radius-md);font-size:12px;font-weight:500">
+      <i class="ti ti-scan" style="font-size:14px"></i> Scan PO
+      <input type="file" id="po-scan-input" accept="image/*" style="display:none" onchange="scanPOImage(this)">
+    </label>
+    <button class="close-btn" onclick="closeModal()">×</button>
+  </div>
+</div>
+<div id="po-scan-status" style="display:none;padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px">
+  <i class="ti ti-loader" style="animation:spin 1s linear infinite;margin-right:6px"></i>
+  Reading PO with AI… please wait…
+</div>
 <div class="form-row">
   <div class="form-group"><label>Customer</label>
     <select id="so-cust" onchange="handleSOCustSel(this);showSOCustBranch(this)">${custOpts}</select>
@@ -9994,6 +10007,162 @@ function showAddSO() {
   <button class="btn primary" onclick="saveSO()">Create Sales Order</button>
 </div>`);
   renderOrderLines('so');
+}
+
+async function scanPOImage(input) {
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 5 * 1024 * 1024) { alert('Image too large. Please use an image under 5MB.'); return; }
+
+  // Show loading status
+  const status = document.getElementById('po-scan-status');
+  const scanBtn = document.getElementById('scan-po-btn');
+  if(status) { status.style.display = ''; }
+  if(scanBtn) scanBtn.style.opacity = '0.5';
+
+  // Convert to base64
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  // Get current inventory and customer names for context
+  const itemNames = (state.inventory||[]).map(i=>i.name).join(', ');
+  const custNames = (state.customers||[]).map(c=>c.name).join(', ');
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: file.type, data: base64 }
+            },
+            {
+              type: 'text',
+              text: `You are reading a Purchase Order document image. Extract all information and return ONLY a JSON object with no markdown, no explanation, just raw JSON.
+
+Known customers in the system: ${custNames}
+Known inventory items: ${itemNames}
+
+Return this exact structure:
+{
+  "customer": "customer name (match to known customers if possible)",
+  "poNumber": "PO number if visible",
+  "date": "order date in YYYY-MM-DD format if visible, else null",
+  "deliveryDate": "requested delivery date in YYYY-MM-DD format if visible, else null",
+  "notes": "any special instructions or notes",
+  "lines": [
+    {
+      "desc": "item description (match to known items if possible)",
+      "qty": numeric quantity,
+      "unitPrice": numeric unit price or 0 if not shown
+    }
+  ]
+}
+
+If a field is not visible or unclear, use null or empty string. For lines, extract every line item you can see.`
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content||[]).map(b=>b.text||'').join('');
+
+    // Parse JSON from response
+    let extracted;
+    try {
+      // Strip any markdown fences if present
+      const clean = text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+      extracted = JSON.parse(clean);
+    } catch(e) {
+      throw new Error('Could not parse AI response. Please try a clearer image.\n\nResponse: ' + text.slice(0,200));
+    }
+
+    // Populate the form
+    if(extracted.customer) {
+      const custSel = document.getElementById('so-cust');
+      if(custSel) {
+        // Try to match customer name (case-insensitive partial match)
+        const match = state.customers.find(c=>
+          c.name.toLowerCase().includes(extracted.customer.toLowerCase()) ||
+          extracted.customer.toLowerCase().includes(c.name.toLowerCase())
+        );
+        if(match) {
+          custSel.value = match.name;
+          showSOCustBranch(custSel);
+        }
+      }
+    }
+    if(extracted.date) {
+      const dateEl = document.getElementById('so-date');
+      if(dateEl) dateEl.value = extracted.date;
+    }
+    if(extracted.deliveryDate) {
+      const delEl = document.getElementById('so-del');
+      if(delEl) delEl.value = extracted.deliveryDate;
+    }
+    if(extracted.notes) {
+      const notesEl = document.getElementById('so-notes');
+      if(notesEl) notesEl.value = [extracted.notes, extracted.poNumber ? 'PO No: '+extracted.poNumber : ''].filter(Boolean).join(' | ');
+    } else if(extracted.poNumber) {
+      const notesEl = document.getElementById('so-notes');
+      if(notesEl) notesEl.value = 'PO No: ' + extracted.poNumber;
+    }
+
+    // Populate line items
+    if(extracted.lines && extracted.lines.length > 0) {
+      window._soLines = extracted.lines.map(l => {
+        // Try to match to inventory item
+        const match = (state.inventory||[]).find(it=>
+          it.name.toLowerCase().includes((l.desc||'').toLowerCase()) ||
+          (l.desc||'').toLowerCase().includes(it.name.toLowerCase())
+        );
+        const qty = parseFloat(l.qty)||1;
+        const price = parseFloat(l.unitPrice)||(match?.salePrice||0);
+        return {
+          itemId: match?.id||'',
+          desc:   match?.name||l.desc||'',
+          qty,
+          unitPrice: price,
+          lineTotal: qty * price
+        };
+      });
+      renderOrderLines('so');
+    }
+
+    // Show success
+    if(status) {
+      status.innerHTML = `<i class="ti ti-check" style="color:var(--green);margin-right:6px"></i>
+        <strong>PO scanned successfully!</strong>
+        ${extracted.customer?` Customer: <strong>${extracted.customer}</strong>`:''} 
+        ${extracted.lines?.length?` · ${extracted.lines.length} line item${extracted.lines.length!==1?'s':''} found`:''}
+        <span style="color:var(--text-tertiary);font-size:11px;margin-left:8px">Please verify and adjust before saving.</span>`;
+      status.style.background = 'var(--green-bg,rgba(16,185,129,0.08))';
+      status.style.borderColor = 'var(--green)';
+    }
+
+  } catch(err) {
+    if(status) {
+      status.innerHTML = `<i class="ti ti-alert-circle" style="color:var(--red);margin-right:6px"></i>
+        <strong>Scan failed:</strong> ${err.message}`;
+      status.style.background = 'rgba(239,68,68,0.08)';
+      status.style.borderColor = 'var(--red)';
+    }
+  }
+
+  if(scanBtn) scanBtn.style.opacity = '1';
+  input.value = ''; // reset file input
 }
 
 function orderLineTableHtml(prefix) {
