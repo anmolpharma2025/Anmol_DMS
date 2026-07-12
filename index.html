@@ -2040,6 +2040,7 @@ function filterTable() {
   return undelivered.map(l=>{const k=l.itemId||l.desc;const rem=(l.qty||0)-(issuedMap[k]||0);return `${l.desc}×${rem}${l.approved?'<span style="color:var(--green);margin-left:2px">✓</span>':''}`;}).join(', ');
 })()}</td>
               <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
+              <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${so.preparedBy||'—'}</td>
               <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
                 ${approvedCount>0&&so.status!=='delivered'?`<span style="font-size:10px;color:var(--green);display:block;margin-top:2px">${approvedCount}/${so.lines.length} approved</span>`:''}
               </td>
@@ -2074,6 +2075,7 @@ function filterTable() {
                 ${po.supplierInvoiceNo?`<div style="font-size:10px;color:var(--green);margin-top:1px"><i class="ti ti-receipt" style="font-size:10px"></i> SI: ${po.supplierInvoiceNo}${po.drNo?' · DR: '+po.drNo:''}</div>`:''}
               </td>
               <td style="text-align:right;font-weight:500">${fmt(poTotal)}</td>
+              <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${po.preparedBy||'—'}</td>
               <td><span class="badge" style="font-size:11px">${paymentTermsLabel(po.paymentTerms||'on_account')}</span></td>
               <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)')+'22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
               <td><div class="action-btns">
@@ -9605,9 +9607,9 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Items</th><th style="text-align:right">Total Value</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Items</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
-  ${displayed.length===0?`<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
+  ${displayed.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
   ${displayed.map(so=>{
     const soTotal=so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     const approvedCount=so.lines.filter(l=>l.approved).length;
@@ -9622,6 +9624,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
   return undelivered.map(l=>{const k=l.itemId||l.desc;const rem=(l.qty||0)-(issuedMap[k]||0);return `${l.desc}×${rem}${l.approved?'<span style="color:var(--green);margin-left:2px">✓</span>':''}`;}).join(', ');
 })()}</td>
       <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
+      <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${so.preparedBy||'—'}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
         ${approvedCount>0&&so.status!=='delivered'?`<span style="font-size:10px;color:var(--green);display:block;margin-top:2px">${approvedCount}/${so.lines.length} items approved</span>`:''}
       </td>
@@ -10507,9 +10510,9 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Payment Terms</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Payment Terms</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
-  ${displayed.length===0?`<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase orders found${window._poFilter?' for "'+window._poFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
+  ${displayed.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase orders found${window._poFilter?' for "'+window._poFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
   ${displayed.map(po=>{
     const poTotal=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     return `<tr>
@@ -10525,6 +10528,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
         </span>
         ${po.dueDate&&po.paymentTerms&&po.paymentTerms!=='cod'&&po.paymentTerms!=='cod_check'?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">Due: ${po.dueDate}</div>`:''}
       </td>
+      <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${po.preparedBy||'—'}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
