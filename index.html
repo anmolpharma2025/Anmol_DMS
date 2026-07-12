@@ -3459,6 +3459,7 @@ function saveJournal() {
     if(!a) return;
     state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy, poRef:poRef||'' });
   });
+  auditLog(window._jeEditGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${window._jeEditGroupId?'Updated':'Posted'} ${isDisbursement?'Disbursement':'General'} Journal ${groupId} — ${desc}`});
   save(); closeModal(); render();
 }
 
@@ -4804,6 +4805,7 @@ function saveExpense() {
   const id='EXP-'+String((state.expenses||[]).length+10).padStart(3,'0');
   if(!state.expenses) state.expenses=[];
   state.expenses.push({ id, date, vendor, category, expType, vatBase, vat, amount, vatType, status:'pending' });
+  auditLog('CREATE','Expense',id,{description:`Expense: ${category||vendor} — ${fmt(amount)}`});
   save(); closeModal(); render();
 }
 
@@ -7400,6 +7402,7 @@ function receiveTransfer(id) {
   t.status='received';
   t.receivedDate=today();
   t.receivedBy=currentUser.name;
+  auditLog('UPDATE','Purchase Order',id,{description:`Received PO ${id} from ${t.supplier||t.fromBranch}`});
   const branches=getBranches();
   const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
   const fromB=branches.find(b=>b.id===t.fromBranch)||{name:t.fromBranch};
@@ -7981,6 +7984,7 @@ function saveMovement2() {
   it.qty += type==='in' ? qty : -qty;
   const id = 'MOV-' + String(state.inventoryMovements.length+1).padStart(3,'0');
   state.inventoryMovements.push({ id, date, item:itemId, type, qty, ref, note });
+  auditLog('UPDATE','Inventory',it.id,{description:`Updated item: ${it.name}`},_beforeItem,{...it});
   save(); closeModal(); render();
 }
 
@@ -8157,7 +8161,9 @@ function saveItem() {
       state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+( myBranch?.name||myBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
     }
   }
-  save(); closeModal(); render();
+  save();
+  auditLog('CREATE','Inventory',id,{description:`Added item: ${name} (qty: ${qty})`});
+  closeModal(); render();
 }
 
 // ── SUPPLIERS ─────────────────────────────────────────────────────────────────
@@ -10006,6 +10012,7 @@ function deliverSO(id) {
   so.deliveredDate = today();
   so.deliveredBy = currentUser?.name||'';
   stampUpdate(so);
+  auditLog('UPDATE','Sales Order',id,{description:`Marked SO ${id} as DELIVERED`});
   save(); render();
 }
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; const _so2=state.salesOrders.find(s=>s.id===id); auditLog('DELETE','Sales Order',id,{description:`Deleted SO ${id} for ${_so2?.customer}`}); state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
@@ -10425,6 +10432,7 @@ function saveSO() {
   const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
   state.salesOrders.push({id, date, deliveryDate, customer, branch, lines, notes, preparedBy, status:'pending'});
+  auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${lines.length} item(s)`});
   save(); closeModal(); render();
 }
 
@@ -10552,6 +10560,7 @@ function savePO() {
   const id = nextRefNum('PO', state.purchaseOrders||[]);
   if(!state.purchaseOrders) state.purchaseOrders=[];
   state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, status:'pending' });
+  auditLog('CREATE','Purchase Order',id,{description:`Created PO ${id} for ${supplier} — ${lines.length} item(s)`});
   save(); closeModal(); render();
 }
 
@@ -10600,7 +10609,7 @@ function receivePO(id) {
 </div>`);
 }
 
-function confirmReceivePO(id) {
+function confirmReceivePO(id) { auditLog('UPDATE','Purchase Order',id,{description:`Received PO ${id}`});
   const supInvNo = document.getElementById('recv-inv-no')?.value.trim();
   const drNo     = document.getElementById('recv-dr-no')?.value.trim();
   const recvDate = document.getElementById('recv-date')?.value || today();
@@ -13143,7 +13152,7 @@ function renderPayroll(c, ta) {
 </table>`;
 }
 
-function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(p); } save(); render(); }
+function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(p); auditLog('UPDATE','Payroll',p.id,{description:`Released payroll ${p.id} — Net: ${fmt(p.netPay||0)}`}); } save(); render(); }
 function deletePayroll(id) { if(!requireAdmin("delete payroll records")) return; if(confirm('Delete payroll record?')) { state.payrolls=(state.payrolls||[]).filter(p=>p.id!==id); save(); render(); } }
 
 // Custom earnings/deductions line state
