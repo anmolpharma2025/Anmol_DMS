@@ -1084,7 +1084,6 @@ function verifyAdminPin(userId) {
   cancelAdminPin(); // restore form
   setSession(u);
   currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
-  setTimeout(()=>auditLog('LOGIN','System',u.id,{description:`${u.name} logged in (${u.role})`}),1000);
   showAppScreen();
 }
 
@@ -1161,15 +1160,23 @@ function showAppScreen() {
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       render();
     }
-    // Now safe to push local meta changes (users/roles) to Firestore
     _fbMetaLoadedOnce = true;
-    // Start listening for real-time updates from other devices
     fbListen();
     fbListenMeta();
+    // Log login AFTER Firebase is confirmed ready
+    if(currentUser) {
+      auditLog('LOGIN', 'System', currentUser.id, {
+        description: `${currentUser.name} logged in (${currentUser.role})`
+      });
+    }
   }).catch(() => {
-    // Even if the load fails (offline, etc.), allow saves after a timeout
-    // so the app doesn't get permanently stuck unable to sync.
     _fbMetaLoadedOnce = true;
+    // Still try to log even if load failed
+    if(currentUser && db) {
+      auditLog('LOGIN', 'System', currentUser.id, {
+        description: `${currentUser.name} logged in (${currentUser.role}) [offline]`
+      });
+    }
   });
   // Absolute fallback: if Firestore load hangs for any reason, unblock saves after 8s
   setTimeout(() => { _fbMetaLoadedOnce = true; }, 8000);
@@ -1927,21 +1934,32 @@ let state = {
 const AUDIT_COLLECTION = 'companies/anmol/audit_logs';
 
 function auditLog(action, module, recordId, details={}, before=null, after=null) {
-  if(!db || !currentUser) return;
+  if(!currentUser) return;
   const entry = {
-    ts:        firebase.firestore.FieldValue.serverTimestamp(),
-    date:      new Date().toISOString(),
-    user:      currentUser.name || currentUser.username || 'Unknown',
-    userId:    currentUser.id,
-    role:      currentUser.role,
-    action,    // 'CREATE' | 'UPDATE' | 'DELETE' | 'APPROVE' | 'LOGIN' | 'LOGOUT' | 'PRINT' | 'EMAIL'
-    module,    // 'Sales Order' | 'Invoice' | 'Journal' | etc.
-    recordId:  String(recordId||''),
-    details,   // { description: '...' }
-    before:    before ? JSON.stringify(before).slice(0,2000) : null,
-    after:     after  ? JSON.stringify(after).slice(0,2000)  : null,
+    ts:       firebase.firestore.FieldValue.serverTimestamp(),
+    date:     new Date().toISOString(),
+    user:     currentUser.name || currentUser.username || 'Unknown',
+    userId:   currentUser.id,
+    role:     currentUser.role,
+    action, module,
+    recordId: String(recordId||''),
+    details,
+    before:   before ? JSON.stringify(before).slice(0,2000) : null,
+    after:    after  ? JSON.stringify(after).slice(0,2000)  : null,
   };
-  db.collection(AUDIT_COLLECTION).add(entry).catch(e=>console.warn('Audit log failed:', e));
+
+  const writeLog = (attempts=0) => {
+    if(!db) {
+      if(attempts < 5) setTimeout(()=>writeLog(attempts+1), 1000);
+      return;
+    }
+    db.collection(AUDIT_COLLECTION).add(entry)
+      .catch(e => {
+        console.warn('Audit log failed:', e.message);
+        if(attempts < 3) setTimeout(()=>writeLog(attempts+1), 2000);
+      });
+  };
+  writeLog();
 }
 
 function save() {
