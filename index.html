@@ -386,6 +386,7 @@
       <div class="nav-section">Administration</div>
       <div class="nav-item" title="User Accounts" data-page="users"><i class="ti ti-shield-lock"></i><span>User Accounts</span></div>
       <div class="nav-item" title="Company Profile" data-page="company"><i class="ti ti-building"></i><span>Company Profile</span></div>
+      <div class="nav-item" title="Audit Log" data-page="auditlog"><i class="ti ti-clipboard-list"></i><span>Audit Log</span></div>
     </div>
     <div style="margin-top:auto;flex-shrink:0;padding:10px 10px 10px;border-top:1px solid var(--border-light);background:var(--bg-secondary)">
       <div style="display:flex;align-items:center;justify-content:space-between">
@@ -1083,6 +1084,7 @@ function verifyAdminPin(userId) {
   cancelAdminPin(); // restore form
   setSession(u);
   currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
+  setTimeout(()=>auditLog('LOGIN','System',u.id,{description:`${u.name} logged in (${u.role})`}),1000);
   showAppScreen();
 }
 
@@ -1101,6 +1103,7 @@ function cancelAdminPin() {
 }
 
 function logout() {
+  if(currentUser) auditLog('LOGOUT','System',currentUser.id,{description:`${currentUser.name} logged out`});
   clearSession();
   currentUser = null;
   showLoginScreen();
@@ -1920,6 +1923,27 @@ let state = {
 };
 
 // Persist to localStorage
+// ── AUDIT LOG ─────────────────────────────────────────────────────────────────
+const AUDIT_COLLECTION = 'companies/anmol/audit_logs';
+
+function auditLog(action, module, recordId, details={}, before=null, after=null) {
+  if(!db || !currentUser) return;
+  const entry = {
+    ts:        firebase.firestore.FieldValue.serverTimestamp(),
+    date:      new Date().toISOString(),
+    user:      currentUser.name || currentUser.username || 'Unknown',
+    userId:    currentUser.id,
+    role:      currentUser.role,
+    action,    // 'CREATE' | 'UPDATE' | 'DELETE' | 'APPROVE' | 'LOGIN' | 'LOGOUT' | 'PRINT' | 'EMAIL'
+    module,    // 'Sales Order' | 'Invoice' | 'Journal' | etc.
+    recordId:  String(recordId||''),
+    details,   // { description: '...' }
+    before:    before ? JSON.stringify(before).slice(0,2000) : null,
+    after:     after  ? JSON.stringify(after).slice(0,2000)  : null,
+  };
+  db.collection(AUDIT_COLLECTION).add(entry).catch(e=>console.warn('Audit log failed:', e));
+}
+
 function save() {
   try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
   fbSave(state);
@@ -2084,7 +2108,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2117,7 +2141,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -3598,7 +3622,7 @@ function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   recomputeBalances();
   save(); render();
 }
-function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(confirm('Delete this invoice?')) { state.invoices = state.invoices.filter(i => i.id !== id); save(); render(); } }
+function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(confirm('Delete this invoice?')) { const _inv=state.invoices.find(i=>i.id===id); auditLog('DELETE','Invoice',id,{description:`Deleted invoice ${id} for ${_inv?.customer}`}); state.invoices = state.invoices.filter(i => i.id !== id); save(); render(); } }
 
 // Invoice line items state
 let invLines = [];
@@ -4059,7 +4083,7 @@ function saveInvoiceNumber(oldId) {
   save(); closeModal(); render();
 }
 
-function printInvoice(id) {
+function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed invoice ${id}`});
   const inv = state.invoices.find(i=>i.id===id);
   if(!inv) return;
   const cp  = getCompanyProfile();
@@ -6354,6 +6378,7 @@ function saveCollection() {
   const rec = { id, date, customer, invoice, invoices: selectedInvoices, amount, mode, reference, receivedBy };
   if(cwtAmt > 0) { rec.cwtAmount = cwtAmt; rec.cwtRate = cwtRate; rec.netCash = amount - cwtAmt; }
   state.collections.push(rec);
+  auditLog('CREATE','Collection',id,{description:`Collection from ${customer} — ${fmt(amount)}`});
 
   // Auto-mark invoices as paid if fully collected
   const paidNow = [];
@@ -7743,8 +7768,8 @@ function clearAllMovements() {
 function deleteItem(id) {
   if(!requireAdmin('delete inventory items')) return;
   if(confirm('Remove this item and all its stock movement records?')) {
+    const _itm=state.inventory.find(i=>i.id===id); auditLog('DELETE','Inventory',id,{description:`Deleted item ${_itm?.name}`});
     state.inventory = state.inventory.filter(i=>i.id!==id);
-    // Remove movements for this item
     state.inventoryMovements = (state.inventoryMovements||[]).filter(m=>m.item!==id);
     save(); render();
   }
@@ -8416,7 +8441,7 @@ function renderCustomers(c, ta) {
   </table>`;
 }
 
-function deleteCust(id) { if(!requireAdmin("delete customers")) return; if(confirm('Remove this customer?')) { state.customers = state.customers.filter(c => c.id !== id); save(); render(); } }
+function deleteCust(id) { if(!requireAdmin("delete customers")) return; if(confirm('Remove this customer?')) { const _cu=state.customers.find(c=>c.id===id); auditLog('DELETE','Customer',id,{description:`Deleted customer ${_cu?.name}`}); state.customers = state.customers.filter(c => c.id !== id); save(); render(); } }
 
 function showEditCustomer(id) {
   const cu = state.customers.find(c=>c.id===id);
@@ -8489,8 +8514,8 @@ function saveEditCustomer(id) {
     if(bName) branches.push({ name: bName, address: bAddr||'' });
   });
   cu.branches = branches;
-  cu.branch   = branches.length > 0 ? branches[0].name : ''; // legacy compat
-
+  cu.branch   = branches.length > 0 ? branches[0].name : '';
+  auditLog('UPDATE','Customer',id,{description:`Updated customer ${cu.name}`});
   save(); closeModal(); render();
 }
 
@@ -8707,7 +8732,9 @@ function saveCustomer(redirectAfter) {
   const n = state.customers.length + 1;
   // Keep legacy branch field as first branch name for backward compat
   const branch = branches.length > 0 ? branches[0].name : '';
-  state.customers.push({ id:'C'+n.toString().padStart(3,'0'), name, tin, email, phone, address, branch, branches, balance:0 });
+  const _newCu={ id:'C'+n.toString().padStart(3,'0'), name, tin, email, phone, address, branch, branches, balance:0 };
+  state.customers.push(_newCu);
+  auditLog('CREATE','Customer',_newCu.id,{description:`Added customer ${name}`});
   save();
   if(redirectAfter==='so') { closeModal(); showAddSO(); }
   else if(redirectAfter==='inv') { closeModal(); showAddInvoice(); }
@@ -9600,7 +9627,9 @@ function viewSO(id) {
   }
 
   const allApproved = so.lines.every(l=>l.approved);
-  const soTotal = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+  const soTotal  = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+  const soVatBase = parseFloat((soTotal/1.12).toFixed(2));
+  const soVat    = parseFloat((soTotal - soVatBase).toFixed(2));
 
   showModal(`
 <div class="modal-head">
@@ -9635,12 +9664,8 @@ ${canApproveItems?`<div style="padding:8px 12px;background:var(--accent-bg);bord
     ${allApproved?`<span style="color:var(--green);font-weight:600"><i class="ti ti-circle-check"></i> All items approved</span>`:''}
   </div>
   <div style="text-align:right">
-    ${(()=>{
-      const vatBase = soTotal / 1.12;
-      const vat = soTotal - vatBase;
-      return `<div style="font-size:11px;color:var(--text-secondary)">VAT Base: <strong>${fmt(vatBase)}</strong> &nbsp;+&nbsp; Output VAT: <strong>${fmt(vat)}</strong></div>
-      <div style="font-size:20px;font-weight:700;color:var(--accent);margin-top:2px">Total: ${fmt(soTotal)}</div>`;
-    })()}
+    <div style="font-size:11px;color:var(--text-secondary)">VAT Base: <strong>${fmt(soVatBase)}</strong> &nbsp;+&nbsp; Output VAT: <strong>${fmt(soVat)}</strong></div>
+    <div style="font-size:20px;font-weight:700;color:var(--accent);margin-top:2px">Total: ${fmt(soTotal)}</div>
   </div>
 </div>
 
@@ -9943,7 +9968,7 @@ function approveAllSOItems(soId) {
   render();
 }
 
-function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(so); } save(); render(); }
+function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(so); auditLog('APPROVE','Sales Order',id,{description:`Approved SO ${id} for ${so.customer}`}); } save(); render(); }
 function dispatchSO(id) { if(!requireAdmin('dispatch sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='dispatched'; so.dispatchedDate=today(); so.dispatchedBy=currentUser.name; stampUpdate(so); } save(); render(); }
 function deliverSO(id) {
   if(!requireAdmin('mark sales orders delivered')) return;
@@ -9965,7 +9990,7 @@ function deliverSO(id) {
   stampUpdate(so);
   save(); render();
 }
-function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
+function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; const _so2=state.salesOrders.find(s=>s.id===id); auditLog('DELETE','Sales Order',id,{description:`Deleted SO ${id} for ${_so2?.customer}`}); state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
 
 function showAddSO() {
   const custOpts = '<option value="">— Select customer —</option>' +
@@ -10385,7 +10410,7 @@ function saveSO() {
   save(); closeModal(); render();
 }
 
-function printSO(id) {
+function printSO(id) { auditLog('PRINT','Sales Order',id,{description:`Printed SO ${id}`});
   const so=(state.salesOrders||[]).find(s=>s.id===id); if(!so) return;
   const cp=getCompanyProfile();
   const logo=localStorage.getItem(LOGO_KEY)||'';
@@ -10512,7 +10537,7 @@ function savePO() {
   save(); closeModal(); render();
 }
 
-function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(po); } save(); render(); }
+function approvePO(id) { if(!requireAdmin('approve purchase orders')) return; const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(po){ po.status='approved'; po.approvedBy=currentUser?.name; po.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(po); auditLog('APPROVE','Purchase Order',id,{description:`Approved PO ${id} from ${po.supplier}`}); } save(); render(); }
 function receivePO(id) {
   if(!currentUser || (currentUser.role!=='admin'&&currentUser.role!=='warehouse')) {
     if(!requireAdmin('mark purchase orders received')) return;
@@ -10776,8 +10801,12 @@ function viewPO(id) {
   if(!po) return;
   const sup = (state.suppliers||[]).find(s=>s.name===po.supplier)||{};
   const inv = state.inventory||[];
-  const poTotal = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-  const canReceive = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
+  const poTotal      = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poVatableAmt = po.lines.filter(l=>!l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poExemptAmt  = po.lines.filter(l=>l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poVatBase    = parseFloat((poVatableAmt/1.12).toFixed(2));
+  const poInputVat   = parseFloat((poVatableAmt - poVatBase).toFixed(2));
+  const canReceive   = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
   const statusColor = { pending:'var(--amber)', approved:'var(--accent)', received:'var(--green)', partial:'var(--amber)', cancelled:'var(--red)' };
   const deliveredCount = po.lines.filter(l=>l.deliveryStatus==='delivered').length;
   const totalLines = po.lines.length;
@@ -10812,33 +10841,22 @@ function viewPO(id) {
 ${canReceive && (po.status==='approved'||po.status==='partial')?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)"><i class="ti ti-info-circle" style="margin-right:5px"></i>Mark each line as <strong>Delivered</strong> when received. Delivered items are added to inventory immediately. You can also enter a partial quantity.</div>`:''}
 <div id="po-view-lines">${renderPOViewLines(po, canReceive)}</div>
 <div style="border-top:1px solid var(--border-light);padding-top:12px;margin-top:4px">
-  ${(()=>{
-    const vatableLines = po.lines.filter(l=>!l.vatExempt);
-    const exemptLines  = po.lines.filter(l=>l.vatExempt);
-    const vatableAmt   = vatableLines.reduce((s,l)=>s+(l.lineTotal||0),0);
-    const exemptAmt    = exemptLines.reduce((s,l)=>s+(l.lineTotal||0),0);
-    const vatBase      = vatableAmt / 1.12;
-    const inputVat     = vatableAmt - vatBase;
-    return `
-    <div style="display:flex;justify-content:flex-end">
-      <table style="font-size:12px;border-collapse:collapse;min-width:280px">
-        ${vatableAmt>0?`
-        <tr><td style="padding:3px 12px;color:var(--text-secondary)">Taxable Amount (ex VAT)</td><td style="padding:3px 0;text-align:right;font-weight:500">${fmt(vatBase)}</td></tr>
-        <tr><td style="padding:3px 12px;color:var(--text-secondary)">Input VAT (12%)</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--accent)">${fmt(inputVat)}</td></tr>`:''}
-        ${exemptAmt>0?`<tr><td style="padding:3px 12px;color:var(--text-secondary)">VAT Exempt Amount</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--amber)">${fmt(exemptAmt)}</td></tr>`:''}
-        <tr style="border-top:1.5px solid var(--border-mid)">
-          <td style="padding:8px 12px;font-weight:700;font-size:15px">TOTAL AMOUNT</td>
-          <td style="padding:8px 0;text-align:right;font-weight:700;font-size:18px;color:var(--accent)">${fmt(poTotal)}</td>
-        </tr>
-      </table>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-      <div>
-        ${po.status==='received'?'<span style="color:var(--green);font-weight:600"><i class="ti ti-check-all"></i> All items received</span>':''}
-        ${po.status==='partial'?'<span style="color:var(--amber);font-weight:600"><i class="ti ti-clock"></i> Partial delivery in progress</span>':''}
-      </div>
-    </div>`;
-  })()}
+  <div style="display:flex;justify-content:flex-end">
+    <table style="font-size:12px;border-collapse:collapse;min-width:280px">
+      ${poVatableAmt>0?`
+      <tr><td style="padding:3px 12px;color:var(--text-secondary)">Taxable Amount (ex VAT)</td><td style="padding:3px 0;text-align:right;font-weight:500">${fmt(poVatBase)}</td></tr>
+      <tr><td style="padding:3px 12px;color:var(--text-secondary)">Input VAT (12%)</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--accent)">${fmt(poInputVat)}</td></tr>`:''}
+      ${poExemptAmt>0?`<tr><td style="padding:3px 12px;color:var(--text-secondary)">VAT Exempt Amount</td><td style="padding:3px 0;text-align:right;font-weight:500;color:var(--amber)">${fmt(poExemptAmt)}</td></tr>`:''}
+      <tr style="border-top:1.5px solid var(--border-mid)">
+        <td style="padding:8px 12px;font-weight:700;font-size:15px">TOTAL AMOUNT</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;font-size:18px;color:var(--accent)">${fmt(poTotal)}</td>
+      </tr>
+    </table>
+  </div>
+  <div style="display:flex;justify-content:flex-start;margin-top:8px">
+    ${po.status==='received'?'<span style="color:var(--green);font-weight:600"><i class="ti ti-check-all"></i> All items received</span>':''}
+    ${po.status==='partial'?'<span style="color:var(--amber);font-weight:600"><i class="ti ti-clock"></i> Partial delivery in progress</span>':''}
+  </div>
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal();render()">Close</button>
@@ -11025,7 +11043,7 @@ function receiveAllPOLines(poId) {
   _refreshPOModal(po);
 }
 
-function printPO(id) {
+function printPO(id) { auditLog('PRINT','Purchase Order',id,{description:`Printed PO ${id}`});
   const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(!po) return;
   const cp=getCompanyProfile();
   const logo=localStorage.getItem(LOGO_KEY)||'';
@@ -12620,6 +12638,127 @@ function importInventoryCSV() {
     `\nTotal inventory: ${(state.inventory||[]).length} items`
   ), 200);
 }
+// ── AUDIT LOG PAGE ────────────────────────────────────────────────────────────
+function renderAuditLog(c, ta) {
+  ta.innerHTML = `
+    <select id="audit-module-filter" onchange="loadAuditLogs()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <option value="">All Modules</option>
+      <option>Sales Order</option><option>Invoice</option><option>Purchase Order</option>
+      <option>Collection</option><option>Inventory</option><option>Customer</option><option>System</option>
+    </select>
+    <select id="audit-action-filter" onchange="loadAuditLogs()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <option value="">All Actions</option>
+      <option>CREATE</option><option>UPDATE</option><option>DELETE</option>
+      <option>APPROVE</option><option>LOGIN</option><option>LOGOUT</option><option>PRINT</option><option>EMAIL</option>
+    </select>
+    <select id="audit-user-filter" onchange="loadAuditLogs()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <option value="">All Users</option>
+      ${getUsers().map(u=>`<option>${u.name}</option>`).join('')}
+    </select>
+    <input type="date" id="audit-date-filter" onchange="loadAuditLogs()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    ${isAdmin()?`<button class="btn danger" onclick="clearAuditLogs()" style="font-size:12px"><i class="ti ti-trash"></i>Clear All</button>`:''}`;
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-clipboard-list"></i>Total Logs</div><div class="kpi-value" id="audit-total">—</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-users"></i>Active Users</div><div class="kpi-value" id="audit-users">—</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-calendar"></i>Today</div><div class="kpi-value" id="audit-today">—</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-trash"></i>Deletes</div><div class="kpi-value neg" id="audit-deletes">—</div></div>
+</div>
+<div id="audit-table-wrap">
+  <div style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="ti ti-loader" style="animation:spin 1s linear infinite;font-size:24px;display:block;margin-bottom:8px"></i>Loading…</div>
+</div>`;
+  loadAuditLogs();
+}
+
+function loadAuditLogs() {
+  if(!db) { document.getElementById('audit-table-wrap').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-tertiary)">Firebase not connected.</div>`; return; }
+  const modF  = document.getElementById('audit-module-filter')?.value||'';
+  const actF  = document.getElementById('audit-action-filter')?.value||'';
+  const userF = document.getElementById('audit-user-filter')?.value||'';
+  const dateF = document.getElementById('audit-date-filter')?.value||'';
+  const wrap  = document.getElementById('audit-table-wrap');
+  if(wrap) wrap.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-tertiary)"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Loading…</div>`;
+
+  db.collection(AUDIT_COLLECTION).orderBy('ts','desc').limit(300).get().then(snap=>{
+    let logs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(modF)  logs=logs.filter(l=>l.module===modF);
+    if(actF)  logs=logs.filter(l=>l.action===actF);
+    if(userF) logs=logs.filter(l=>l.user===userF);
+    if(dateF) logs=logs.filter(l=>(l.date||'').startsWith(dateF));
+
+    const todayLogs = logs.filter(l=>(l.date||'').startsWith(today()));
+    document.getElementById('audit-total').textContent   = snap.size;
+    document.getElementById('audit-users').textContent   = new Set(logs.map(l=>l.user)).size;
+    document.getElementById('audit-today').textContent   = todayLogs.length;
+    document.getElementById('audit-deletes').textContent = logs.filter(l=>l.action==='DELETE').length;
+
+    const clr={CREATE:'var(--green)',UPDATE:'var(--accent)',DELETE:'var(--red)',APPROVE:'var(--green)',LOGIN:'var(--text-secondary)',LOGOUT:'var(--text-tertiary)',PRINT:'var(--text-secondary)',EMAIL:'var(--accent)'};
+    if(!wrap) return;
+    if(!logs.length){ wrap.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="ti ti-clipboard-list" style="font-size:36px;display:block;margin-bottom:8px;opacity:0.3"></i>No audit logs found.</div>`; return; }
+    wrap.innerHTML=`
+<table>
+  <thead><tr><th>Timestamp</th><th>User</th><th>Role</th><th>Action</th><th>Module</th><th>Record</th><th>Description</th><th>Detail</th></tr></thead>
+  <tbody>
+  ${logs.map(l=>{
+    const ts=l.date?new Date(l.date).toLocaleString('en-PH',{dateStyle:'short',timeStyle:'short'}):'—';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:11px;color:var(--text-secondary)">${ts}</td>
+      <td style="font-weight:500;font-size:12px">${l.user||'—'}</td>
+      <td><span class="badge" style="font-size:10px">${l.role||'—'}</span></td>
+      <td><span class="badge" style="background:${clr[l.action]||'var(--text-secondary)'}22;color:${clr[l.action]||'var(--text-secondary)'};font-size:11px;font-weight:700">${l.action}</span></td>
+      <td style="font-size:12px">${l.module||'—'}</td>
+      <td class="mono" style="font-size:11px">${l.recordId||'—'}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${l.details?.description||'—'}</td>
+      <td>${(l.before||l.after)?`<button class="btn" style="padding:2px 7px;font-size:10px" onclick="showAuditDetail('${l.id}')"><i class="ti ti-eye"></i></button>`:'—'}</td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>
+${snap.size>=300?`<div style="text-align:center;padding:8px;font-size:12px;color:var(--text-tertiary)">Showing 300 most recent. Use filters to narrow down.</div>`:''}`;
+  }).catch(err=>{ if(wrap) wrap.innerHTML=`<div style="color:var(--red);padding:20px">Error: ${err.message}</div>`; });
+}
+
+function showAuditDetail(logId) {
+  db.collection(AUDIT_COLLECTION).doc(logId).get().then(doc=>{
+    const l=doc.data();
+    let beforeObj, afterObj;
+    try{beforeObj=l.before?JSON.parse(l.before):null;}catch(e){beforeObj=l.before;}
+    try{afterObj=l.after?JSON.parse(l.after):null;}catch(e){afterObj=l.after;}
+    let diff='';
+    if(beforeObj&&afterObj&&typeof beforeObj==='object'&&typeof afterObj==='object'){
+      const keys=new Set([...Object.keys(beforeObj||{}),...Object.keys(afterObj||{})]);
+      diff=[...keys].filter(k=>JSON.stringify(beforeObj[k])!==JSON.stringify(afterObj[k]))
+        .map(k=>`<tr><td style="padding:4px 8px;font-weight:500;font-size:12px">${k}</td><td style="padding:4px 8px;font-size:12px;color:var(--red)">${String(JSON.stringify(beforeObj[k])||'—').slice(0,120)}</td><td style="padding:4px 8px;font-size:12px;color:var(--green)">${String(JSON.stringify(afterObj[k])||'—').slice(0,120)}</td></tr>`).join('');
+    }
+    const clr={CREATE:'var(--green)',DELETE:'var(--red)',APPROVE:'var(--green)',UPDATE:'var(--accent)'};
+    showModal(`
+<div class="modal-head"><h3>Audit Log Detail</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;font-size:12px">
+  <div><span style="color:var(--text-tertiary)">User:</span> <strong>${l.user}</strong> (${l.role})</div>
+  <div><span style="color:var(--text-tertiary)">Time:</span> <strong>${new Date(l.date).toLocaleString('en-PH')}</strong></div>
+  <div><span style="color:var(--text-tertiary)">Action:</span> <strong style="color:${clr[l.action]||'inherit'}">${l.action}</strong></div>
+  <div><span style="color:var(--text-tertiary)">Module:</span> <strong>${l.module}</strong> <span class="mono">${l.recordId||''}</span></div>
+</div>
+<div style="font-size:12px;margin-bottom:12px"><span style="color:var(--text-tertiary)">Description:</span> ${l.details?.description||'—'}</div>
+${diff?`<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px">Changes (Before → After)</div>
+<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--bg-secondary)"><th style="padding:4px 8px;text-align:left">Field</th><th style="padding:4px 8px;text-align:left;color:var(--red)">Before</th><th style="padding:4px 8px;text-align:left;color:var(--green)">After</th></tr></thead><tbody>${diff}</tbody></table>`:
+(l.before||l.after)?`<div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:6px">Snapshot</div><pre style="background:var(--bg-secondary);padding:10px;border-radius:var(--radius-md);font-size:11px;overflow-x:auto;max-height:200px">${(l.after||l.before||'').slice(0,800)}</pre>`:''}
+<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  });
+}
+
+function clearAuditLogs() {
+  if(!requireAdmin('clear audit logs')) return;
+  if(!confirm('Delete ALL audit logs permanently?\n\nThis cannot be undone.')) return;
+  db.collection(AUDIT_COLLECTION).get().then(snap=>{
+    let batch=db.batch(), count=0, batches=[];
+    snap.docs.forEach(d=>{ batch.delete(d.ref); if(++count%400===0){ batches.push(batch.commit()); batch=db.batch(); } });
+    batches.push(batch.commit());
+    return Promise.all(batches);
+  }).then(()=>{ alert('✅ All audit logs cleared.'); render(); });
+}
+
 function renderEmployees(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddEmployee()"><i class="ti ti-plus"></i>Add Employee</button>`;
   const emps = state.employees || [];
