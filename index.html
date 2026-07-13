@@ -1112,9 +1112,16 @@ function logout() {
 function showLoginScreen() {
   document.getElementById('shell').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('login-error').textContent = '';
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
+  // Hide chat elements on login screen
+  const chatBtn = document.getElementById('chat-float-btn');
+  const chatPanel = document.getElementById('chat-panel');
+  if(chatBtn) chatBtn.style.display = 'none';
+  if(chatPanel) chatPanel.style.display = 'none';
+  const aiPanel = document.getElementById('ai-panel');
+  if(aiPanel) aiPanel.style.display = 'none';
+  // Clear fields and pre-load user list
+  const errEl = document.getElementById('login-error');
+  if(errEl) errEl.textContent = '';
   // Pre-load user list from Firebase so non-admin users can log in on any device
   // without requiring admin to log in first (which would trigger fbLoadMeta)
   if(db) {
@@ -2404,6 +2411,165 @@ function renderDashboard(c, ta) {
     </div>`:''}
   </div>
 
+</div>
+
+<!-- ── ADVANCED ANALYTICS ── -->
+<div style="margin-top:20px">
+  <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+    <i class="ti ti-chart-dots-3" style="color:var(--accent)"></i> Advanced Analytics
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
+
+    <!-- AR Aging -->
+    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">AR Aging</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Accounts receivable by age</div>
+      ${(()=>{
+        const now2 = new Date();
+        const buckets = [{label:'Current (0-30 days)',days:30,color:'#34c98a'},{label:'31-60 days',days:60,color:'#f5a623'},{label:'61-90 days',days:90,color:'#f05c6e'},{label:'90+ days',days:9999,color:'#8b0000'}];
+        const unpaid = state.invoices.filter(i=>getInvoiceStatus(i)!=='paid'&&i.due);
+        const aging = buckets.map(b=>({...b,amount:0,count:0}));
+        unpaid.forEach(i=>{
+          const due = new Date(i.due);
+          const days = Math.max(0,Math.floor((now2-due)/(1000*60*60*24)));
+          const bucket = days<=30?aging[0]:days<=60?aging[1]:days<=90?aging[2]:aging[3];
+          bucket.amount+=(i.amount||0); bucket.count++;
+        });
+        const maxAging = Math.max(...aging.map(b=>b.amount),1);
+        return aging.map(b=>`
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+            <span style="color:var(--text-secondary)">${b.label}</span>
+            <span style="font-weight:600;color:${b.color}">${fmt(b.amount)}</span>
+          </div>
+          <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${(b.amount/maxAging*100).toFixed(1)}%;background:${b.color};border-radius:4px"></div>
+          </div>
+        </div>`).join('');
+      })()}
+      <div style="border-top:1px solid var(--border-light);padding-top:8px;font-size:11px;color:var(--text-tertiary)">
+        ${state.invoices.filter(i=>getInvoiceStatus(i)!=='paid').length} unpaid invoices
+      </div>
+    </div>
+
+    <!-- Inventory Turnover -->
+    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Inventory Status</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Stock levels at a glance</div>
+      ${(()=>{
+        const inv2 = state.inventory||[];
+        const total = inv2.length;
+        const lowStock = inv2.filter(it=>it.qty<=(it.reorderLevel||5)&&it.qty>0).length;
+        const outOfStock = inv2.filter(it=>it.qty<=0).length;
+        const healthy = total - lowStock - outOfStock;
+        const expiring = inv2.filter(it=>{ if(!it.expiryDate) return false; const d=new Date(it.expiryDate); const days=Math.floor((d-new Date())/(1000*60*60*24)); return days>=0&&days<=90; }).length;
+        const totalValue = inv2.reduce((s,it)=>s+((it.qty||0)*(it.costPrice||0)),0);
+        return `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+          <div style="background:rgba(52,201,138,0.1);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:22px;font-weight:700;color:#34c98a">${healthy}</div>
+            <div style="font-size:10px;color:var(--text-secondary)">Healthy</div>
+          </div>
+          <div style="background:rgba(245,166,35,0.1);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:22px;font-weight:700;color:#f5a623">${lowStock}</div>
+            <div style="font-size:10px;color:var(--text-secondary)">Low Stock</div>
+          </div>
+          <div style="background:rgba(240,92,110,0.1);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:22px;font-weight:700;color:#f05c6e">${outOfStock}</div>
+            <div style="font-size:10px;color:var(--text-secondary)">Out of Stock</div>
+          </div>
+          <div style="background:rgba(167,139,250,0.1);border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:22px;font-weight:700;color:#a78bfa">${expiring}</div>
+            <div style="font-size:10px;color:var(--text-secondary)">Exp. in 90d</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border-light);padding-top:8px;font-size:11px">
+          <div style="display:flex;justify-content:space-between"><span style="color:var(--text-tertiary)">Total SKUs</span><strong>${total}</strong></div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:var(--text-tertiary)">Inventory Value</span><strong>${fmt(totalValue)}</strong></div>
+        </div>`;
+      })()}
+    </div>
+
+    <!-- Collections this month -->
+    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Collection Trend</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Last 6 months</div>
+      ${(()=>{
+        const n = new Date();
+        const last6 = Array.from({length:6},(_,i)=>{
+          const d = new Date(n.getFullYear(), n.getMonth()-5+i, 1);
+          return { label:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()], year:d.getFullYear(), month:d.getMonth()+1 };
+        });
+        const colAmts = last6.map(m=>(state.collections||[]).filter(c=>{const d=c.date||'';return d.startsWith(`${m.year}-${String(m.month).padStart(2,'0')}`)}).reduce((s,c)=>s+(c.netCash||c.amount||0),0));
+        const maxCol = Math.max(...colAmts, 1);
+        return last6.map((m,i)=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="width:28px;font-size:10px;color:var(--text-tertiary);flex-shrink:0">${m.label}</div>
+          <div style="flex:1;height:20px;background:var(--bg-secondary);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${(colAmts[i]/maxCol*100).toFixed(1)}%;background:linear-gradient(90deg,#4f8ef7,#6366f1);border-radius:3px;display:flex;align-items:center;padding-left:5px;min-width:${colAmts[i]>0?'4px':'0'}">
+            </div>
+          </div>
+          <div style="width:70px;font-size:11px;font-weight:500;text-align:right;flex-shrink:0;color:var(--text-secondary)">${colAmts[i]>=1000?(colAmts[i]/1000).toFixed(1)+'k':colAmts[i]>0?fmt(colAmts[i]):'—'}</div>
+        </div>`).join('');
+      })()}
+    </div>
+  </div>
+
+  <!-- Expense Breakdown + Monthly Net Income -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    <!-- Expense by Category -->
+    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Expense Breakdown</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">By category (all time)</div>
+      ${(()=>{
+        const expCats = {};
+        (state.expenses||[]).forEach(e=>{ const cat=e.category||'Other'; expCats[cat]=(expCats[cat]||0)+(e.amount||0); });
+        const sorted = Object.entries(expCats).sort((a,b)=>b[1]-a[1]).slice(0,6);
+        const maxExp = sorted.length ? Math.max(...sorted.map(x=>x[1])) : 1;
+        const colors = ['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e','#06b6d4'];
+        if(!sorted.length) return `<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:12px">No expense data yet.</div>`;
+        const total = sorted.reduce((s,x)=>s+x[1],0);
+        return sorted.map(([cat,amt],i)=>`
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+            <span style="color:var(--text-secondary)">${cat}</span>
+            <span style="font-weight:500">${fmt(amt)} <span style="color:var(--text-tertiary)">(${(amt/total*100).toFixed(1)}%)</span></span>
+          </div>
+          <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${(amt/maxExp*100).toFixed(1)}%;background:${colors[i%6]};border-radius:4px"></div>
+          </div>
+        </div>`).join('');
+      })()}
+    </div>
+
+    <!-- Monthly Net Income Trend -->
+    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Monthly Net Income</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Revenue minus costs per month (${currentYear})</div>
+      ${(()=>{
+        const netData = months.map((_,i)=>{
+          const rev=revData[i]||0, pur=purData[i]||0, exp=expData[i]||0;
+          return rev - pur - exp;
+        });
+        const maxNet = Math.max(...netData.map(Math.abs), 1);
+        return months.map((m,i)=>{
+          const net = netData[i];
+          const pct = Math.abs(net)/maxNet*100;
+          const isPos = net >= 0;
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+            <div style="width:28px;font-size:10px;color:var(--text-tertiary);flex-shrink:0">${m}</div>
+            <div style="flex:1;height:18px;background:var(--bg-secondary);border-radius:3px;overflow:hidden;position:relative">
+              <div style="position:absolute;${isPos?'left:50%':'right:50%'};top:0;height:100%;width:${(pct/2).toFixed(1)}%;background:${isPos?'#34c98a':'#f05c6e'};${isPos?'border-radius:0 3px 3px 0':'border-radius:3px 0 0 3px'}"></div>
+              <div style="position:absolute;left:50%;top:0;width:1px;height:100%;background:var(--border-mid)"></div>
+            </div>
+            <div style="width:75px;font-size:11px;font-weight:500;text-align:right;flex-shrink:0;color:${isPos?'#34c98a':'#f05c6e'}">${net>=1000?(net/1000).toFixed(1)+'k':net<=-1000?(net/1000).toFixed(1)+'k':fmt(Math.abs(net))} ${isPos?'▲':'▼'}</div>
+          </div>`;
+        }).join('');
+      })()}
+    </div>
+  </div>
 </div>`;
 }
 
