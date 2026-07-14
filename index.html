@@ -2287,7 +2287,15 @@ function renderDashboard(c, ta) {
   ta.innerHTML = '';
   const totalRev   = state.invoices.reduce((s,i)=>s+(i.amount||0),0);
   const totalPur   = (state.purchaseOrders||[]).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
-  const totalExp   = (state.expenses||[]).reduce((s,e)=>s+(e.amount||0),0);
+
+  // Expenses: state.expenses + disbursement journal debit lines hitting expense accounts
+  const expFromState = (state.expenses||[]).reduce((s,e)=>s+(e.amount||0),0);
+  const expAccIds = new Set((state.accounts||[]).filter(a=>a.type==='Expense').map(a=>String(a.id)));
+  const expFromDV = (state.journal||[])
+    .filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit)))
+    .reduce((s,j)=>s+(j.amount||0),0);
+  const totalExp   = expFromState + expFromDV;
+
   const totalCost  = totalPur + totalExp;
   const grossProfit= totalRev - totalPur;
   const netIncome  = totalRev - totalCost;
@@ -2336,7 +2344,14 @@ function renderDashboard(c, ta) {
 
   const revData = sumByMonth(state.invoices.filter(i=>i.status!=='draft'));
   const purData = sumPOByMonth();
-  const expData = sumByMonth(state.expenses||[]);
+  // Monthly expense: combine state.expenses + DV journal expense lines
+  const dvExpByMonth = Array(monthCount).fill(0);
+  (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))).forEach(j=>{
+    const d = j.date||''; if(!d) return;
+    const yr = parseInt(d.slice(0,4)), mo = parseInt(d.slice(5,7))-1;
+    if(yr===currentYear && mo>=0 && mo<monthCount) dvExpByMonth[mo]+=(j.amount||0);
+  });
+  const expData = sumByMonth(state.expenses||[]).map((v,i)=>v+dvExpByMonth[i]);
   const colData = sumByMonth(state.collections||[]);
   const maxVal = Math.max(...revData, ...purData.map((p,i)=>p+(expData[i]||0)), 1);
 
@@ -2634,6 +2649,12 @@ function renderDashboard(c, ta) {
       ${(()=>{
         const expCats = {};
         (state.expenses||[]).forEach(e=>{ const cat=e.category||'Other'; expCats[cat]=(expCats[cat]||0)+(e.amount||0); });
+        // Also include DV journal debit lines hitting expense accounts
+        (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))).forEach(j=>{
+          const acc = (state.accounts||[]).find(a=>String(a.id)===String(j.debit));
+          const cat = acc?.name||'Other';
+          expCats[cat]=(expCats[cat]||0)+(j.amount||0);
+        });
         const sorted = Object.entries(expCats).sort((a,b)=>b[1]-a[1]).slice(0,6);
         const maxExp = sorted.length ? Math.max(...sorted.map(x=>x[1])) : 1;
         const colors = ['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e','#06b6d4'];
@@ -2770,6 +2791,7 @@ function buildDisbursementRows(entries) {
         ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
       </td>
       <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
+      <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${g.lines[0]?.preparedBy||'—'}</td>
       <td style="text-align:right;font-weight:600;color:${isCancelled?'var(--text-tertiary)':'var(--red)'}">${fmt(totalDisb)}</td>
       <td class="no-print">
         <div class="action-btns">
@@ -2788,6 +2810,7 @@ function buildDisbursementRows(entries) {
     <thead><tr>
       <th>Entry #</th><th>Date</th><th>Reference</th><th>Payee / Description</th>
       <th>Drawn From</th>
+      <th>Created By</th>
       <th style="text-align:right">Amount Disbursed</th>
       <th class="no-print">Actions</th>
     </tr></thead>
@@ -6291,12 +6314,22 @@ function renderVouchers(c, ta) {
 function approveVoucher(id) { if(!requireAdmin("approve vouchers")) return; const v=state.vouchers.find(v=>v.id===id); if(v){ v.status='approved'; stampUpdate(v); } save(); render(); }
 function deleteVoucher(id) { if(!requireAdmin("delete disbursement vouchers")) return; if(confirm('Delete this voucher?')) { state.vouchers=state.vouchers.filter(v=>v.id!==id); save(); render(); } }
 
-function printVoucher(id) {
-  const v = state.vouchers.find(v => v.id === id);
-  if (!v) return;
-  const acc = state.accounts.find(a => a.id === v.account);
+function printVoucher(groupId) {
+  // Get all journal lines for this DV group
+  const lines = (state.journal||[]).filter(j=>j.group===groupId||j.id===groupId);
+  if(!lines.length) { alert('Disbursement entry not found.'); return; }
+  const first = lines[0];
+  const cp = getCompanyProfile();
+
+  // Debit lines = expense/asset accounts
+  const debitLines = lines.filter(l=>l.debit);
+  // Credit line = cash/bank drawn from
+  const creditLine = lines.find(l=>l.credit);
+  const drawnAcc = creditLine ? state.accounts.find(a=>String(a.id)===String(creditLine.credit)) : null;
+  const totalAmt = debitLines.reduce((s,l)=>s+(l.amount||0),0);
+
   const win = window.open('', '_blank', 'width=900,height=700');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Disbursement Voucher ${v.id}</title>
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Disbursement Voucher ${groupId}</title>
 <style>
   body{font-family:'Times New Roman',serif;font-size:13px;color:#111;margin:0;padding:32px 40px}
   h1{font-size:20px;font-weight:700;letter-spacing:0.04em;margin:0}
@@ -6315,34 +6348,36 @@ function printVoucher(id) {
   .sig{text-align:center}
   .sig-line{border-top:1px solid #333;padding-top:5px;font-size:11px;margin-top:48px}
   .sig-name{font-weight:700;font-size:12px}
-  .status-stamp{position:absolute;top:80px;right:60px;border:3px solid ${v.status==='approved'?'#0a5c3a':'#8a6a00'};color:${v.status==='approved'?'#0a5c3a':'#8a6a00'};font-size:28px;font-weight:900;padding:6px 14px;transform:rotate(-15deg);opacity:0.55;letter-spacing:0.12em;border-radius:4px}
   @page{margin:18mm 16mm}
   @media print{body{padding:0}}
 </style></head><body>
 <div style="position:relative">
 <div class="header">
-  <p style="font-size:11px;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.08em;color:#555">ANMOL PHARMACEUTICALS US CORP. Company</p>
+  <p style="font-size:11px;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.08em;color:#555">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</p>
   <h1>DISBURSEMENT VOUCHER</h1>
 </div>
-<div class="status-stamp">${v.status.toUpperCase()}</div>
 <div class="meta">
-  <div class="meta-item"><span class="meta-label">DV No.</span><span class="meta-val">${v.id}</span></div>
-  <div class="meta-item"><span class="meta-label">Date</span><span class="meta-val">${v.date}</span></div>
-  <div class="meta-item"><span class="meta-label">Payee</span><span class="meta-val">${v.payee}</span></div>
-  <div class="meta-item"><span class="meta-label">Account</span><span class="meta-val">${acc ? acc.id+' – '+acc.name : v.account}</span></div>
+  <div class="meta-item"><span class="meta-label">DV No.</span><span class="meta-val">${groupId}</span></div>
+  <div class="meta-item"><span class="meta-label">Date</span><span class="meta-val">${first.date}</span></div>
+  <div class="meta-item"><span class="meta-label">Payee</span><span class="meta-val">${first.payee||'—'}</span></div>
+  <div class="meta-item"><span class="meta-label">Check / Ref No.</span><span class="meta-val">${first.checkNo||'—'}</span></div>
+  <div class="meta-item"><span class="meta-label">Drawn From</span><span class="meta-val">${drawnAcc?drawnAcc.id+' – '+drawnAcc.name:'—'}</span></div>
+  <div class="meta-item"><span class="meta-label">Reference</span><span class="meta-val">${first.ref||'—'}</span></div>
 </div>
 <table>
-  <thead><tr><th>Particulars / Description</th><th style="text-align:right;width:160px">Amount (₱)</th></tr></thead>
+  <thead><tr><th>Account</th><th>Description</th><th style="text-align:right;width:140px">Amount (₱)</th></tr></thead>
   <tbody>
-    <tr><td>${v.purpose}</td><td>${fmt(v.amount)}</td></tr>
-    <tr><td style="border:none"></td><td style="border:none"></td></tr>
+    ${debitLines.map(l=>{
+      const acc = state.accounts.find(a=>String(a.id)===String(l.debit));
+      return `<tr><td>${acc?acc.id+' – '+acc.name:l.debit||'—'}</td><td>${l.desc||first.desc||'—'}</td><td>${fmt(l.amount)}</td></tr>`;
+    }).join('')}
   </tbody>
 </table>
-<div class="total">Total: ${fmt(v.amount)}</div>
-<div class="words">Amount in words: <em>${toWords(v.amount)}</em></div>
+<div class="total">TOTAL AMOUNT: ${fmt(totalAmt)}</div>
+<div class="words">Amount in words: <em>${toWords(totalAmt)}</em></div>
 <div class="sigs">
-  <div class="sig"><div class="sig-line"><div class="sig-name">${v.preparedBy || '______________________'}</div>Prepared by</div></div>
-  <div class="sig"><div class="sig-line"><div class="sig-name">${v.approvedBy || '______________________'}</div>Approved by</div></div>
+  <div class="sig"><div class="sig-line"><div class="sig-name">${first.preparedBy||'______________________'}</div>Prepared by</div></div>
+  <div class="sig"><div class="sig-line"><div class="sig-name">${first.approvedBy||'______________________'}</div>Approved by</div></div>
   <div class="sig"><div class="sig-line"><div class="sig-name">______________________</div>Received by / Date</div></div>
 </div>
 </div>
