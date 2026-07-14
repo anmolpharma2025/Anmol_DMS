@@ -845,6 +845,85 @@ const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDi
 const fmtS = n => (n < 0 ? '-' : '') + fmt(n);
 const today = () => new Date().toISOString().split('T')[0];
 
+
+// ── SEARCHABLE DROPDOWN HELPER ────────────────────────────────────────────────
+function makeSearchDrop(inputId, dropId, hiddenId, items, onSelect, onAddNew, addLabel='Add new…') {
+  const inp = document.getElementById(inputId);
+  const dd  = document.getElementById(dropId);
+  const hid = document.getElementById(hiddenId);
+  if(!inp||!dd) return;
+
+  function render(q) {
+    const filtered = q ? items.filter(x=>x.toLowerCase().includes(q.toLowerCase())) : items;
+    dd.innerHTML = filtered.map(item=>`
+      <div class="sd-opt" data-val="${item.replace(/"/g,'&quot;')}" style="padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+        ${item}
+      </div>`).join('') + `
+      <div class="sd-add" style="padding:9px 12px;cursor:pointer;font-size:13px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid);display:flex;align-items:center;gap:6px" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+        <i class="ti ti-plus" style="font-size:14px"></i>${addLabel}
+      </div>`;
+
+    dd.querySelectorAll('.sd-opt').forEach(opt=>{
+      opt.onclick = () => {
+        inp.value = opt.dataset.val;
+        if(hid) hid.value = opt.dataset.val;
+        dd.style.display = 'none';
+        if(onSelect) onSelect(opt.dataset.val);
+      };
+    });
+    dd.querySelector('.sd-add').onclick = () => {
+      dd.style.display = 'none';
+      if(onAddNew) onAddNew(inp.value.trim());
+    };
+  }
+
+  inp.oninput = () => { dd.style.display=''; render(inp.value); };
+  inp.onfocus = () => { dd.style.display=''; render(inp.value); };
+  inp.onblur  = () => setTimeout(()=>{ dd.style.display='none'; if(inp.value&&hid&&!hid.value) hid.value=inp.value.trim(); },200);
+  inp.onkeydown = (e) => {
+    if(e.key==='Enter') {
+      // If typed name not in list — prompt to add
+      e.preventDefault();
+      const q = inp.value.trim();
+      if(!q) return;
+      if(!items.some(x=>x.toLowerCase()===q.toLowerCase())) {
+        dd.style.display='none';
+        if(onAddNew) onAddNew(q);
+      } else {
+        const match = items.find(x=>x.toLowerCase()===q.toLowerCase());
+        if(hid) hid.value = match;
+        if(onSelect) onSelect(match);
+        dd.style.display='none';
+      }
+    }
+    if(e.key==='Escape') dd.style.display='none';
+  };
+  render('');
+}
+
+// Shared search input HTML builder
+function searchDropHTML(inputId, dropId, hiddenId, placeholder, currentVal='') {
+  return `<div style="position:relative">
+    <input type="text" id="${inputId}" value="${currentVal}" placeholder="${placeholder}" autocomplete="off"
+      style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <div id="${dropId}" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:500;max-height:220px;overflow-y:auto;margin-top:2px"></div>
+    <input type="hidden" id="${hiddenId}" value="${currentVal}">
+  </div>`;
+}
+
+// ── EMPTY STATE HELPER ────────────────────────────────────────────────────────
+function emptyState(icon, title, desc, btnLabel, btnAction, btnClass='primary') {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 24px;text-align:center">
+    <div style="width:72px;height:72px;border-radius:50%;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;margin-bottom:20px">
+      <i class="ti ${icon}" style="font-size:32px;color:var(--accent)"></i>
+    </div>
+    <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:8px">${title}</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;max-width:320px">${desc}</div>
+    ${btnLabel?`<button class="btn ${btnClass}" onclick="${btnAction}" style="padding:10px 24px;font-size:13px"><i class="ti ti-plus" style="margin-right:6px"></i>${btnLabel}</button>`:''}
+  </div>`;
+}
+
+
 // ── AUTH & USER MANAGEMENT ────────────────────────────────────────────────────
 const USERS_KEY = 'anmolpharma_users';
 const SESSION_KEY = 'anmolpharma_session';
@@ -2615,7 +2694,7 @@ function buildGeneralJournalRows(entries) {
     g.approved  = g.lines.some(l=>l.approved);
     g.cancelled = g.lines.some(l=>l.cancelled);
   });
-  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-notebook" style="font-size:36px;display:block;margin-bottom:12px"></i>No General Journal entries yet.</div>`;
+  if(!Object.keys(groups).length) return emptyState('ti-notebook','No Journal Entries Yet','Post your first general journal entry to start recording transactions.','New Journal Entry','showAddJournal()');
   const rows = Object.values(groups).map(g => {
     return g.lines.map((l,idx) => {
       const da = state.accounts.find(a=>String(a.id)===String(l.debit));
@@ -2673,7 +2752,7 @@ function buildDisbursementRows(entries) {
     g.approved  = g.lines.some(l=>l.approved);
     g.cancelled = g.lines.some(l=>l.cancelled);
   });
-  if(!Object.keys(groups).length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-cash-banknote" style="font-size:36px;display:block;margin-bottom:12px"></i>No Disbursement Journal entries yet.</div>`;
+  if(!Object.keys(groups).length) return emptyState('ti-cash-banknote','No Disbursements Yet','Record your first disbursement voucher to track payments made.','New Disbursement Voucher','showAddJournal(true)');
   const rows = Object.values(groups).map(g => {
     const crLines = g.lines.filter(l=>l.credit && isCashAcc(l.credit));
     const cashLine = crLines[0] || g.lines.find(l=>l.credit);
@@ -3065,10 +3144,19 @@ function showAddJournal(type, prefill) {
 <div class="form-row">
   <div class="form-group">
     <label>Payee <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-bolt" style="font-size:10px"></i> auto-fills from PO</span></label>
-    <select id="je-payee-sel" onchange="handlePayeeSel(this)"
-      style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-      ${supOpts}
-    </select>
+    <div style="position:relative">
+      <input type="text" id="je-payee-search" placeholder="Search or type payee name…"
+        value="${prefill?.payee||''}"
+        autocomplete="off"
+        style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)"
+        oninput="filterPayeeDropdown(this.value)"
+        onfocus="showPayeeDropdown()"
+        onblur="setTimeout(hidePayeeDropdown,200)">
+      <div id="je-payee-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:500;max-height:220px;overflow-y:auto;margin-top:2px">
+        ${(state.suppliers||[]).map(s=>`<div class="payee-opt" data-value="${s.name}" onclick="selectPayee('${s.name.replace(/'/g,"\\'")}')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">${s.name}</div>`).join('')}
+        <div class="payee-opt payee-add" onclick="addNewPayeeFromDV()" style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">➕ Add new supplier…</div>
+      </div>
+    </div>
     <input type="hidden" id="je-payee" value="${prefill?.payee||''}">
   </div>
   <div class="form-group"><label>Check / Reference No.</label>
@@ -3146,22 +3234,65 @@ ${disbFields}
   window._jeIsDisbursement = isDisbursement;
   window._jeEditGroupId = prefill?.groupId || null;
   renderJeLines();
-  // Pre-select payee dropdown if editing/prefill has payee
+  // Pre-fill payee search input if editing/prefill has payee
   if(isDisbursement && prefill?.payee) {
     setTimeout(() => {
-      const sel = document.getElementById('je-payee-sel');
-      const hid = document.getElementById('je-payee');
-      if(hid) hid.value = prefill.payee;
-      if(sel) {
-        for(let i=0; i<sel.options.length; i++) {
-          if(sel.options[i].value === prefill.payee) { sel.selectedIndex = i; break; }
-        }
-      }
+      const search = document.getElementById('je-payee-search');
+      const hid    = document.getElementById('je-payee');
+      if(hid)    hid.value    = prefill.payee;
+      if(search) search.value = prefill.payee;
     }, 50);
   }
 }
 
 // When "Drawn from" changes, auto-fill credit side on all lines
+function filterPayeeDropdown(q) {
+  const dd = document.getElementById('je-payee-dropdown');
+  if(!dd) return;
+  dd.style.display = '';
+  const opts = dd.querySelectorAll('.payee-opt:not(.payee-add)');
+  let any = false;
+  opts.forEach(opt => {
+    const match = !q || opt.dataset.value.toLowerCase().includes(q.toLowerCase());
+    opt.style.display = match ? '' : 'none';
+    if(match) any = true;
+  });
+  // Clear hidden field if user is typing a new value
+  document.getElementById('je-payee').value = '';
+}
+
+function showPayeeDropdown() {
+  const dd = document.getElementById('je-payee-dropdown');
+  if(dd) { dd.style.display = ''; filterPayeeDropdown(document.getElementById('je-payee-search')?.value||''); }
+}
+
+function hidePayeeDropdown() {
+  const dd = document.getElementById('je-payee-dropdown');
+  if(dd) dd.style.display = 'none';
+  // If user typed a name not in list, use it as custom payee
+  const search = document.getElementById('je-payee-search');
+  const hidden = document.getElementById('je-payee');
+  if(search && hidden && search.value && !hidden.value) {
+    hidden.value = search.value.trim();
+  }
+}
+
+function selectPayee(name) {
+  const search = document.getElementById('je-payee-search');
+  const hidden = document.getElementById('je-payee');
+  if(search) search.value = name;
+  if(hidden) hidden.value = name;
+  hidePayeeDropdown();
+}
+
+function addNewPayeeFromDV() {
+  hidePayeeDropdown();
+  if(confirm('Add a new supplier?\n\nYou will be redirected to the Add Supplier form. Your current DV will be lost.\n\nContinue?')) {
+    closeModal();
+    showAddSupplier('dv');
+  }
+}
+
 function handlePayeeSel(sel) {
   const val = sel.value;
   if(val === '__add_new__') {
@@ -3194,20 +3325,12 @@ function loadPOIntoJournal() {
   const refEl   = document.getElementById('je-ref');
   const descEl  = document.getElementById('je-desc');
   const payeeEl = document.getElementById('je-payee');
-  const payeeSelEl = document.getElementById('je-payee-sel');
   if(refEl && !refEl.value) refEl.value = poId;
   if(descEl && !descEl.value) descEl.value = `Payment — ${po.supplier} (${poId})`;
-  // Always auto-fill payee from PO supplier
+  // Auto-fill payee from PO supplier
   if(payeeEl) payeeEl.value = po.supplier || '';
-  // Sync the dropdown too if supplier exists in list
-  if(payeeSelEl && po.supplier) {
-    for(let i=0; i<payeeSelEl.options.length; i++) {
-      if(payeeSelEl.options[i].value === po.supplier) {
-        payeeSelEl.selectedIndex = i;
-        break;
-      }
-    }
-  }
+  const payeeSearchEl = document.getElementById('je-payee-search');
+  if(payeeSearchEl && po.supplier) payeeSearchEl.value = po.supplier;
 
   if(isDisbursement) {
     // DISBURSEMENT: Debit = Inventory/Expense account, Credit = Cash/Bank (auto from drawn-from)
@@ -3667,8 +3790,8 @@ const VAT_RATE = 0.12;
 function computeVAT(base) { const vat = parseFloat((base * VAT_RATE).toFixed(2)); return { vatBase: parseFloat(base.toFixed(2)), vat, amount: parseFloat((base + vat).toFixed(2)) }; }
 function vatFromGross(gross) { const base = parseFloat((gross / (1 + VAT_RATE)).toFixed(2)); const vat = parseFloat((gross - base).toFixed(2)); return { vatBase: base, vat, amount: parseFloat(gross.toFixed(2)) }; }
 
-function showSOCustBranch(sel) {
-  const name = sel.value;
+function showSOCustBranch(selOrVal) {
+  const name = typeof selOrVal === 'string' ? selOrVal : selOrVal?.value;
   const div  = document.getElementById('so-cust-branch');
   if(!div) return;
   const cust = state.customers.find(c=>c.name===name);
@@ -3876,7 +3999,7 @@ function showAddInvoice() {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Invoice Number</label><input type="text" id="inv-number" value="${'INV-' + String(state.invoices.length + 1).padStart(3,'0')}" style="font-family:monospace;font-weight:600"></div>
-  <div class="form-group"><label>Customer</label><select id="inv-cust" onchange="handleInvCustSel(this)">${custOpts}</select></div>
+  <div class="form-group"><label>Customer</label>${searchDropHTML('inv-cust-inp','inv-cust-dd','inv-cust','Select or search customer…')}</div>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Status</label><select id="inv-status"><option value="pending" selected>Pending</option></select></div>
@@ -4124,7 +4247,7 @@ function calcInvLines() {
 function calcInvVAT() { calcInvLines(); }
 
 function saveInvoice() {
-  const customer = document.getElementById('inv-cust').value;
+  const customer = document.getElementById('inv-cust')?.value || document.getElementById('inv-cust-inp')?.value || '';
   const date     = document.getElementById('inv-date').value;
   const due      = document.getElementById('inv-due').value;
   const terms    = document.getElementById('inv-terms')?.value || 'net30';
@@ -5962,7 +6085,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     <div style="font-size:13px;font-weight:600;margin-top:6px">GENERAL LEDGER (BIR)</div>
     <div style="font-size:11px;color:var(--text-secondary)">For the period: ${periodLabel}</div>
   </div>
-  ${html||'<div style="text-align:center;color:var(--text-tertiary);padding:32px">No journal entries or accounts in period</div>'}
+  ${html||emptyState('ti-receipt','No Expenses Yet','Record your first expense to track operating costs.','Add Expense','showAddExpense()')}
   <button class="btn no-print" onclick="window.print()" style="margin-top:12px"><i class="ti ti-printer"></i>Print</button>
 </div>`;
   }
@@ -6292,7 +6415,7 @@ function renderCollections(c, ta) {
 }
 
 function buildCollectionRows(rows) {
-  if(!rows.length) return `<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No collections found</td></tr>`;
+  if(!rows.length) return `<tr><td colspan="11">${emptyState('ti-cash','No Collections Yet','Record your first payment received from a customer.','Record Collection','showAddCollection()')}</td></tr>`;
   return rows.map(r => `<tr>
     <td class="mono">${r.id}</td><td>${r.date}</td><td style="font-weight:500">${r.customer}</td>
     <td class="mono">${r.invoice}</td><td>${r.mode}</td>
@@ -6504,7 +6627,7 @@ function getInvoiceBalance(invId) {
 }
 
 function filterCollectionInvoices() {
-  const custName = document.getElementById('col-cust')?.value;
+  const custName = document.getElementById('col-cust')?.value || document.getElementById('col-cust-inp')?.value;
   const list = document.getElementById('col-inv-list');
   const hint = document.getElementById('col-inv-hint');
   if(!list) return;
@@ -6579,7 +6702,7 @@ function calcCWT() {
 
 function saveCollection() {
   const date       = document.getElementById('col-date').value;
-  const customer   = document.getElementById('col-cust').value;
+  const customer   = document.getElementById('col-cust')?.value || document.getElementById('col-cust-inp')?.value || '';
   const list       = document.getElementById('col-inv-list');
   const selectedInvoices = list ? Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>cb.value) : [];
   const invoice    = selectedInvoices.length > 0 ? selectedInvoices.join(', ') : '—';
@@ -6794,7 +6917,7 @@ ${(outOfStockCount>0||lowStockCount>0)?`<div style="display:flex;gap:10px;margin
     <tr>${branchCols}</tr>
   </thead>
   <tbody>
-  ${rows.length===0?`<tr><td colspan="${5+branches.length}" style="text-align:center;padding:48px;color:var(--text-tertiary)">No inventory items yet.</td></tr>`:
+  ${rows.length===0?`<tr><td colspan="${5+branches.length}">${emptyState('ti-package','No Inventory Items Yet','Add your first item or import from a CSV file to start tracking stock.','Add Item','showAddItem()')}</td></tr>`:
   rows.map(r=>`<tr>
     <td class="mono">${r.it.id}</td>
     <td style="font-weight:500">${r.it.name}</td>
@@ -6899,7 +7022,7 @@ function buildConsignedItems() {
     <th>Prepared by</th><th>Status</th><th>Notes</th><th>Actions</th>
   </tr></thead>
   <tbody>
-  ${consigned.length===0 ? `<tr><td colspan="12" style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-box" style="font-size:32px;display:block;margin-bottom:10px"></i>No consigned items recorded yet.</td></tr>` :
+  ${consigned.length===0 ? `<tr><td colspan="12">${emptyState('ti-box','No Consigned Items Yet','Record items sent out on consignment to track what is with customers.','Add Consignment','showAddConsignment()')}</td></tr>` :
   [...consigned].reverse().map(c=>{
     const item = items.find(it=>it.id===c.itemId);
     const totalVal = (c.qty||0)*(c.unitPrice||0);
@@ -7314,7 +7437,7 @@ ${pending>0?`<div style="padding:9px 14px;background:var(--amber-bg);border:1px 
     <button class="btn primary" style="font-size:12px;padding:4px 10px" onclick="showTransferInventory()"><i class="ti ti-plus"></i>New Transfer</button>
   </div>
 </div>
-${transfers.length===0 ? `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-arrows-transfer-up" style="font-size:36px;display:block;margin-bottom:12px"></i>No transfers yet. Click <strong>New Transfer</strong> above.</div>` : `
+${transfers.length===0 ? emptyState('ti-arrows-transfer-up','No Transfers Yet','Move stock between your main warehouse and branches.','New Transfer','showTransferInventory()') : `
 <table>
   <thead><tr><th>ID</th><th>Date</th><th>From</th><th>To</th><th>Items</th><th style="text-align:center">Qty</th><th>Transferred by</th><th>Received by</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
@@ -7774,7 +7897,7 @@ function deleteBranch(id) {
 
 function buildInventoryReturns() {
   const returns = (state.salesReturns||[]);
-  if(!returns.length) return `<div style="text-align:center;padding:48px;color:var(--text-tertiary)"><i class="ti ti-arrow-back-up" style="font-size:36px;display:block;margin-bottom:12px"></i>No sales returns recorded yet.</div>`;
+  if(!returns.length) return emptyState('ti-arrow-back-up','No Sales Returns Yet','Record a return when a customer sends back items from an invoice.','New Sales Return','showAddReturn()');
 
   const totalReturnValue = returns.reduce((s,r)=>s+r.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
   const restocked = returns.filter(r=>r.restocked).length;
@@ -7936,7 +8059,7 @@ function buildInventoryItems() {
       <th style="text-align:right">Total Value</th>
       <th>Status</th><th></th>
     </tr></thead>
-    <tbody>${allRows||'<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-tertiary)">No inventory items yet.</td></tr>'}</tbody>
+    <tbody>${allRows||`<tr><td colspan="11">${emptyState('ti-package','No Inventory Items','Add your first item to get started.','Add Item','showAddItem()')}</td></tr>`}</tbody>
   </table>`;
 }
 
@@ -8417,7 +8540,7 @@ function renderSuppliers(c, ta) {
 }
 
 function buildSupplierRows(rows, purBySupplier) {
-  if(!rows.length) return `<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-tertiary)"><i class="ti ti-truck" style="font-size:32px;display:block;margin-bottom:10px"></i>No suppliers found</td></tr>`;
+  if(!rows.length) return `<tr><td colspan="12">${emptyState('ti-truck','No Suppliers Yet','Add your first supplier to link to purchase orders.','Add Supplier','showAddSupplier()')}</td></tr>`;
   return rows.map(s => `<tr>
     <td class="mono">${s.id}</td>
     <td style="font-weight:500;min-width:160px">${s.name}</td>
@@ -10240,7 +10363,7 @@ function showAddSO() {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Customer</label>
-    <select id="so-cust" onchange="handleSOCustSel(this);showSOCustBranch(this)">${custOpts}</select>
+    ${searchDropHTML('so-cust-inp','so-cust-dd','so-cust','Select or search customer…')}
     <div id="so-cust-branch" style="display:none;margin-top:4px;font-size:12px;color:var(--accent);padding:4px 8px;background:var(--accent-bg);border-radius:var(--radius-sm)"></div>
   </div>
   <div class="form-group">
@@ -10266,6 +10389,18 @@ function showAddSO() {
   <button class="btn primary" onclick="saveSO()">Create Sales Order</button>
 </div>`);
   renderOrderLines('so');
+  setTimeout(()=>{
+    makeSearchDrop('so-cust-inp','so-cust-dd','so-cust',
+      state.customers.map(c=>c.name),
+      (val)=>{ showSOCustBranch({value:val}); },
+      (typed)=>{
+        const msg = typed ? `Customer "${typed}" not found.` : 'Customer not in list.';
+        if(confirm(msg+'\n\nAdd new customer now? The SO form will re-open after saving.')) {
+          const cur = document.getElementById('so-cust').value;
+          closeModal(); showAddCustomer('so');
+        }
+      }, 'Add new customer…');
+  },100);
 }
 
 async function scanPOImage(input) {
@@ -10620,7 +10755,7 @@ function removeOrderLine(prefix, i) {
 }
 
 function saveSO() {
-  const customer    = document.getElementById('so-cust').value;
+  const customer    = document.getElementById('so-cust')?.value || document.getElementById('so-cust-inp')?.value || '';
   const date        = document.getElementById('so-date').value;
   const deliveryDate= document.getElementById('so-del').value;
   const notes       = document.getElementById('so-notes').value;
@@ -12477,7 +12612,7 @@ function renderDeposits(c, ta) {
     <th style="text-align:right">Amount</th><th>Status</th><th>Actions</th>
   </tr></thead>
   <tbody>
-  ${deps.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)"><i class="ti ti-building-bank" style="font-size:36px;display:block;margin-bottom:8px;opacity:0.3"></i>No deposit transactions yet.</td></tr>`:''}
+  ${deps.length===0?`<tr><td colspan="9">${emptyState('ti-building-bank','No Deposits Yet','Record your first bank deposit to track cash received.','New Deposit','showAddDeposit()')}</td></tr>`:''}
   ${[...deps].reverse().map(d=>`<tr>
     <td class="mono">${d.id}</td>
     <td>${d.date}</td>
@@ -13287,6 +13422,7 @@ function renderEmployees(c, ta) {
 <table>
   <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Position</th><th>Department</th><th>SSS No.</th><th>PhilHealth</th><th>Pag-IBIG</th><th>TIN</th><th style="text-align:right">Basic Salary</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
+  ${emps.length===0?`<tr><td colspan="9">${emptyState('ti-user-plus','No Employees Yet','Add your first employee to manage HR, attendance and payroll.','Add Employee','showAddEmployee()')}</td></tr>`:''}
   ${emps.map(e=>`<tr>
     <td class="mono">${e.id}</td>
     <td style="font-weight:500">${e.name}</td>
