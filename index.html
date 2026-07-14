@@ -3151,7 +3151,8 @@ function showAddJournal(type, prefill) {
         style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)"
         oninput="filterPayeeDropdown(this.value)"
         onfocus="showPayeeDropdown()"
-        onblur="setTimeout(hidePayeeDropdown,200)">
+        onblur="setTimeout(hidePayeeDropdown,200)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();checkPayeeAndPrompt();}if(event.key==='Escape')document.getElementById('je-payee-dropdown').style.display='none'">
       <div id="je-payee-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:500;max-height:220px;overflow-y:auto;margin-top:2px">
         ${(state.suppliers||[]).map(s=>`<div class="payee-opt" data-value="${s.name}" onclick="selectPayee('${s.name.replace(/'/g,"\\'")}')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">${s.name}</div>`).join('')}
         <div class="payee-opt payee-add" onclick="addNewPayeeFromDV()" style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">➕ Add new supplier…</div>
@@ -3257,7 +3258,6 @@ function filterPayeeDropdown(q) {
     opt.style.display = match ? '' : 'none';
     if(match) any = true;
   });
-  // Clear hidden field if user is typing a new value
   document.getElementById('je-payee').value = '';
 }
 
@@ -3269,25 +3269,56 @@ function showPayeeDropdown() {
 function hidePayeeDropdown() {
   const dd = document.getElementById('je-payee-dropdown');
   if(dd) dd.style.display = 'none';
-  // If user typed a name not in list, use it as custom payee
   const search = document.getElementById('je-payee-search');
   const hidden = document.getElementById('je-payee');
-  if(search && hidden && search.value && !hidden.value) {
-    hidden.value = search.value.trim();
+  if(!search || !hidden) return;
+  const typed = search.value.trim();
+  if(!typed) return;
+  // If exact match in suppliers, set it
+  const match = (state.suppliers||[]).find(s=>s.name.toLowerCase()===typed.toLowerCase());
+  if(match) {
+    hidden.value = match.name;
+    search.value = match.name;
+  } else if(!hidden.value) {
+    // Not in list and not already set — will be caught by checkPayeeAndPrompt on save
+    hidden.value = typed; // allow free-text payee
+  }
+}
+
+function checkPayeeAndPrompt() {
+  const search = document.getElementById('je-payee-search');
+  const hidden = document.getElementById('je-payee');
+  const dd     = document.getElementById('je-payee-dropdown');
+  if(dd) dd.style.display = 'none';
+  const typed = search?.value.trim();
+  if(!typed) return;
+  const match = (state.suppliers||[]).find(s=>s.name.toLowerCase()===typed.toLowerCase());
+  if(match) {
+    if(hidden) hidden.value = match.name;
+    if(search) search.value = match.name;
+  } else {
+    // Not found — prompt to add
+    if(confirm(`Supplier/Payee "${typed}" not found in your list.\n\nAdd "${typed}" as a new supplier now?\n\nClick Cancel to use it as a one-time payee without saving.`)) {
+      addNewPayeeFromDV();
+    } else {
+      // Use as free-text payee anyway
+      if(hidden) hidden.value = typed;
+    }
   }
 }
 
 function selectPayee(name) {
   const search = document.getElementById('je-payee-search');
   const hidden = document.getElementById('je-payee');
+  const dd     = document.getElementById('je-payee-dropdown');
   if(search) search.value = name;
   if(hidden) hidden.value = name;
-  hidePayeeDropdown();
+  if(dd) dd.style.display = 'none';
 }
 
 function addNewPayeeFromDV() {
-  hidePayeeDropdown();
-  if(confirm('Add a new supplier?\n\nYou will be redirected to the Add Supplier form. Your current DV will be lost.\n\nContinue?')) {
+  const typed = document.getElementById('je-payee-search')?.value.trim() || '';
+  if(confirm(`Add "${typed || 'new supplier'}" to your supplier list?\n\nThe Add Supplier form will open. Your DV progress will be lost.`)) {
     closeModal();
     showAddSupplier('dv');
   }
@@ -3732,7 +3763,15 @@ function saveJournal() {
   const approvedBy = document.getElementById('je-approved')?.value || '';
   const poRef  = document.getElementById('je-po-ref')?.value || '';
   const payee  = document.getElementById('je-payee')?.value ||
-                 (() => { const s = document.getElementById('je-payee-sel'); return s&&s.value!=='__add_new__'?s.value:''; })() || '';
+                 document.getElementById('je-payee-search')?.value || '';
+  // If payee typed but not in supplier list — prompt to add (non-blocking, save anyway)
+  if(isDisbursement && payee) {
+    const inList = (state.suppliers||[]).some(s=>s.name.toLowerCase()===payee.toLowerCase());
+    if(!inList && !window._jeEditGroupId) {
+      // non-blocking: show after save
+      window._dvNewPayeePrompt = payee;
+    }
+  }
   const checkNo= document.getElementById('je-checkno')?.value || '';
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
@@ -3783,6 +3822,20 @@ function saveJournal() {
   });
   auditLog(window._jeEditGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${window._jeEditGroupId?'Updated':'Posted'} ${isDisbursement?'Disbursement':'General'} Journal ${groupId} — ${desc}`});
   save(); closeModal(); render();
+  // Prompt to add payee as supplier if new
+  if(window._dvNewPayeePrompt) {
+    const newPayee = window._dvNewPayeePrompt;
+    window._dvNewPayeePrompt = null;
+    setTimeout(()=>{
+      if(confirm(`✅ Disbursement saved!\n\n"${newPayee}" was not found in your Suppliers list.\n\nWould you like to add "${newPayee}" as a new supplier now?`)) {
+        showAddSupplier('');
+        setTimeout(()=>{
+          const nameEl = document.getElementById('sup-name');
+          if(nameEl) nameEl.value = newPayee;
+        }, 100);
+      }
+    }, 300);
+  }
 }
 
 // ── INVOICES ─────────────────────────────────────────────────────────────────
