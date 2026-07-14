@@ -13432,10 +13432,13 @@ function recordAttendanceTimeIn(empId) {
   const timeIn = now.toTimeString().slice(0,5);
   const id = 'ATT-'+String((state.attendance||[]).length+1).padStart(4,'0');
   if(!state.attendance) state.attendance=[];
-  state.attendance.push({ id, date:today(), empId, status:'present', timeIn, timeOut:'', hoursWorked:0, overtimeHours:0, notes:'Auto-recorded via face verification', verifiedFace:true });
+  const rec = { id, date:today(), empId, empName:emp.name, status:'present', timeIn, timeOut:'', hoursWorked:0, overtimeHours:0, notes:'Auto-recorded via face verification', verifiedFace:true };
+  state.attendance.push(rec);
+  auditLog('CREATE','Attendance',id,{
+    description:`${emp.name} clocked IN at ${timeIn} via face verification`
+  });
   save();
   render();
-  // Success toast
   const toast = document.createElement('div');
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#10b981;color:#fff;border-radius:99px;padding:12px 24px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3)';
   toast.innerHTML = `✅ Good ${getTimeOfDay()}, ${emp.name}! Time in: ${timeIn}`;
@@ -13446,6 +13449,7 @@ function recordAttendanceTimeIn(empId) {
 function recordTimeOut(attId) {
   const rec = (state.attendance||[]).find(a=>a.id===attId);
   if(!rec) return;
+  const emp = (state.employees||[]).find(e=>e.id===rec.empId);
   const now = new Date();
   const timeOut = now.toTimeString().slice(0,5);
   rec.timeOut = timeOut;
@@ -13456,6 +13460,9 @@ function recordTimeOut(attId) {
   const regular = Math.min(totalMins/60, 8);
   rec.hoursWorked = parseFloat(regular.toFixed(2));
   rec.overtimeHours = parseFloat(Math.max(0,(totalMins/60)-8).toFixed(2));
+  auditLog('UPDATE','Attendance',attId,{
+    description:`${emp?.name||rec.empId} clocked OUT at ${timeOut} — ${rec.hoursWorked}h worked${rec.overtimeHours>0?' (+'+rec.overtimeHours+'h OT)':''}`
+  });
   save(); render();
   const toast = document.createElement('div');
   toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;border-radius:99px;padding:12px 24px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3)';
