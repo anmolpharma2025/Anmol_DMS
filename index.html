@@ -3785,19 +3785,12 @@ function saveJournal() {
   const preparedBy = document.getElementById('je-prepared')?.value || currentUser?.name || '';
   const approvedBy = document.getElementById('je-approved')?.value || '';
   const poRef  = document.getElementById('je-po-ref')?.value || '';
-  const payee  = document.getElementById('je-payee')?.value ||
-                 document.getElementById('je-payee-search')?.value || '';
-  // If payee typed but not in supplier list — prompt to add (non-blocking, save anyway)
-  if(isDisbursement && payee) {
-    const inList = (state.suppliers||[]).some(s=>s.name.toLowerCase()===payee.toLowerCase());
-    if(!inList && !window._jeEditGroupId) {
-      // non-blocking: show after save
-      window._dvNewPayeePrompt = payee;
-    }
-  }
-  const checkNo= document.getElementById('je-checkno')?.value || '';
   const isDisbursement = window._jeIsDisbursement;
   const drawnFrom = isDisbursement ? (document.getElementById('je-drawn-from')?.value || '') : '';
+  const payee  = document.getElementById('je-payee')?.value ||
+                 document.getElementById('je-payee-search')?.value || '';
+  const checkNo= document.getElementById('je-checkno')?.value || '';
+  window._dvNewPayeePrompt = null;
 
   if(isDisbursement && drawnFrom) {
     const debitLines  = jeLines.filter(l=>l.type==='debit' && l.debit && parseFloat(l.amount)>0);
