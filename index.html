@@ -10851,7 +10851,7 @@ function saveSO() {
   const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
   state.salesOrders.push({id, date, deliveryDate, customer, branch, lines, notes, preparedBy, status:'pending'});
-  auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${lines.length} item(s)`});
+  auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${(lines||[]).length} item(s)`});
   save(); closeModal(); render();
 }
 
@@ -13064,7 +13064,7 @@ function importInventoryCSV() {
   let added=0, updated=0, skipped=0;
 
   if(mode === 'replace') {
-    if(!confirm(`⚠️ REPLACE MODE\n\nThis will DELETE all ${state.inventory.length} existing inventory items and replace with ${items.length} items from your CSV.\n\nThis cannot be undone. Continue?`)) return;
+    if(!confirm(`⚠️ REPLACE MODE\n\nThis will DELETE all ${(state.inventory||[]).length} existing inventory items and replace with ${items.length} items from your CSV.\n\nThis cannot be undone. Continue?`)) return;
     state.inventory = items;
     added = items.length;
   } else {
@@ -13426,7 +13426,9 @@ function dismissFaceVerification() {
 }
 
 function recordAttendanceTimeIn(empId) {
-  const emp = (state.employees||[]).find(e=>e.id===empId);
+  if(!state.employees) state.employees = [];
+  if(!state.attendance) state.attendance = [];
+  const emp = state.employees.find(e=>e.id===empId);
   if(!emp) return;
   const now = new Date();
   const timeIn = now.toTimeString().slice(0,5);
@@ -13735,7 +13737,7 @@ function renderAttendance(c, ta) {
       <td style="font-weight:500">
         <div style="display:flex;align-items:center;gap:8px">
           <div style="width:32px;height:32px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--bg-secondary);border:1px solid var(--border-light)">
-            ${emp.photo?`<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-tertiary)">${emp.name.charAt(0)}</div>`}
+            ${emp.photo?`<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-tertiary)">${(emp.name||'?').charAt(0)}</div>`}
           </div>
           <div>
             <div>${emp.name}</div>
