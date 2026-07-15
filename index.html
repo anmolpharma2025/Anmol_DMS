@@ -2868,30 +2868,32 @@ ${buildDisbursementRows(disbEntries)}`;
 
 function printJournal(groupId, type) {
   const groupLines = (state.journal||[]).filter(j=>(j.group||j.id)===groupId);
-  if(!groupLines.length) {
-    alert('No journal lines found for entry ' + groupId + '. Please save the entry first.');
-    return;
-  }
+  if(!groupLines.length) { alert('No journal lines found for entry ' + groupId); return; }
   const first = groupLines[0];
   const cp = getCompanyProfile();
   const totalDebit  = groupLines.reduce((s,l)=>s+(l.debit?l.amount:0),0);
   const totalCredit = groupLines.reduce((s,l)=>s+(l.credit?l.amount:0),0);
   const lineRows = groupLines.map(l => {
-    const da = state.accounts.find(a=>String(a.id)===String(l.debit));
-    const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
+    const da = (state.accounts||[]).find(a=>String(a.id)===String(l.debit));
+    const ca = (state.accounts||[]).find(a=>String(a.id)===String(l.credit));
     const debitName  = l.debit  ? (da ? da.name : l.debit)  : '';
     const creditName = l.credit ? (ca ? ca.name : l.credit) : '';
     if(l.debit) return `<tr><td style="padding-left:8px">${debitName}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td></tr>`;
     return `<tr><td></td><td style="padding-left:20px;font-style:italic">${creditName}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td></tr>`;
   }).join('');
   const title = type==='disbursement' ? 'Disbursement Voucher' : 'Journal Entry Voucher';
-  const w = window.open('','_blank','width=800,height=600');
-  if(!w) { alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
+  const w = window.open('','_blank','width=800,height=650');
+  if(!w) { alert('Pop-up blocked. Allow pop-ups and try again.'); return; }
+  const preparedBy = first.preparedBy || currentUser?.name || '';
+  const approvedBy = first.approvedBy || '';
+  // Collect encrypted sigs from users
+  const encSigsJSON = JSON.stringify(
+    getUsers().reduce((obj,u)=>{ if(u.encryptedSig) obj[u.name]={encryptedSig:u.encryptedSig,id:u.id}; return obj;},{})
+  );
   w.document.write(`<!DOCTYPE html><html><head><title>${title} — ${groupId}</title>
 <style>
 body{font-family:Arial,sans-serif;font-size:12px;padding:24px 32px;color:#111;max-width:700px;margin:0 auto}
-h2{margin:0 0 2px;font-size:16px}
-h3{margin:0 0 14px;color:#555;font-size:13px;font-weight:400}
+h2{margin:0 0 2px;font-size:16px}h3{margin:0 0 14px;color:#555;font-size:13px;font-weight:400}
 .meta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:12px;font-size:12px}
 .meta-item{padding:6px 10px;border:1px solid #ddd;border-radius:4px}
 .meta-label{font-size:10px;color:#888;text-transform:uppercase;margin-bottom:2px}
@@ -2900,7 +2902,8 @@ th,td{border:1px solid #ccc;padding:7px 10px;font-size:12px}
 th{background:#f5f5f5;font-weight:600;text-align:left}
 .total td{font-weight:700;background:#f0f0f0;border-top:2px solid #333}
 .footer{margin-top:32px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
-.sig{border-top:1px solid #333;padding-top:6px;text-align:center;font-size:11px;color:#555}
+.sig{text-align:center}.sig-line{border-top:1px solid #333;padding-top:5px;font-size:11px;color:#555}
+.sig-img{max-width:200px;max-height:60px;display:block;margin:0 auto 6px}
 @media print{button{display:none}*{-webkit-print-color-adjust:exact}}
 </style></head><body>
 <h2>${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</h2>
@@ -2910,71 +2913,36 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
   <div class="meta-item"><div class="meta-label">Date</div>${first.date}</div>
   <div class="meta-item"><div class="meta-label">Reference</div>${first.ref||'—'}</div>
   ${first.payee?`<div class="meta-item"><div class="meta-label">Payee</div><strong>${first.payee}</strong></div>`:''}
-  ${first.checkNo?`<div class="meta-item"><div class="meta-label">Check / Ref No.</div><strong class="meta-label" style="font-family:monospace;color:#1a3a6b">${first.checkNo}</strong></div>`:''}
-  <div class="meta-item" style="grid-column:span ${first.payee||first.checkNo?1:2}"><div class="meta-label">Description / Particulars</div>${first.desc||'—'}</div>
-  <div class="meta-item"><div class="meta-label">Linked PO</div>${first.poRef?`<span style="color:#1a3a6b;font-weight:600">${first.poRef}</span>`:'—'}</div>
+  ${first.checkNo?`<div class="meta-item"><div class="meta-label">Check / Ref No.</div><strong style="font-family:monospace;color:#1a3a6b">${first.checkNo}</strong></div>`:''}
+  <div class="meta-item" style="grid-column:span 2"><div class="meta-label">Description</div>${first.desc||'—'}</div>
+  ${first.poRef?`<div class="meta-item"><div class="meta-label">Linked PO</div><span style="color:#1a3a6b;font-weight:600">${first.poRef}</span></div>`:''}
 </div>
 <table>
-  <thead><tr>
-    <th>Debit Account</th>
-    <th>Credit Account</th>
-    <th style="text-align:right;width:120px">Debit (₱)</th>
-    <th style="text-align:right;width:120px">Credit (₱)</th>
-  </tr></thead>
+  <thead><tr><th>Debit Account</th><th>Credit Account</th><th style="text-align:right;width:120px">Debit (₱)</th><th style="text-align:right;width:120px">Credit (₱)</th></tr></thead>
   <tbody>${lineRows}</tbody>
-  <tfoot>
-    <tr class="total">
-      <td colspan="2" style="text-align:right">TOTAL</td>
-      <td style="text-align:right">${fmt(totalDebit)}</td>
-      <td style="text-align:right">${fmt(totalCredit)}</td>
-    </tr>
-  </tfoot>
+  <tfoot><tr class="total"><td colspan="2" style="text-align:right">TOTAL</td><td style="text-align:right">${fmt(totalDebit)}</td><td style="text-align:right">${fmt(totalCredit)}</td></tr></tfoot>
 </table>
-<div class="footer" id="disb-sigs">
-  <div class="sig" id="esig-prep"></div>
-  <div class="sig" id="esig-approv"></div>
-  <div class="sig"><div style="border-top:1px solid #333;margin-top:40px;padding-top:6px;text-align:center;font-size:11px;color:#555">______________________<br>Received by / Date</div></div>
+<div style="margin-top:8px;font-size:12px;font-weight:600">Total: ${toWords(totalDebit)} (₱${totalDebit.toLocaleString('en-PH',{minimumFractionDigits:2})})</div>
+<div class="footer">
+  <div class="sig"><div id="sig-prep-img"></div><div class="sig-line" style="margin-top:${preparedBy?'4px':'48px'}">${preparedBy||'______________________'}<br>Prepared by</div></div>
+  <div class="sig"><div id="sig-approv-img"></div><div class="sig-line" style="margin-top:${approvedBy?'4px':'48px'}">${approvedBy||'______________________'}<br>Approved by</div></div>
+  <div class="sig"><div style="margin-top:52px" class="sig-line">______________________<br>Received by / Date</div></div>
 </div>
-<div style="margin-top:12px;text-align:right">
-  <button onclick="window.print()" style="padding:8px 20px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button>
-</div>
+<div style="margin-top:12px;text-align:right"><button onclick="window.print()" style="padding:8px 20px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button></div>
 <script>
-(async function() {
-  async function sha256(msg) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  async function makeSig(signer, docId, role, ts, tin) {
-    const secret = 'ANMOL_PHARMA_ESIG_2025_'+(tin||'CORP');
-    const hash = await sha256(role+'|'+docId+'|'+signer+'|'+ts+'|'+secret);
-    const pts = [];
-    for(let i=0;i<20;i++){const v=parseInt(hash.slice(i*2,i*2+2),16);pts.push(i*14+','+(20+(v%20)-10));}
-    const path='M'+pts.join(' L');
-    const vc=hash.slice(0,4).toUpperCase()+'-'+hash.slice(4,8).toUpperCase()+'-'+hash.slice(8,12).toUpperCase()+'-'+hash.slice(12,16).toUpperCase();
-    return '<div style="text-align:center">'
-      +'<svg width="280" height="40"><path d="'+path+'" fill="none" stroke="#1a3a6b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-      +'<div style="border-top:1px solid #333;padding-top:5px;margin-top:2px">'
-      +'<div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
-      +'<div style="font-size:9px;color:#555;margin-top:2px">'+role.replace('JE-','').replace('-APPROVED','')+'</div>'
-      +'<div style="margin-top:4px;display:inline-block;padding:2px 8px;border:1px solid #ccc;border-radius:3px;font-size:8px;font-family:monospace;color:#666">🔏 '+vc+' · '+ts+'</div>'
-      +'</div></div>';
-  }
-  async function blankSig(role) {
-    return '<div style="border-top:1px solid #333;margin-top:48px;padding-top:5px;text-align:center;font-size:11px;color:#555">______________________<br>'+role+'</div>';
-  }
-  const ts = new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'});
-  const tin = '${(getCompanyProfile().tin||'')}';
-  const prep = document.getElementById('esig-prep');
-  const appr = document.getElementById('esig-approv');
-  const preparedBy = '${(first.preparedBy||currentUser?.name||'')}';
-  const approvedBy = '${(first.approvedBy||'')}';
-  if(prep) prep.innerHTML = preparedBy ? await makeSig(preparedBy,'${groupId}','DISB-PREPARED',ts,tin) : await blankSig('Prepared by');
-  if(appr) appr.innerHTML = approvedBy ? await makeSig(approvedBy,'${groupId}','DISB-APPROVED',ts,tin) : await blankSig('Approved by');
+(async function(){
+  const encSigs=${encSigsJSON};
+  const compTin='${cp.tin||''}';
+  async function dec(enc64,pwd){try{const b=Uint8Array.from(atob(enc64),c=>c.charCodeAt(0));const s=b.slice(0,16),iv=b.slice(16,28),d=b.slice(28);const e=new TextEncoder();const km=await crypto.subtle.importKey('raw',e.encode(pwd),'PBKDF2',false,['deriveKey']);const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:s,iterations:100000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);const r=await crypto.subtle.decrypt({name:'AES-GCM',iv},k,d);return new TextDecoder().decode(r);}catch(e){return null;}}
+  async function showSig(name, elId){const u=encSigs[name];if(!u)return;const pwd='ANMOLPHARMA_SIG_'+(compTin||'CORP')+'_'+u.id;const url=await dec(u.encryptedSig,pwd);if(!url)return;const el=document.getElementById(elId);if(el)el.innerHTML='<img src="'+url+'" class="sig-img">';}
+  await showSig('${preparedBy}','sig-prep-img');
+  await showSig('${approvedBy}','sig-approv-img');
 })();
 <\/script>
 </body></html>`);
   w.document.close();
 }
+
 
 function printAllJournal(type) {
   const cashKeywords = ['cash','bank','petty','drawing'];
@@ -2995,23 +2963,29 @@ function printAllJournal(type) {
   const cp = getCompanyProfile();
   const title = type==='disbursement' ? 'Disbursement Journal' : 'General Journal';
   const tableRows = Object.values(groups).map(g => g.lines.map((l,idx)=>{
-    const da=state.accounts.find(a=>String(a.id)===String(l.debit)), ca=state.accounts.find(a=>String(a.id)===String(l.credit));
-    const meta=idx===0?`<td rowspan="${g.lines.length}">${g.id}</td><td rowspan="${g.lines.length}">${g.date}</td><td rowspan="${g.lines.length}">${g.ref}</td><td rowspan="${g.lines.length}">${g.desc}</td>`:'';
-    if(l.debit) return `<tr>${meta}<td style="padding-left:8px">${da?da.name:l.debit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td></tr>`;
-    return `<tr>${meta}<td></td><td style="padding-left:20px;font-style:italic">${ca?ca.name:l.credit}</td><td></td><td style="text-align:right">${fmt(l.amount)}</td></tr>`;
+    const da=(state.accounts||[]).find(a=>String(a.id)===String(l.debit)), ca=(state.accounts||[]).find(a=>String(a.id)===String(l.credit));
+    const rowspan = g.lines.length;
+    const meta = idx===0
+      ? '<td rowspan="'+rowspan+'">'+(g.id||'')+'</td><td rowspan="'+rowspan+'">'+(g.date||'')+'</td><td rowspan="'+rowspan+'">'+(g.ref||'')+'</td><td rowspan="'+rowspan+'">'+(g.desc||'')+'</td>'
+      : '';
+    if(l.debit) return '<tr>'+meta+'<td style="padding-left:8px">'+(da?da.name:l.debit)+'</td><td></td><td style="text-align:right">'+fmt(l.amount)+'</td><td></td></tr>';
+    return '<tr>'+meta+'<td></td><td style="padding-left:20px;font-style:italic">'+(ca?ca.name:l.credit)+'</td><td></td><td style="text-align:right">'+fmt(l.amount)+'</td></tr>';
   }).join('')).join('');
   const w = window.open('','_blank','width=900,height=700');
-  w.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
-<style>body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#111}
-h2{margin:0 0 2px}h3{margin:0 0 14px;color:#555}
-table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;vertical-align:top}
-th{background:#f5f5f5;font-weight:600}
-@media print{button{display:none}}</style></head><body>
-<h2>${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</h2>
-<h3>${title}</h3>
-<table><thead><tr><th>Entry #</th><th>Date</th><th>Ref</th><th>Description</th><th>Debit Account</th><th>Credit Account</th><th style="text-align:right">Debit (₱)</th><th style="text-align:right">Credit (₱)</th></tr></thead>
-<tbody>${tableRows}</tbody></table>
-<script>window.onload=()=>{window.print()}<\/script></body></html>`);
+  if(!w) { alert('Pop-up blocked.'); return; }
+  const cpName = cp.name||'ANMOL PHARMACEUTICALS US CORP.';
+  const html = '<!DOCTYPE html><html><head><title>'+title+'</title>'
+    +'<style>body{font-family:Arial,sans-serif;font-size:11px;padding:20px;color:#111}'
+    +'h2{margin:0 0 2px}h3{margin:0 0 14px;color:#555}'
+    +'table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:5px 8px;vertical-align:top}'
+    +'th{background:#f5f5f5;font-weight:600}@media print{button{display:none}}</style></head><body>'
+    +'<h2>'+cpName+'</h2><h3>'+title+'</h3>'
+    +'<table><thead><tr><th>Entry #</th><th>Date</th><th>Ref</th><th>Description</th>'
+    +'<th>Debit Account</th><th>Credit Account</th>'
+    +'<th style="text-align:right">Debit (₱)</th><th style="text-align:right">Credit (₱)</th>'
+    +'</tr></thead><tbody>'+tableRows+'</tbody></table>'
+    +'<script>window.onload=()=>{window.print()}<\/script></body></html>';
+  w.document.write(html);
   w.document.close();
 }
 
@@ -10411,7 +10385,10 @@ tr:last-child td{border-bottom:2px solid #1a1a1a}
 
 function renderSOViewLines(so, canApproveItems) {
   const inv = state.inventory||[];
-  return so.lines.map((line,i) => {
+  const soTotal    = so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+  const soVatBase  = parseFloat((soTotal/1.12).toFixed(2));
+  const soVat      = parseFloat((soTotal - soVatBase).toFixed(2));
+  const lines = so.lines.map((line,i) => {
     const item = inv.find(it=>it.id===line.itemId);
     const enough = !item || item.qty >= (line.qty||0);
     const avail = item ? item.qty : null;
@@ -10442,6 +10419,21 @@ function renderSOViewLines(so, canApproveItems) {
       <div style="font-weight:600;font-size:14px;text-align:right">${fmt(line.lineTotal||0)}</div>
     </div>`;
   }).join('');
+
+  // Total summary row
+  const summary = `
+  <div style="display:flex;justify-content:flex-end;margin-top:4px;padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-mid);background:var(--bg-secondary)">
+    <table style="font-size:12px;border-collapse:collapse;min-width:260px">
+      <tr><td style="padding:2px 12px;color:var(--text-secondary)">VAT Base (ex VAT)</td><td style="padding:2px 0;text-align:right;font-weight:500">${fmt(soVatBase)}</td></tr>
+      <tr><td style="padding:2px 12px;color:var(--text-secondary)">Output VAT (12%)</td><td style="padding:2px 0;text-align:right;font-weight:500;color:var(--accent)">${fmt(soVat)}</td></tr>
+      <tr style="border-top:1.5px solid var(--border-mid)">
+        <td style="padding:6px 12px;font-weight:700;font-size:14px">TOTAL</td>
+        <td style="padding:6px 0;text-align:right;font-weight:700;font-size:18px;color:var(--accent)">${fmt(soTotal)}</td>
+      </tr>
+    </table>
+  </div>`;
+
+  return lines + summary;
 }
 
 function toggleSOLineApproval(soId, lineIdx, approved) {
@@ -11639,7 +11631,7 @@ function paymentTermsLabel(term) {
 
 function renderPOViewLines(po, canReceive) {
   const inv = state.inventory||[];
-  return po.lines.map((line, i) => {
+  const rows = po.lines.map((line, i) => {
     const item = inv.find(it=>it.id===line.itemId);
     const isDelivered = line.deliveryStatus === 'delivered';
     const isUndelivered = line.deliveryStatus === 'undelivered';
@@ -11681,6 +11673,29 @@ function renderPOViewLines(po, canReceive) {
       ${actionBtns}
     </div>`;
   }).join('');
+
+  // Total summary
+  const poTotal      = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poVatableAmt = po.lines.filter(l=>!l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poExemptAmt  = po.lines.filter(l=>l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const poVatBase    = parseFloat((poVatableAmt/1.12).toFixed(2));
+  const poInputVat   = parseFloat((poVatableAmt - poVatBase).toFixed(2));
+
+  const summary = `
+  <div style="display:flex;justify-content:flex-end;margin-top:4px;padding:10px 14px;border-radius:var(--radius-md);border:1px solid var(--border-mid);background:var(--bg-secondary)">
+    <table style="font-size:12px;border-collapse:collapse;min-width:280px">
+      ${poVatableAmt>0?`
+      <tr><td style="padding:2px 12px;color:var(--text-secondary)">Taxable Amount (ex VAT)</td><td style="padding:2px 0;text-align:right;font-weight:500">${fmt(poVatBase)}</td></tr>
+      <tr><td style="padding:2px 12px;color:var(--text-secondary)">Input VAT (12%)</td><td style="padding:2px 0;text-align:right;font-weight:500;color:var(--accent)">${fmt(poInputVat)}</td></tr>`:''}
+      ${poExemptAmt>0?`<tr><td style="padding:2px 12px;color:var(--text-secondary)">VAT Exempt Amount</td><td style="padding:2px 0;text-align:right;font-weight:500;color:var(--amber)">${fmt(poExemptAmt)}</td></tr>`:''}
+      <tr style="border-top:1.5px solid var(--border-mid)">
+        <td style="padding:6px 12px;font-weight:700;font-size:14px">TOTAL AMOUNT</td>
+        <td style="padding:6px 0;text-align:right;font-weight:700;font-size:18px;color:var(--accent)">${fmt(poTotal)}</td>
+      </tr>
+    </table>
+  </div>`;
+
+  return rows + summary;
 }
 
 function _refreshPOModal(po) {
