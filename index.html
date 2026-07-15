@@ -2867,7 +2867,7 @@ ${buildDisbursementRows(disbEntries)}`;
 }
 
 function printJournal(groupId, type) {
-  const groupLines = state.journal.filter(j=>(j.group||j.id)===groupId);
+  const groupLines = (state.journal||[]).filter(j=>(j.group||j.id)===groupId);
   if(!groupLines.length) {
     alert('No journal lines found for entry ' + groupId + '. Please save the entry first.');
     return;
@@ -2978,7 +2978,7 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
 function printAllJournal(type) {
   const cashKeywords = ['cash','bank','petty','drawing'];
   function isCashAcc(id) { const a=state.accounts.find(a=>String(a.id)===String(id)); return a&&cashKeywords.some(k=>a.name.toLowerCase().includes(k)); }
-  const entries = state.journal.filter(j => {
+  const entries = (state.journal||[]).filter(j => {
     if(type==='disbursement') {
       if(j.type==='disbursement') return true; if(j.type==='general') return false;
       const gl=state.journal.filter(x=>(x.group||x.id)===(j.group||j.id));
@@ -10989,7 +10989,7 @@ function updateOrderLine(prefix, i, field, val) {
       const branchId = currentUser?.branchId;
       const availQty = branchId ? (getBranchStock(branchId)[item.id]||0) : (item.qty||0);
       if(qty > availQty) {
-        const inp = document.getElementById(`${prefix}-item-${i}`);
+        const inp = document.getElementById(`${prefix}-item-inp-${i}`);
         if(inp) inp.style.border = '1.5px solid var(--red)';
         // Show inline warning
         const tb = document.getElementById(`${prefix}-lines-body`);
@@ -11002,7 +11002,7 @@ function updateOrderLine(prefix, i, field, val) {
           }
         }
       } else {
-        const inp = document.getElementById(`${prefix}-item-${i}`);
+        const inp = document.getElementById(`${prefix}-item-inp-${i}`);
         if(inp) inp.style.border='';
         const tb = document.getElementById(`${prefix}-lines-body`);
         if(tb) { const row=tb.querySelectorAll('tr')[i]; if(row){ const warn=row.querySelector('.stock-warn'); if(warn) warn.remove(); } }
@@ -11011,6 +11011,29 @@ function updateOrderLine(prefix, i, field, val) {
   }
   const tb=document.getElementById(`${prefix}-lines-body`);
   if(tb){ const rows=tb.querySelectorAll('tr'); if(rows[i]){ const cells=rows[i].querySelectorAll('td'); if(cells[3]) cells[3].textContent=fmt(qty*price); } }
+}
+
+function renderSOTotals() {
+  const soLines = window._soLines||[];
+  const tb = document.getElementById('so-lines-body');
+  if(!tb) return;
+  tb.querySelectorAll('tr').forEach((row,i)=>{
+    const l = soLines[i]; if(!l) return;
+    const cells = row.querySelectorAll('td');
+    if(cells[3]) cells[3].textContent = fmt((parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0));
+  });
+}
+
+function updatePOTotals() {
+  const poLines = window._poLines||[];
+  const tb = document.getElementById('po-lines-body');
+  if(!tb) return;
+  tb.querySelectorAll('tr').forEach((row,i)=>{
+    const l = poLines[i]; if(!l) return;
+    const cells = row.querySelectorAll('td');
+    const lt = (parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0);
+    if(cells[4]) cells[4].textContent = fmt(lt);
+  });
 }
 
 function loadInvoiceForReturn() {
