@@ -4025,9 +4025,6 @@ function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(con
 let invLines = [];
 
 function showAddInvoice() {
-  const custOpts = '<option value="">— Select customer —</option>' +
-    state.customers.map(cu=>`<option value="${cu.name}">${cu.name}${(cu.branches&&cu.branches.length>1)?' ('+cu.branches.length+' branches)':cu.branch?' — '+cu.branch:''}</option>`).join('') +
-    '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
   const due = new Date(); due.setDate(due.getDate() + 30);
   invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
   window._invVatType = 'inclusive';
@@ -4114,6 +4111,16 @@ function showAddInvoice() {
   <button class="btn primary" onclick="saveInvoice()">Create Invoice</button>
 </div>`;
   renderInvLines();
+  setTimeout(()=>{
+    makeSearchDrop('inv-cust-inp','inv-cust-dd','inv-cust',
+      (state.customers||[]).map(c=>c.name),
+      ()=>{},
+      (typed)=>{
+        if(confirm((typed?`Customer "${typed}" not found.`:'Customer not in list.')+'\n\nAdd new customer now?')) {
+          closeModal(); showAddCustomer('inv');
+        }
+      }, 'Add new customer…');
+  }, 100);
 }
 
 function loadSOIntoInvoice() {
@@ -4128,12 +4135,12 @@ function loadSOIntoInvoice() {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
 
-  // Auto-fill customer
-  const custSel = document.getElementById('inv-cust');
-  if(custSel && so.customer) {
-    for(let i=0;i<custSel.options.length;i++) {
-      if(custSel.options[i].value===so.customer) { custSel.selectedIndex=i; break; }
-    }
+  // Auto-fill customer from SO
+  const custInp = document.getElementById('inv-cust-inp');
+  const custHid = document.getElementById('inv-cust');
+  if(so.customer) {
+    if(custInp) custInp.value = so.customer;
+    if(custHid) custHid.value = so.customer;
   }
 
   // Load ALL lines regardless of approval status
