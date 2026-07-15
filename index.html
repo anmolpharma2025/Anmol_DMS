@@ -4168,10 +4168,8 @@ function renderInvLines() {
   const tbody = document.getElementById('inv-lines-body');
   if(!tbody) return;
   const items = state.inventory || [];
-  const dlId = 'inv-items-dl';
-  const datalist = `<datalist id="${dlId}">${items.map(it=>`<option value="${it.name}" data-id="${it.id}" data-price="${it.salePrice}">`).join('')}</datalist>`;
 
-  tbody.innerHTML = datalist + invLines.map((l, i) => {
+  tbody.innerHTML = invLines.map((l, i) => {
     const lineTotal = (parseFloat(l.qty)||0) * (parseFloat(l.unitPrice)||0);
     const linkedItem = items.find(it => String(it.id) === String(l.itemId));
     const stockWarn = linkedItem && (parseFloat(l.qty)||0) > linkedItem.qty
@@ -4179,13 +4177,16 @@ function renderInvLines() {
     const isExempt = l.vatExempt === true;
 
     return `<tr>
-      <td style="padding:4px 6px;vertical-align:top">
-        <input type="text" id="inv-item-${i}" list="${dlId}"
-          value="${linkedItem?linkedItem.name:(l.desc||'')}" placeholder="Search item…"
+      <td style="padding:4px 6px;vertical-align:top;position:relative;min-width:180px">
+        <input type="text" id="inv-item-inp-${i}"
+          value="${linkedItem?linkedItem.name:(l.desc||'')}" placeholder="Search or type item…"
           autocomplete="off"
-          oninput="matchInvItem(${i},this.value)"
-          onchange="matchInvItem(${i},this.value)"
+          oninput="filterInvItemDrop(${i},this.value)"
+          onfocus="showInvItemDrop(${i})"
+          onblur="setTimeout(()=>hideInvItemDrop(${i}),200)"
+          onkeydown="invItemDropKeydown(event,${i})"
           style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+        <div id="inv-item-dd-${i}" style="display:none;position:absolute;top:100%;left:0;min-width:260px;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:600;max-height:200px;overflow-y:auto;margin-top:2px"></div>
         ${stockWarn}
       </td>
       <td style="padding:4px 6px;vertical-align:top">
@@ -4202,13 +4203,88 @@ function renderInvLines() {
         </label>
       </td>
       <td style="text-align:right;font-size:13px;padding:4px 8px;font-weight:500;vertical-align:top">
-        ${fmt(lineTotal)}
-        ${isExempt?`<div style="font-size:9px;color:var(--amber)">exempt</div>`:''}
+        ${fmt(lineTotal)}${isExempt?`<div style="font-size:9px;color:var(--amber)">exempt</div>`:''}
       </td>
       <td style="vertical-align:top;padding:4px 4px"><button class="je-line-btn" onclick="removeInvLine(${i})" title="Remove line">×</button></td>
     </tr>`;
   }).join('');
+
+  // Build invoice item dropdowns
+  invLines.forEach((_,i) => buildInvItemDrop(i));
   calcInvLines();
+}
+
+function buildInvItemDrop(i) {
+  const items = state.inventory||[];
+  const dd = document.getElementById(`inv-item-dd-${i}`);
+  if(!dd) return;
+  dd.innerHTML = items.map(it=>`
+    <div class="inv-item-opt" data-id="${it.id}" data-name="${it.name}"
+      onmousedown="selectInvItem(${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${it.salePrice||0})"
+      style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
+      onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+      <div style="font-weight:500">${it.name}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · Sale: ₱${it.salePrice||0} · Stock: ${it.qty||0}</div>
+    </div>`).join('') +
+  `<div onmousedown="addNewItemFromInv(${i})"
+    style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
+    onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+    ➕ Add new inventory item…
+  </div>`;
+}
+
+function filterInvItemDrop(i, q) {
+  const dd = document.getElementById(`inv-item-dd-${i}`);
+  if(!dd) return;
+  dd.style.display = '';
+  dd.querySelectorAll('.inv-item-opt').forEach(opt=>{
+    opt.style.display = (!q || opt.dataset.name.toLowerCase().includes(q.toLowerCase())) ? '' : 'none';
+  });
+}
+
+function showInvItemDrop(i) { filterInvItemDrop(i, document.getElementById(`inv-item-inp-${i}`)?.value||''); }
+function hideInvItemDrop(i) {
+  const dd = document.getElementById(`inv-item-dd-${i}`);
+  if(dd) dd.style.display = 'none';
+  const inp = document.getElementById(`inv-item-inp-${i}`);
+  if(inp && invLines[i] && !invLines[i].itemId) invLines[i].desc = inp.value.trim();
+}
+
+function invItemDropKeydown(e, i) {
+  if(e.key==='Escape') hideInvItemDrop(i);
+  if(e.key==='Enter') {
+    e.preventDefault();
+    const q = document.getElementById(`inv-item-inp-${i}`)?.value.trim();
+    if(!q) return;
+    const match = (state.inventory||[]).find(it=>it.name.toLowerCase()===q.toLowerCase());
+    if(match) { selectInvItem(i, match.id, match.name, match.salePrice||0); }
+    else {
+      hideInvItemDrop(i);
+      if(confirm(`Item "${q}" not found.\n\nAdd as new inventory item now?`)) {
+        window._pendingInvItemLine = { i, name: q };
+        closeModal(); showAddItem();
+      }
+    }
+  }
+}
+
+function selectInvItem(i, itemId, name, price) {
+  const inp = document.getElementById(`inv-item-inp-${i}`);
+  if(inp) inp.value = name;
+  hideInvItemDrop(i);
+  invLines[i].itemId = itemId;
+  invLines[i].desc   = name;
+  if(!invLines[i].unitPrice) invLines[i].unitPrice = parseFloat(price)||0;
+  invLines[i].lineTotal = (invLines[i].qty||1)*(invLines[i].unitPrice||0);
+  renderInvLines();
+}
+
+function addNewItemFromInv(i) {
+  const typed = document.getElementById(`inv-item-inp-${i}`)?.value.trim()||'';
+  if(confirm(`Item "${typed||'new item'}" not found.\n\nAdd as new inventory item?`)) {
+    window._pendingInvItemLine = { i, name: typed };
+    closeModal(); showAddItem();
+  }
 }
 
 function matchInvItem(i, val) {
@@ -5444,6 +5520,26 @@ function showReport(type) {
     status: po.status, tin: (state.suppliers||[]).find(s=>s.name===po.supplier)?.tin||''
   }));
   const expInPeriod  = (state.expenses||[]).filter(e=>inPeriod(e.date));
+
+  // Also pull expense entries from Disbursement Journal (debit to expense accounts)
+  const expAccounts  = (state.accounts||[]).filter(a=>a.type==='Expense');
+  const expAccIdSet  = new Set(expAccounts.map(a=>String(a.id)));
+  const dvExpEntries = (state.journal||[])
+    .filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIdSet.has(String(j.debit))&&inPeriod(j.date))
+    .map(j=>{
+      const acc = expAccounts.find(a=>String(a.id)===String(j.debit));
+      return {
+        id:        j.id,
+        date:      j.date,
+        amount:    j.amount||0,
+        vatBase:   j.amount||0,
+        category:  acc?.name || 'Other',
+        expType:   acc?.subType==='Selling'?'operating':'admin',
+        vendor:    j.payee||'',
+        notes:     j.desc||''
+      };
+    });
+  const allExpInPeriod = [...expInPeriod, ...dvExpEntries];
   const colInPeriod  = (state.collections||[]).filter(r=>inPeriod(r.date));
   const payInPeriod  = (state.payrolls||[]).filter(p=>p.status==='released'&&inPeriod(p.payDate));
 
@@ -5456,8 +5552,8 @@ function showReport(type) {
   const cosTotal   = purEntries.reduce((s,p)=>s+(p.vatBase!=null?p.vatBase:p.amount||0),0);
   const grossProfit= revenueVATBase - cosTotal;
 
-  // EXPENSES
-  const allExp   = expInPeriod;
+  // EXPENSES (state.expenses + DV journal expense debits)
+  const allExp   = allExpInPeriod;
   const adminExp = allExp.filter(e=>e.expType==='admin'||!e.expType).reduce((s,e)=>s+(e.vatBase!=null?e.vatBase:e.amount||0),0);
   const opExp    = allExp.filter(e=>e.expType==='operating').reduce((s,e)=>s+(e.vatBase!=null?e.vatBase:e.amount||0),0);
   const totalExp = adminExp + opExp;
@@ -5560,9 +5656,9 @@ function showReport(type) {
     // Group COS by category
     const cosByCategory = groupBy(purEntries, p=>p.category, p=>p.vatBase!=null?p.vatBase:p.amount||0);
     // Group admin exp by category
-    const adminByCat = groupBy(allExp.filter(e=>e.expType==='admin'||!e.expType), e=>e.category, e=>e.vatBase!=null?e.vatBase:e.amount||0);
+    const adminByCat = groupBy(allExp.filter(e=>e.expType==='admin'||!e.expType), e=>e.category||'General', e=>e.vatBase!=null?e.vatBase:e.amount||0);
     // Group operating exp by category
-    const opByCat    = groupBy(allExp.filter(e=>e.expType==='operating'), e=>e.category, e=>e.vatBase!=null?e.vatBase:e.amount||0);
+    const opByCat    = groupBy(allExp.filter(e=>e.expType==='operating'), e=>e.category||'Operating', e=>e.vatBase!=null?e.vatBase:e.amount||0);
 
     rb.innerHTML = `<div class="report-section" style="max-width:860px">
       <div class="report-section-title">Income Statement — ${periodLabel}</div>
@@ -10667,30 +10763,123 @@ function renderOrderLines(prefix) {
   const lines = getOrderLines(prefix);
   const isSOLine = prefix === 'so';
   const items = state.inventory||[];
-  const itemOpts = `<option value="">— select item —</option>` +
-    items.map(it=>`<option value="${it.id}" data-name="${it.name}" data-price="${isSOLine?it.salePrice:it.costPrice}" data-unit="${it.unit}">${it.name} (${it.unit})</option>`).join('');
 
   const tbody = document.getElementById(`${prefix}-lines-body`);
   if(!tbody) return;
-  const datalistId = `${prefix}-items-dl`;
-  const datalist = `<datalist id="${datalistId}">${items.map(it=>`<option value="${it.name}" data-id="${it.id}">`).join('')}</datalist>`;
 
-  tbody.innerHTML = datalist + lines.map((l,i)=>{
+  tbody.innerHTML = lines.map((l,i)=>{
     const item = items.find(it=>it.id===l.itemId);
-    return `<tr>
-    <td>
-      <input type="text" id="${prefix}-item-${i}" list="${datalistId}"
-        value="${item?item.name:''}" placeholder="Search item…"
+    return `<tr id="${prefix}-line-row-${i}">
+    <td style="position:relative;min-width:180px">
+      <input type="text" id="${prefix}-item-inp-${i}"
+        value="${item?item.name:l.desc||''}" placeholder="Search or type item…"
         autocomplete="off"
-        oninput="matchOrderItem('${prefix}',${i},this.value)"
-        onchange="matchOrderItem('${prefix}',${i},this.value)"
+        oninput="filterItemDrop('${prefix}',${i},this.value)"
+        onfocus="showItemDrop('${prefix}',${i})"
+        onblur="setTimeout(()=>hideItemDrop('${prefix}',${i}),200)"
+        onkeydown="itemDropKeydown(event,'${prefix}',${i})"
         style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+      <div id="${prefix}-item-dd-${i}" style="display:none;position:absolute;top:100%;left:0;min-width:260px;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:600;max-height:200px;overflow-y:auto;margin-top:2px"></div>
     </td>
     <td><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updateOrderLine('${prefix}',${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
     <td><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updateOrderLine('${prefix}',${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
     <td style="text-align:right;padding:4px 8px;font-weight:500">${fmt((parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0))}</td>
     <td><button class="je-line-btn" onclick="removeOrderLine('${prefix}',${i})">×</button></td>
   </tr>`;}).join('');
+
+  // init dropdowns after render
+  lines.forEach((_,i) => buildItemDrop(prefix, i, isSOLine));
+}
+
+function buildItemDrop(prefix, i, isSale) {
+  const items = state.inventory||[];
+  const dd = document.getElementById(`${prefix}-item-dd-${i}`);
+  if(!dd) return;
+  dd.innerHTML = items.map(it=>`
+    <div class="item-opt" data-id="${it.id}" data-name="${it.name}" data-price="${isSale?it.salePrice:it.costPrice}" data-unit="${it.unit||''}"
+      onmousedown="selectItemLine('${prefix}',${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${isSale?it.salePrice:it.costPrice},'${it.unit||''}')"
+      style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
+      onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+      <div style="font-weight:500">${it.name}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · ₱${(isSale?it.salePrice:it.costPrice)||0}</div>
+    </div>`).join('') +
+  `<div class="item-add-opt" onmousedown="addNewItemFromLine('${prefix}',${i})"
+    style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
+    onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+    ➕ Add new inventory item…
+  </div>`;
+}
+
+function filterItemDrop(prefix, i, q) {
+  const dd = document.getElementById(`${prefix}-item-dd-${i}`);
+  if(!dd) return;
+  dd.style.display = '';
+  const opts = dd.querySelectorAll('.item-opt');
+  opts.forEach(opt=>{
+    const match = !q || opt.dataset.name.toLowerCase().includes(q.toLowerCase());
+    opt.style.display = match ? '' : 'none';
+  });
+  // Clear itemId if user is typing new text
+  const lines = getOrderLines(prefix);
+  if(lines[i]) lines[i].itemId = '';
+}
+
+function showItemDrop(prefix, i) {
+  filterItemDrop(prefix, i, document.getElementById(`${prefix}-item-inp-${i}`)?.value||'');
+}
+
+function hideItemDrop(prefix, i) {
+  const dd = document.getElementById(`${prefix}-item-dd-${i}`);
+  if(dd) dd.style.display = 'none';
+  // If text typed but no item selected, keep as free-text desc
+  const inp = document.getElementById(`${prefix}-item-inp-${i}`);
+  const lines = getOrderLines(prefix);
+  if(inp && lines[i] && !lines[i].itemId && inp.value.trim()) {
+    lines[i].desc = inp.value.trim();
+  }
+}
+
+function itemDropKeydown(e, prefix, i) {
+  if(e.key === 'Escape') hideItemDrop(prefix, i);
+  if(e.key === 'Enter') {
+    e.preventDefault();
+    const q = document.getElementById(`${prefix}-item-inp-${i}`)?.value.trim();
+    if(!q) return;
+    const match = (state.inventory||[]).find(it=>it.name.toLowerCase()===q.toLowerCase());
+    if(match) {
+      const isSale = prefix==='so'||prefix==='inv'||prefix==='ret';
+      selectItemLine(prefix, i, match.id, match.name, isSale?match.salePrice:match.costPrice, match.unit||'');
+    } else {
+      hideItemDrop(prefix, i);
+      if(confirm(`Item "${q}" not found in inventory.\n\nAdd "${q}" as a new inventory item now?`)) {
+        window._pendingItemLine = { prefix, i, name: q };
+        closeModal(); showAddItem();
+      }
+    }
+  }
+}
+
+function selectItemLine(prefix, i, itemId, name, price, unit) {
+  const inp = document.getElementById(`${prefix}-item-inp-${i}`);
+  if(inp) inp.value = name;
+  hideItemDrop(prefix, i);
+  const lines = getOrderLines(prefix);
+  if(!lines[i]) return;
+  lines[i].itemId = itemId;
+  lines[i].desc   = name;
+  if(!lines[i].unitPrice) lines[i].unitPrice = parseFloat(price)||0;
+  lines[i].lineTotal = (lines[i].qty||1) * (lines[i].unitPrice||0);
+  renderOrderLines(prefix);
+  if(prefix==='so') renderSOTotals();
+  if(prefix==='po') updatePOTotals();
+}
+
+function addNewItemFromLine(prefix, i) {
+  const typed = document.getElementById(`${prefix}-item-inp-${i}`)?.value.trim()||'';
+  if(confirm(`Item "${typed||'new item'}" not found.\n\nAdd as new inventory item now? The form will re-open after saving.`)) {
+    window._pendingItemLine = { prefix, i, name: typed };
+    closeModal(); showAddItem();
+  }
 }
 
 function termsTodays(term) {
@@ -11171,17 +11360,20 @@ function renderPOLines() {
   const tbody = document.getElementById('po-lines-body');
   if(!tbody) return;
   const items = state.inventory||[];
-  const dlId = 'po-items-dl';
-  const datalist = `<datalist id="${dlId}">${items.map(it=>`<option value="${it.name}">`).join('')}</datalist>`;
-  tbody.innerHTML = datalist + (window._poLines||[]).map((l,i) => {
+  tbody.innerHTML = (window._poLines||[]).map((l,i) => {
     const item = items.find(it=>String(it.id)===String(l.itemId));
     const lineTotal = (parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0);
     const vatAmt = l.vatExempt ? 0 : lineTotal/1.12*0.12;
     return `<tr>
-      <td style="padding:4px 6px;vertical-align:top">
-        <input type="text" list="${dlId}" value="${item?item.name:(l.desc||'')}" placeholder="Search item…"
-          autocomplete="off" oninput="matchPOItem(${i},this.value)" onchange="matchPOItem(${i},this.value)"
+      <td style="padding:4px 6px;vertical-align:top;position:relative;min-width:180px">
+        <input type="text" id="po-item-inp-${i}" value="${item?item.name:(l.desc||'')}" placeholder="Search or type item…"
+          autocomplete="off"
+          oninput="filterPOItemDrop(${i},this.value)"
+          onfocus="showPOItemDrop(${i})"
+          onblur="setTimeout(()=>hidePOItemDrop(${i}),200)"
+          onkeydown="poItemDropKeydown(event,${i})"
           style="width:100%;padding:4px 6px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+        <div id="po-item-dd-${i}" style="display:none;position:absolute;top:100%;left:0;min-width:260px;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:600;max-height:200px;overflow-y:auto;margin-top:2px"></div>
       </td>
       <td style="padding:4px"><input type="number" min="1" step="1" value="${l.qty||1}" oninput="updatePOLine(${i},'qty',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
       <td style="padding:4px"><input type="number" min="0" step="0.01" value="${l.unitPrice||''}" placeholder="0.00" oninput="updatePOLine(${i},'unitPrice',this.value)" style="width:100%;text-align:right;padding:4px 6px;border:none;background:transparent;color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none"></td>
@@ -11196,6 +11388,81 @@ function renderPOLines() {
       <td><button class="je-line-btn" onclick="window._poLines.splice(${i},1);renderPOLines()">×</button></td>
     </tr>`;
   }).join('');
+  // Build PO dropdowns after render
+  (window._poLines||[]).forEach((_,i)=>buildPOItemDrop(i));
+}
+
+function buildPOItemDrop(i) {
+  const items = state.inventory||[];
+  const dd = document.getElementById(`po-item-dd-${i}`);
+  if(!dd) return;
+  dd.innerHTML = items.map(it=>`
+    <div class="po-item-opt" data-id="${it.id}" data-name="${it.name}" data-price="${it.costPrice||0}"
+      onmousedown="selectPOItem(${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${it.costPrice||0})"
+      style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
+      onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+      <div style="font-weight:500">${it.name}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · Cost: ₱${it.costPrice||0}</div>
+    </div>`).join('') +
+  `<div onmousedown="addNewItemFromPO(${i})"
+    style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
+    onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+    ➕ Add new inventory item…
+  </div>`;
+}
+
+function filterPOItemDrop(i, q) {
+  const dd = document.getElementById(`po-item-dd-${i}`);
+  if(!dd) return;
+  dd.style.display = '';
+  dd.querySelectorAll('.po-item-opt').forEach(opt=>{
+    opt.style.display = (!q || opt.dataset.name.toLowerCase().includes(q.toLowerCase())) ? '' : 'none';
+  });
+}
+
+function showPOItemDrop(i) { filterPOItemDrop(i, document.getElementById(`po-item-inp-${i}`)?.value||''); }
+function hidePOItemDrop(i) {
+  const dd = document.getElementById(`po-item-dd-${i}`);
+  if(dd) dd.style.display = 'none';
+  const inp = document.getElementById(`po-item-inp-${i}`);
+  if(inp && window._poLines[i] && !window._poLines[i].itemId) window._poLines[i].desc = inp.value.trim();
+}
+
+function poItemDropKeydown(e, i) {
+  if(e.key==='Escape') hidePOItemDrop(i);
+  if(e.key==='Enter') {
+    e.preventDefault();
+    const q = document.getElementById(`po-item-inp-${i}`)?.value.trim();
+    if(!q) return;
+    const match = (state.inventory||[]).find(it=>it.name.toLowerCase()===q.toLowerCase());
+    if(match) { selectPOItem(i, match.id, match.name, match.costPrice||0); }
+    else {
+      hidePOItemDrop(i);
+      if(confirm(`Item "${q}" not found in inventory.\n\nAdd "${q}" as a new inventory item now?`)) {
+        window._pendingPOItemLine = { i, name: q };
+        closeModal(); showAddItem();
+      }
+    }
+  }
+}
+
+function selectPOItem(i, itemId, name, price) {
+  const inp = document.getElementById(`po-item-inp-${i}`);
+  if(inp) inp.value = name;
+  hidePOItemDrop(i);
+  window._poLines[i].itemId = itemId;
+  window._poLines[i].desc   = name;
+  if(!window._poLines[i].unitPrice) window._poLines[i].unitPrice = parseFloat(price)||0;
+  window._poLines[i].lineTotal = (window._poLines[i].qty||1)*(window._poLines[i].unitPrice||0);
+  renderPOLines(); updatePOTotals();
+}
+
+function addNewItemFromPO(i) {
+  const typed = document.getElementById(`po-item-inp-${i}`)?.value.trim()||'';
+  if(confirm(`Item "${typed||'new item'}" not found.\n\nAdd as new inventory item?`)) {
+    window._pendingPOItemLine = { i, name: typed };
+    closeModal(); showAddItem();
+  }
 }
 
 function matchPOItem(i, val) {
