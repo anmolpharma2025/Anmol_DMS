@@ -2938,6 +2938,7 @@ th{background:#f5f5f5;font-weight:600;text-align:left}
 <div style="margin-top:12px;text-align:right">
   <button onclick="window.print()" style="padding:8px 20px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px">🖨 Print</button>
 </div>
+<script>
 (async function() {
   async function sha256(msg) {
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
@@ -11841,6 +11842,7 @@ ${po.notes?`<div class="notes-box"><strong>Notes:</strong> ${po.notes}</div>`:''
   <div class="sig"><div style="font-size:9px;text-align:center;color:#888;margin-bottom:2px">DIGITALLY SIGNED</div><div id="esig-approved"></div></div>
   <div class="sig"><div class="sig-line"><strong>______________________</strong><br>Supplier acknowledgement / Date</div></div>
 </div>
+<script>
 (async function() {
   async function aesDecrypt(encBase64, password) {
     try {
