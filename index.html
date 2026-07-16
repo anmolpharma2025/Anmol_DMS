@@ -170,6 +170,7 @@
   .report-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 14px; }
   .report-table td { padding: 5px 0; font-size: 13px; }
   .report-table td:last-child { text-align: right; }
+  .report-table th { white-space: nowrap; padding: 6px 8px; font-size: 12px; }
   .report-total td { padding: 9px 0; font-weight: 600; border-top: 1px solid var(--border-light); }
   .report-grand td { padding: 11px 0; font-size: 15px; font-weight: 700; border-top: 2px solid var(--border-mid); }
   .stat-pill { display: inline-flex; align-items: center; padding: 10px 14px; border-radius: var(--radius-md); font-size: 11px; margin-bottom: 10px; width: 100%; }
@@ -5548,7 +5549,11 @@ function showReport(type) {
   const pTo   = reportPeriodTo   || '2099-12-31';
   const periodLabel = pFrom==='2000-01-01'&&pTo==='2099-12-31' ? 'All Time' : `${pFrom} to ${pTo}`;
 
-  const invInPeriod  = state.invoices.filter(i=>i.status!=='draft'&&inPeriod(i.date));
+  const invInPeriod  = state.invoices.filter(i=>
+    i.status!=='draft' &&
+    i.status!=='cancelled' &&
+    inPeriod(i.date)
+  );
   // Use Purchase Orders as source for purchases (not old COS module)
   const purInPeriod  = (state.purchaseOrders||[]).filter(p=>inPeriod(p.date)).map(po => ({
     id: po.id, date: po.date, vendor: po.supplier,
@@ -6024,9 +6029,9 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   </div>
   <div style="overflow-x:auto">
   <table class="report-table" style="font-size:12px;min-width:900px;width:100%">
-    <thead><tr>
-      <th style="white-space:nowrap">Date</th>
-      <th style="white-space:nowrap">OR / Invoice No.</th>
+    <thead><tr style="white-space:nowrap">
+      <th>Date</th>
+      <th>OR / Invoice No.</th>
       <th>Customer Name</th>
       <th>TIN</th>
       <th>Address</th>
@@ -6270,7 +6275,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
     ${acc.id} — ${acc.name} <span style="font-size:11px;color:var(--text-tertiary);font-weight:400">(${acc.type})</span>
   </div>
   <table class="report-table" style="font-size:11px;border-top:none">
-    <thead><tr><th>Date</th><th>JE No.</th><th>Ref</th><th>Particulars</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th></tr></thead>
+    <thead><tr style="white-space:nowrap"><th>Date</th><th>JE No.</th><th>Ref</th><th>Particulars</th><th style="text-align:right">Debit</th><th style="text-align:right">Credit</th><th style="text-align:right">Balance</th></tr></thead>
     <tbody><tr><td>${pFrom}</td><td></td><td></td><td>Opening Balance</td><td></td><td></td><td style="text-align:right">${fmt(acc.balance||0)}</td></tr>${rows}</tbody>
   </table>
 </div>`;
@@ -6356,7 +6361,7 @@ ${invoicesAR.length===0?'<div style="text-align:center;padding:40px;color:var(--
   </div>
   <div style="overflow-x:auto">
   <table class="report-table" style="font-size:12px;min-width:900px;width:100%">
-    <thead><tr>
+    <thead><tr style="white-space:nowrap">
       <th>Date</th><th>Invoice No.</th><th>TIN</th><th>Customer Name</th><th>Address</th>
       <th style="text-align:right">Taxable Sales</th>
       <th style="text-align:right">Output VAT</th>
