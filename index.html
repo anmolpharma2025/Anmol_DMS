@@ -3948,7 +3948,7 @@ function renderInvoices(c, ta) {
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${invFiltered.length===0?`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
   ${invFiltered.map(inv => {
@@ -3965,11 +3965,13 @@ function renderInvoices(c, ta) {
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
+      <td style="font-size:11px;color:var(--text-tertiary)">${inv.updatedAt?`<i class="ti ti-clock-edit" style="font-size:10px;margin-right:3px"></i>${inv.updatedAt}`:'—'}</td>
       <td><span class="badge ${getInvoiceStatus(inv)}">${getInvoiceStatus(inv).toUpperCase()}</span></td>
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
-        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceFull('${inv.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
+        ${getInvoiceStatus(inv)!=='paid'?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelInvoice('${inv.id}')" title="Cancel Invoice"><i class="ti ti-ban"></i></button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
@@ -3994,6 +3996,109 @@ function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   recomputeBalances();
   save(); render();
 }
+function cancelInvoice(id) {
+  if(!requireAdmin('cancel invoices')) return;
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  if(!confirm(`Cancel invoice ${id} for ${inv.customer}?\n\nThis will mark it as cancelled. Collections linked to this invoice will not be affected.`)) return;
+  const before = {...inv};
+  inv.status = 'cancelled';
+  inv.cancelledAt = today();
+  inv.cancelledBy = currentUser?.name||'';
+  inv.updatedAt = today();
+  stampUpdate(inv);
+  auditLog('UPDATE','Invoice',id,{description:`Cancelled invoice ${id} for ${inv.customer}`},before,inv);
+  save(); render();
+}
+
+function showEditInvoiceFull(id) {
+  if(!requireAdmin('edit invoices')) return;
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  if(getInvoiceStatus(inv)==='paid') { alert('Cannot edit a fully paid invoice. Reverse the collection first.'); return; }
+  // Pre-fill invLines from existing invoice
+  invLines = (inv.lines||[{desc:inv.description||'',qty:1,unitPrice:inv.amount||0,itemId:'',lineTotal:inv.amount||0}]).map(l=>({...l}));
+  window._invVatType = inv.vatType||'inclusive';
+  window._invLinkedSO = inv.soRef||null;
+  window._editingInvoiceId = id;
+
+  const soOpts = '<option value="">— Link to Sales Order (optional) —</option>' +
+    (state.salesOrders||[]).filter(so=>so.status==='approved'||so.id===inv.soRef).map(so=>`<option value="${so.id}" ${inv.soRef===so.id?'selected':''}>${so.id} — ${so.customer}</option>`).join('');
+  const termsOpts = ['cod','net7','net15','net30','net60'].map(t=>`<option value="${t}" ${(inv.terms||'net30')===t?'selected':''}>${paymentTermsLabel(t)}</option>`).join('');
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Invoice ${id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Customer</label>${searchDropHTML('inv-cust-inp','inv-cust-dd','inv-cust','Search customer…',inv.customer)}</div>
+  <div class="form-group"><label>Invoice Date</label><input type="date" id="inv-date" value="${inv.date}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Payment Terms</label><select id="inv-terms" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${termsOpts}</select></div>
+  <div class="form-group"><label>Due Date</label><input type="date" id="inv-due" value="${inv.due||''}"></div>
+</div>
+<div class="form-group"><label>Link to SO (optional)</label><select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${soOpts}</select></div>
+<div id="so-load-banner" style="display:none;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);margin-bottom:8px;font-size:12px"></div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="font-size:12px;color:var(--text-secondary)">Invoice lines</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+        <input type="checkbox" id="inv-vat-inc" ${window._invVatType!=='exclusive'?'checked':''} onchange="window._invVatType=this.checked?'inclusive':'exclusive';calcInvLines()"> VAT Inclusive
+      </label>
+      <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addInvLine()"><i class="ti ti-plus"></i>Add line</button>
+    </div>
+  </div>
+  <table><thead><tr><th>Item/Description</th><th style="text-align:right;width:80px">Qty</th><th style="text-align:right;width:100px">Unit Price</th><th>VAT</th><th style="text-align:right;width:100px">Total</th><th style="width:36px"></th></tr></thead>
+  <tbody id="inv-lines-body"></tbody>
+  <tfoot><tr>
+    <td colspan="3" id="inv-summary" style="padding:8px 10px;font-size:12px;color:var(--text-secondary)"></td>
+    <td colspan="3" id="inv-total" style="text-align:right;padding:8px 10px;font-weight:700;font-size:15px"></td>
+  </tr></tfoot></table>
+</div>
+<div class="form-group"><label>Notes / Description</label><input type="text" id="inv-notes" value="${inv.notes||inv.description||''}" placeholder="Notes or description"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+  <button class="btn" onclick="closeModal();window._editingInvoiceId=null">Cancel</button>
+  <button class="btn primary" onclick="saveEditInvoiceFull()"><i class="ti ti-check"></i>Update Invoice</button>
+</div>`);
+  renderInvLines();
+  setTimeout(()=>{
+    makeSearchDrop('inv-cust-inp','inv-cust-dd','inv-cust',(state.customers||[]).map(c=>c.name),()=>{},
+      (typed)=>{ if(confirm(`Customer "${typed}" not found. Add now?`)) { closeModal(); showAddCustomer('inv'); } },'Add new customer…');
+  },100);
+}
+
+function saveEditInvoiceFull() {
+  const id = window._editingInvoiceId;
+  const inv = id ? state.invoices.find(i=>i.id===id) : null;
+  if(!inv) return;
+  const before = {...inv, lines:[...(inv.lines||[])]};
+  const customer = document.getElementById('inv-cust')?.value || document.getElementById('inv-cust-inp')?.value || inv.customer;
+  if(!customer) { alert('Please select a customer.'); return; }
+  inv.customer  = customer;
+  inv.date      = document.getElementById('inv-date').value||inv.date;
+  inv.due       = document.getElementById('inv-due').value||inv.due;
+  inv.terms     = document.getElementById('inv-terms').value||inv.terms;
+  inv.soRef     = document.getElementById('inv-so')?.value||inv.soRef;
+  inv.notes     = document.getElementById('inv-notes').value.trim();
+  inv.description = inv.notes;
+  inv.vatType   = window._invVatType;
+  inv.lines     = invLines.filter(l=>l.desc||l.itemId);
+  // Recalculate totals
+  const grossTotal = inv.lines.reduce((s,l)=>s+(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0),0);
+  const vatables   = inv.lines.filter(l=>!l.vatExempt);
+  const vatableAmt = vatables.reduce((s,l)=>s+(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0),0);
+  inv.amount    = grossTotal;
+  inv.vatBase   = parseFloat((vatableAmt/1.12).toFixed(2));
+  inv.vat       = parseFloat((vatableAmt - inv.vatBase).toFixed(2));
+  inv.updatedAt = today();
+  inv.updatedBy = currentUser?.name||'';
+  stampUpdate(inv);
+  auditLog('UPDATE','Invoice',id,{description:`Updated invoice ${id} for ${customer}`},before,inv);
+  window._editingInvoiceId = null;
+  recomputeBalances();
+  save(); closeModal(); render();
+}
+
 function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(confirm('Delete this invoice?')) { const _inv=state.invoices.find(i=>i.id===id); auditLog('DELETE','Invoice',id,{description:`Deleted invoice ${id} for ${_inv?.customer}`}); state.invoices = state.invoices.filter(i => i.id !== id); save(); render(); } }
 
 // Invoice line items state
@@ -11068,6 +11173,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
+        ${po.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditPO('${po.id}')"><i class="ti ti-edit"></i></button>`:''}
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printPO('${po.id}')"><i class="ti ti-printer"></i></button>
         ${po.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="approvePO('${po.id}')">Approve</button>`:''}
         ${po.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="receivePO('${po.id}')"><i class="ti ti-package-import"></i>Receive</button>`:''}
@@ -11177,6 +11283,73 @@ function confirmReceivePO(id) { auditLog('UPDATE','Purchase Order',id,{descripti
   });
   save(); closeModal(); render();
 }
+function showEditPO(id) {
+  if(!requireAdmin('edit purchase orders')) return;
+  const po = (state.purchaseOrders||[]).find(p=>p.id===id);
+  if(!po) return;
+  if(po.status!=='pending') { alert('Only pending POs can be edited. Approved/received POs cannot be modified.'); return; }
+  // Pre-fill _poLines
+  window._poLines = (po.lines||[]).map(l=>({...l}));
+  window._editingPOId = id;
+  const termsOpts = ['cod','cod_check','net7','net15','net30','net60','consignment'].map(t=>`<option value="${t}" ${(po.paymentTerms||'on_account')===t?'selected':''}>${paymentTermsLabel(t)}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Purchase Order ${id}</h3><button class="close-btn" onclick="closeModal();window._editingPOId=null">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier</label>${searchDropHTML('po-sup-inp','po-sup-dd','po-sup','Search supplier…',po.supplier)}</div>
+  <div class="form-group"><label>PO Date</label><input type="date" id="po-date" value="${po.date}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Expected Delivery</label><input type="date" id="po-del" value="${po.deliveryDate||''}"></div>
+  <div class="form-group"><label>Payment Terms</label>
+    <select id="po-terms" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${termsOpts}</select>
+  </div>
+</div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="font-size:12px;color:var(--text-secondary)">Order lines</span>
+    <button class="btn" style="padding:3px 10px;font-size:12px" onclick="window._poLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0});renderPOLines()"><i class="ti ti-plus"></i>Add line</button>
+  </div>
+  <table><thead><tr><th>Item/Description</th><th style="text-align:right;width:70px">Qty</th><th style="text-align:right;width:100px">Unit Cost</th><th style="width:80px;text-align:center">VAT</th><th style="text-align:right;width:100px">Total</th><th style="text-align:right;width:80px">Input VAT</th><th style="width:36px"></th></tr></thead>
+  <tbody id="po-lines-body"></tbody></table>
+</div>
+<div id="po-grand-total" style="text-align:right;font-size:14px;font-weight:700;margin-bottom:8px"></div>
+<div class="form-group"><label>Notes</label><input type="text" id="po-notes" value="${po.notes||''}" placeholder="Notes or delivery instructions"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+  <button class="btn" onclick="closeModal();window._editingPOId=null">Cancel</button>
+  <button class="btn primary" onclick="saveEditPO()"><i class="ti ti-check"></i>Update PO</button>
+</div>`);
+  renderPOLines();
+  setTimeout(()=>{
+    makeSearchDrop('po-sup-inp','po-sup-dd','po-sup',(state.suppliers||[]).map(s=>s.name),()=>{},
+      (typed)=>{ if(confirm(`Supplier "${typed}" not found. Add now?`)) { closeModal(); showAddSupplier('po',typed); } },'Add new supplier…');
+  },100);
+}
+
+function saveEditPO() {
+  const id = window._editingPOId;
+  const po = id ? (state.purchaseOrders||[]).find(p=>p.id===id) : null;
+  if(!po) return;
+  const before = {...po, lines:[...(po.lines||[])]};
+  const supplier = document.getElementById('po-sup')?.value || document.getElementById('po-sup-inp')?.value || po.supplier;
+  if(!supplier) { alert('Please select a supplier.'); return; }
+  po.supplier     = supplier;
+  po.date         = document.getElementById('po-date').value||po.date;
+  po.deliveryDate = document.getElementById('po-del').value||po.deliveryDate;
+  po.paymentTerms = document.getElementById('po-terms').value||po.paymentTerms;
+  po.notes        = document.getElementById('po-notes').value.trim();
+  po.lines        = (window._poLines||[]).filter(l=>l.desc||l.itemId).map(l=>({
+    ...l, qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0,
+    lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)
+  }));
+  po.updatedAt    = today();
+  po.updatedBy    = currentUser?.name||'';
+  stampUpdate(po);
+  auditLog('UPDATE','Purchase Order',id,{description:`Updated PO ${id} for ${supplier}`},before,po);
+  window._editingPOId = null;
+  window._poLines = [];
+  save(); closeModal(); render();
+}
+
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO() {
@@ -13925,14 +14098,54 @@ function saveEditEmployee(id) { if(!requireAdmin("edit employee records")) retur
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
 function renderAttendance(c, ta) {
-  const dates = [...new Set((state.attendance||[]).map(a=>a.date))].sort().reverse();
+  const allRecords = state.attendance||[];
+  const dates = [...new Set(allRecords.map(a=>a.date))].sort().reverse();
   const filterDate = window._attDate || (dates[0]||today());
   window._attDate = filterDate;
+  const viewMode = window._attViewMode || 'day';
+  window._attViewMode = viewMode;
+
   ta.innerHTML = `
-    <input type="date" value="${filterDate}" onchange="window._attDate=this.value;render()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn${viewMode==='day'?' primary':''}" onclick="window._attViewMode='day';render()">Day View</button>
+      <button class="btn${viewMode==='history'?' primary':''}" onclick="window._attViewMode='history';render()">Full History</button>
+      ${viewMode==='day'?`<input type="date" value="${filterDate}" onchange="window._attDate=this.value;render()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font)">`:
+      `<input type="text" id="att-hist-search" placeholder="Search by name or date\u2026" oninput="filterAttHistory()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">`}
+    </div>
     <button class="btn primary" onclick="showLogAttendance()"><i class="ti ti-plus"></i>Log Attendance</button>`;
 
-  const dayRecords = (state.attendance||[]).filter(a=>a.date===filterDate);
+  if(viewMode==='history') {
+    const emps = state.employees||[];
+    c.innerHTML = `
+<table id="att-history-table">
+  <thead><tr><th>Date</th><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${allRecords.length===0?`<tr><td colspan="10">${emptyState('ti-clock','No Attendance Records','Attendance will appear here once logged or verified via face recognition.','Log Attendance','showLogAttendance()')}</td></tr>`:''}
+  ${[...allRecords].sort((a,b)=>(b.date+b.timeIn).localeCompare(a.date+a.timeIn)).map(a=>{
+    const emp = emps.find(e=>e.id===a.empId)||{name:a.empName||a.empId||'Unknown',department:'—'};
+    return `<tr>
+      <td class="mono" style="font-size:12px">${a.date}</td>
+      <td style="font-weight:500">${emp.name}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${emp.department||'—'}</td>
+      <td class="mono">${a.timeIn||'—'}</td>
+      <td class="mono">${a.timeOut||'—'}</td>
+      <td style="text-align:right">${a.hoursWorked?(+a.hoursWorked).toFixed(2):'—'}</td>
+      <td style="text-align:right;color:${(a.overtimeHours||0)>0?'var(--amber)':'var(--text-tertiary)'}">${(a.overtimeHours||0).toFixed(2)}</td>
+      <td><span class="badge" style="background:${a.status==='present'?'rgba(16,185,129,0.15)':a.status==='absent'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'};color:${a.status==='present'?'var(--green)':a.status==='absent'?'var(--red)':'var(--amber)'}">${a.status||'present'}</span></td>
+      <td style="text-align:center">${a.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i></span>':'—'}</td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAttendance('${a.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAttendance('${a.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+    return;
+  }
+
+  // Day view
+  const dayRecords = allRecords.filter(a=>a.date===filterDate);
   const emps = state.employees||[];
   const present = dayRecords.filter(a=>a.status==='present').length;
   const absent  = dayRecords.filter(a=>a.status==='absent').length;
@@ -13946,49 +14159,102 @@ function renderAttendance(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-beach"></i>On Leave</div><div class="kpi-value" style="color:var(--amber)">${leave}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-clock-plus"></i>Total OT Hours</div><div class="kpi-value">${totalOT.toFixed(2)}</div></div>
 </div>
-<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-  <span class="section-title">Attendance — ${filterDate}</span>
-  <span style="font-size:12px;color:var(--text-secondary)">${emps.length} employees</span>
-</div>
 <table>
-  <thead><tr><th>Employee</th><th>Department</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">Overtime</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Actions</th></tr></thead>
   <tbody>
   ${emps.map(emp=>{
     const rec = dayRecords.find(a=>a.empId===emp.id);
     if(!rec) return `<tr>
       <td style="font-weight:500">
         <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:32px;height:32px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--bg-secondary);border:1px solid var(--border-light)">
-            ${emp.photo?`<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text-tertiary)">${(emp.name||'?').charAt(0)}</div>`}
+          <div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--bg-secondary);border:1px solid var(--border-light);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-tertiary)">
+            ${emp.photo?`<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`:(emp.name||'?').charAt(0)}
           </div>
-          <div>
-            <div>${emp.name}</div>
-            ${emp.photo?'<div style="font-size:10px;color:var(--green)"><i class="ti ti-shield-check" style="font-size:10px"></i> Face verified</div>':'<div style="font-size:10px;color:var(--text-tertiary)">No photo</div>'}
-          </div>
+          <span>${emp.name}</span>
         </div>
-      </td><td>${emp.department}</td>
-      <td colspan="5" style="color:var(--text-tertiary);font-size:12px">No record for this date</td>
-      <td><button class="btn" style="padding:3px 9px;font-size:11px" onclick="showLogAttendanceSingle('${emp.id}','${filterDate}')">Log</button></td>
+      </td><td style="font-size:12px">${emp.department||'—'}</td>
+      <td colspan="5" style="color:var(--text-tertiary);font-size:12px">No record</td>
+      <td></td>
+      <td><button class="btn" style="padding:2px 8px;font-size:11px" onclick="showLogAttendanceSingle('${emp.id}','${filterDate}')">Log</button></td>
     </tr>`;
-    const statusColor = rec.status==='present'?'paid':rec.status==='absent'?'overdue':'pending';
     return `<tr>
       <td style="font-weight:500">${emp.name}</td>
-      <td>${emp.department}</td>
+      <td style="font-size:12px">${emp.department||'—'}</td>
       <td class="mono">${rec.timeIn||'—'}</td>
       <td class="mono">${rec.timeOut||'—'}</td>
-      <td style="text-align:right">${rec.hoursWorked?rec.hoursWorked.toFixed(2):'0.00'}</td>
-      <td style="text-align:right;color:${rec.overtimeHours>0?'var(--amber)':'var(--text-tertiary)'}">${(rec.overtimeHours||0).toFixed(2)}</td>
-      <td><span class="badge ${statusColor}">${rec.status}</span></td>
-      <td style="font-size:12px;color:var(--text-secondary)">${rec.notes||'—'}</td>
+      <td style="text-align:right">${rec.hoursWorked?(+rec.hoursWorked).toFixed(2):'0.00'}</td>
+      <td style="text-align:right;color:${(rec.overtimeHours||0)>0?'var(--amber)':'var(--text-tertiary)'}">${(rec.overtimeHours||0).toFixed(2)}</td>
+      <td><span class="badge" style="background:${rec.status==='present'?'rgba(16,185,129,0.15)':rec.status==='absent'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'};color:${rec.status==='present'?'var(--green)':rec.status==='absent'?'var(--red)':'var(--amber)'}">${rec.status||'present'}</span></td>
+      <td style="text-align:center">${rec.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i></span>':'—'}</td>
       <td><div class="action-btns">
-        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="showEditAttendance('${rec.id}')"><i class="ti ti-edit"></i></button>
-        <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteAttendance('${rec.id}')"><i class="ti ti-trash"></i></button>
+        <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAttendance('${rec.id}')"><i class="ti ti-edit"></i></button>
+        ${!rec.timeOut?`<button class="btn primary" style="padding:2px 7px;font-size:11px" onclick="recordTimeOut('${rec.id}')"><i class="ti ti-clock-off"></i>Out</button>`:''}
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteAttendance('${rec.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
   }).join('')}
   </tbody>
 </table>`;
 }
+
+function filterAttHistory() {
+  const q = document.getElementById('att-hist-search')?.value?.toLowerCase()||'';
+  document.querySelectorAll('#att-history-table tbody tr').forEach(r=>{ r.style.display=(!q||r.textContent.toLowerCase().includes(q))?'':'none'; });
+}
+
+function showEditAttendance(id) {
+  const rec = (state.attendance||[]).find(a=>a.id===id);
+  if(!rec) return;
+  const emp = (state.employees||[]).find(e=>e.id===rec.empId)||{name:rec.empName||rec.empId};
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-clock-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Attendance — ${emp.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Date</label><input type="date" id="att-date" value="${rec.date}"></div>
+  <div class="form-group"><label>Status</label>
+    <select id="att-status" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="present" ${rec.status==='present'?'selected':''}>Present</option>
+      <option value="absent" ${rec.status==='absent'?'selected':''}>Absent</option>
+      <option value="leave" ${rec.status==='leave'?'selected':''}>On Leave</option>
+      <option value="holiday" ${rec.status==='holiday'?'selected':''}>Holiday</option>
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Time In</label><input type="time" id="att-timein" value="${rec.timeIn||''}"></div>
+  <div class="form-group"><label>Time Out</label><input type="time" id="att-timeout" value="${rec.timeOut||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Hours Worked</label><input type="number" id="att-hours" value="${rec.hoursWorked||0}" min="0" step="0.25"></div>
+  <div class="form-group"><label>Overtime Hours</label><input type="number" id="att-ot" value="${rec.overtimeHours||0}" min="0" step="0.25"></div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="att-notes" value="${rec.notes||''}" placeholder="Reason or remarks"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditAttendance('${id}')"><i class="ti ti-check"></i>Save</button>
+</div>`);
+}
+
+function saveEditAttendance(id) {
+  const rec = (state.attendance||[]).find(a=>a.id===id);
+  if(!rec) return;
+  rec.date=document.getElementById('att-date').value;
+  rec.status=document.getElementById('att-status').value;
+  rec.timeIn=document.getElementById('att-timein').value;
+  rec.timeOut=document.getElementById('att-timeout').value;
+  rec.hoursWorked=parseFloat(document.getElementById('att-hours').value)||0;
+  rec.overtimeHours=parseFloat(document.getElementById('att-ot').value)||0;
+  rec.notes=document.getElementById('att-notes').value.trim();
+  stampUpdate(rec);
+  auditLog('UPDATE','Attendance',id,{description:`Updated attendance for ${rec.empId} on ${rec.date}`});
+  save(); closeModal(); render();
+}
+
+function deleteAttendance(id) {
+  if(!confirm('Delete this attendance record?')) return;
+  state.attendance=(state.attendance||[]).filter(a=>a.id!==id);
+  save(); render();
+}
+
 
 function deleteAttendance(id) { if(!requireAdmin("delete attendance records")) return;
   if(confirm('Delete this attendance record?')) { state.attendance=(state.attendance||[]).filter(a=>a.id!==id); save(); render(); }
