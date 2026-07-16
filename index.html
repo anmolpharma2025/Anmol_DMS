@@ -5467,12 +5467,8 @@ let reportPeriodTo = '';
 
 function renderReports(c, ta) {
   ta.innerHTML = `<button class="btn no-print" onclick="window.print()"><i class="ti ti-printer"></i>Print report</button>`;
-  // Set default period to current month if not set
-  if(!reportPeriodFrom || !reportPeriodTo) {
-    const now = new Date();
-    reportPeriodFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    reportPeriodTo   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().split('T')[0];
-  }
+  // Default to All Time so BIR reports capture all data
+  // Users can narrow down using the period filter buttons
   c.innerHTML = `
 <div class="tabs no-print" id="report-tabs" style="flex-wrap:wrap">
   <div class="tab ${currentReport==='pnl'?'active':''}" onclick="switchReport('pnl',this)">Income Statement</div>
@@ -5550,8 +5546,9 @@ function showReport(type) {
   const periodLabel = pFrom==='2000-01-01'&&pTo==='2099-12-31' ? 'All Time' : `${pFrom} to ${pTo}`;
 
   const invInPeriod  = state.invoices.filter(i=>
-    i.status!=='draft' &&
-    i.status!=='cancelled' &&
+    getInvoiceStatus(i) !== 'cancelled' &&
+    i.status !== 'cancelled' &&
+    i.status !== 'draft' &&
     inPeriod(i.date)
   );
   // Use Purchase Orders as source for purchases (not old COS module)
@@ -8984,16 +8981,30 @@ function saveEditSupplier(id) {
 
 // ── CUSTOMERS ─────────────────────────────────────────────────────────────────
 function renderCustomers(c, ta) {
+  const q = (window._custSearch||'').toLowerCase();
+  const custs = (state.customers||[]).filter(cu=>
+    !q ||
+    cu.name?.toLowerCase().includes(q) ||
+    cu.tin?.toLowerCase().includes(q) ||
+    cu.email?.toLowerCase().includes(q) ||
+    cu.phone?.toLowerCase().includes(q) ||
+    cu.address?.toLowerCase().includes(q) ||
+    (cu.branches||[]).some(b=>b.name?.toLowerCase().includes(q))
+  );
+
   ta.innerHTML = `
+    <input type="text" id="cust-search" value="${window._custSearch||''}" placeholder="Search customers…" oninput="window._custSearch=this.value;renderCurrentPage()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">
     <button class="btn" onclick="emailAllSOA()" style="color:var(--accent);border-color:var(--accent)"><i class="ti ti-mail"></i>Email SOA</button>
     <button class="btn primary" onclick="showAddCustomer()"><i class="ti ti-plus"></i>Add Customer</button>`;
+
   c.innerHTML = `<table>
     <thead><tr>
       <th>ID</th><th>Name</th><th>Branch / Clinic</th><th>TIN</th><th>Email</th><th>Phone</th>
       <th>Address</th><th style="text-align:right">Outstanding</th><th>Actions</th>
     </tr></thead>
     <tbody>
-    ${state.customers.map(cu => `<tr>
+    ${!custs.length ? `<tr><td colspan="9">${emptyState('ti-users', q?'No customers found':'No Customers Yet', q?`No customers match "${q}"`:'Add your first customer to start creating sales orders and invoices.', q?'':'Add Customer', q?'':'showAddCustomer()')}</td></tr>` : ''}
+    ${custs.map(cu => `<tr>
       <td class="mono">${cu.id}</td>
       <td style="font-weight:500">${cu.name}</td>
       <td style="font-size:12px;color:var(--accent)">
