@@ -4262,47 +4262,6 @@ function addNewItemFromInv(i) {
   }
 }
 
-function matchInvItem(i, val) {
-  const items = state.inventory||[];
-  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase()||String(it.id).toLowerCase()===val.toLowerCase());
-  if(match) {
-    invLines[i].itemId = match.id;
-    invLines[i].desc = match.name;
-    if(!invLines[i].unitPrice || invLines[i].unitPrice===0) invLines[i].unitPrice = match.salePrice||0;
-    invLines[i].lineTotal = (invLines[i].qty||1)*invLines[i].unitPrice;
-    // Stock check
-    const branchId = currentUser?.branchId;
-    const availQty = branchId ? (getBranchStock(branchId)[match.id]||0) : (match.qty||0);
-    if(availQty === 0) setTimeout(()=>alert(`⚠ Out of Stock: "${match.name}" has 0 units available.`), 100);
-    else if((invLines[i].qty||1) > availQty) setTimeout(()=>alert(`⚠ Low Stock: "${match.name}" — ordered ${invLines[i].qty||1}, only ${availQty} available.`), 100);
-    // Update price cell without re-render
-    const tbody = document.getElementById('inv-lines-body');
-    if(tbody) {
-      const rows = tbody.querySelectorAll('tr');
-      if(rows[i]) {
-        const priceInput = rows[i].querySelectorAll('input[type="number"]')[1];
-        if(priceInput && !priceInput.value) priceInput.value = invLines[i].unitPrice;
-      }
-    }
-  } else {
-    invLines[i].itemId = '';
-    invLines[i].desc = val;
-  }
-  calcInvLines();
-}
-
-function selectInvItem(i, selectEl) {
-  const selected = selectEl.options[selectEl.selectedIndex];
-  if (!selected || !selected.value) {
-    invLines[i].itemId = '';
-    renderInvLines();
-    return;
-  }
-  invLines[i].itemId    = selected.value;
-  invLines[i].desc      = selected.getAttribute('data-name') || invLines[i].desc;
-  invLines[i].unitPrice = parseFloat(selected.getAttribute('data-price')) || invLines[i].unitPrice;
-  renderInvLines();
-}
 
 function updateInvLine(i, field, val) {
   invLines[i][field] = val;
@@ -10918,57 +10877,6 @@ function autoDueDateInv() {
   if(hint) hint.textContent = `(+${days} days from invoice date)`;
 }
 
-function matchOrderItem(prefix, i, val) {
-  const isSOLine = prefix === 'so' || prefix === 'inv';
-  const items = state.inventory||[];
-  const match = items.find(it=>String(it.name).toLowerCase()===val.toLowerCase() || String(it.id).toLowerCase()===val.toLowerCase());
-  const lines = getOrderLines(prefix);
-  if(match) {
-    lines[i].itemId = match.id;
-    lines[i].desc = match.name;
-    lines[i].unit = match.unit;
-    if(!lines[i].unitPrice || lines[i].unitPrice === 0) {
-      lines[i].unitPrice = isSOLine ? (match.salePrice||0) : (match.costPrice||0);
-    }
-    lines[i].lineTotal = (lines[i].qty||1) * lines[i].unitPrice;
-    // Stock check for SO/Invoice (outgoing items)
-    if(isSOLine) {
-      const branchId = currentUser?.branchId;
-      const availQty = branchId ? (getBranchStock(branchId)[match.id]||0) : (match.qty||0);
-      if(availQty === 0) {
-        setTimeout(()=>alert(`⚠ Out of Stock: "${match.name}" has 0 units available.`), 100);
-      } else if((lines[i].qty||1) > availQty) {
-        setTimeout(()=>alert(`⚠ Low Stock: "${match.name}" — ordered ${lines[i].qty||1}, only ${availQty} available.`), 100);
-      }
-    }
-    // Update price and total cells without re-rendering
-    const tbody = document.getElementById(`${prefix}-lines-body`);
-    if(tbody) {
-      const rows = tbody.querySelectorAll('tr');
-      if(rows[i]) {
-        const priceInput = rows[i].querySelectorAll('input[type="number"]')[1];
-        const totalCell = rows[i].querySelectorAll('td')[3];
-        if(priceInput && !priceInput.value) priceInput.value = lines[i].unitPrice;
-        if(totalCell) totalCell.textContent = fmt((lines[i].qty||1)*lines[i].unitPrice);
-      }
-    }
-  } else {
-    lines[i].itemId = '';
-    lines[i].desc = val;
-  }
-}
-
-function selectOrderItem(prefix, i, sel) {
-  const lines = getOrderLines(prefix);
-  const opt = sel.options[sel.selectedIndex];
-  if(!opt||!opt.value) { lines[i].itemId=''; renderOrderLines(prefix); return; }
-  lines[i].itemId = opt.value;
-  lines[i].desc = opt.getAttribute('data-name')||'';
-  lines[i].unitPrice = parseFloat(opt.getAttribute('data-price'))||0;
-  lines[i].lineTotal = (lines[i].qty||1)*lines[i].unitPrice;
-  renderOrderLines(prefix);
-  setTimeout(()=>{ const tb=document.getElementById(`${prefix}-lines-body`); if(tb){ const rows=tb.querySelectorAll('tr'); if(rows[i]){ const s=rows[i].querySelector('select'); if(s) s.value=lines[i].itemId; } } },0);
-}
 
 function updateOrderLine(prefix, i, field, val) {
   const lines = getOrderLines(prefix);
