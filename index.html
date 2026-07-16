@@ -138,6 +138,7 @@
   .badge.paid { background: var(--green-bg); color: var(--green); }
   .badge.pending { background: var(--amber-bg); color: var(--amber); }
   .badge.overdue { background: var(--red-bg); color: var(--red); }
+  .badge.cancelled { background: rgba(100,100,120,0.15); color: var(--text-tertiary); text-decoration: line-through; }
   .badge.draft { background: rgba(138,157,192,0.12); color: var(--text-secondary); }
   .mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
   .filter-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -6821,6 +6822,7 @@ function recomputeBalances() {
 }
 
 function getInvoiceStatus(inv) {
+  if(inv.status === 'cancelled') return 'cancelled';
   const totalCollected = (state.collections||[])
     .filter(r => (r.invoices||[]).includes(inv.id) || r.invoice === inv.id)
     .reduce((s,r) => s + (r.netCash||r.amount||0), 0);
@@ -6998,11 +7000,11 @@ function saveCollection() {
 
 // ── INVENTORY TRACKER ────────────────────────────────────────────────────────
 function renderInventory(c, ta) {
+  const q = (window._invSearch||'').toLowerCase();
   if(ta) ta.innerHTML = `
-    <button class="btn" onclick="showReceiveFromPO()"><i class="ti ti-package-import"></i>Receive from PO</button>
-    <button class="btn" onclick="showTransferInventory()"><i class="ti ti-arrows-transfer-up"></i>Transfer</button>
-    <button class="btn" onclick="showAddMovement()"><i class="ti ti-arrow-right-left"></i>Stock Movement</button>
-    <button class="btn" onclick="showManageBranches()"><i class="ti ti-building-store"></i>Manage Branches</button>
+    <input type="text" id="inv-search" value="${window._invSearch||''}" placeholder="Search items…" oninput="window._invSearch=this.value;renderCurrentPage()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:180px">
+    <button class="btn" onclick="showReceiveFromPO()"><i class="ti ti-package-import"></i>Receive PO</button>
+    <button class="btn" onclick="showAddMovement()"><i class="ti ti-arrow-right-left"></i>Stock Move</button>
     <button class="btn" onclick="exportInventoryCSV()"><i class="ti ti-download"></i>Export</button>
     <button class="btn" onclick="showImportInventory()"><i class="ti ti-upload"></i>Import</button>
     <button class="btn primary" onclick="showAddItem()"><i class="ti ti-plus"></i>Add Item</button>`;
@@ -7038,7 +7040,7 @@ function invTab(type, el) {
   el.classList.add('active');
   const body = document.getElementById('inv-body');
   if(!body) return;
-  if(type==='items') body.innerHTML = buildInventoryItems();
+  if(type==='items') { body.innerHTML = buildInventoryItems(); }
   else if(type==='movements') body.innerHTML = buildInventoryMovements();
   else if(type==='returns') body.innerHTML = buildInventoryReturns();
   else if(type==='transfers') body.innerHTML = buildInventoryTransfers();
@@ -8211,8 +8213,19 @@ function buildInventoryItems() {
   }
 
   const cats = [...new Set(state.inventory.map(it=>it.category))];
+  const q = (window._invSearch||'').toLowerCase();
   const allRows = cats.map(cat => {
-    const items = state.inventory.filter(it=>it.category===cat);
+    const items = state.inventory.filter(it=>it.category===cat && (
+      !q ||
+      it.name?.toLowerCase().includes(q) ||
+      it.id?.toLowerCase().includes(q) ||
+      it.brand?.toLowerCase().includes(q) ||
+      it.category?.toLowerCase().includes(q) ||
+      it.location?.toLowerCase().includes(q) ||
+      it.batchNumber?.toLowerCase().includes(q) ||
+      it.lotNumber?.toLowerCase().includes(q)
+    ));
+    if(!items.length) return '';
     const catRow = `<tr>
       <td colspan="11" style="background:var(--bg-secondary);padding:6px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);border-top:2px solid var(--border-mid)">${cat}</td>
     </tr>`;
