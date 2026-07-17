@@ -403,6 +403,13 @@
     <div class="nav-item" title="Employees" data-page="employees"><i class="ti ti-id-badge"></i><span>Employees</span></div>
     <div class="nav-item" title="Attendance" data-page="attendance"><i class="ti ti-calendar-check"></i><span>Attendance</span></div>
     <div class="nav-item" title="Payroll" data-page="payroll"><i class="ti ti-moneybag"></i><span>Payroll</span></div>
+    <div class="nav-item" title="Leave Management" data-page="leaves"><i class="ti ti-beach"></i><span>Leave Mgmt</span></div>
+    <div class="nav-item" title="Performance" data-page="performance"><i class="ti ti-star"></i><span>Performance</span></div>
+    <div class="nav-item" title="Training" data-page="training"><i class="ti ti-school"></i><span>Training</span></div>
+    <div class="nav-item" title="Disciplinary" data-page="discipline"><i class="ti ti-alert-triangle"></i><span>Disciplinary</span></div>
+    <div class="nav-item" title="201 File / Documents" data-page="documents"><i class="ti ti-folder"></i><span>201 File</span></div>
+    <div class="nav-item" title="Org Chart" data-page="orgchart"><i class="ti ti-hierarchy"></i><span>Org Chart</span></div>
+    <div class="nav-item" title="Announcements" data-page="announcements"><i class="ti ti-speakerphone"></i><span>Announcements</span></div>
 
     <div class="nav-section">Management</div>
     <div class="nav-item" title="Collections" data-page="collections"><i class="ti ti-cash"></i><span>Collections</span></div>
@@ -1280,6 +1287,7 @@ function showAppScreen() {
     _fbMetaLoadedOnce = true;
     fbListen();
     fbListenMeta();
+    startMobileAttSync(); // sync attendance from mobile app
     // Log login AFTER Firebase is confirmed ready
     if(currentUser) {
       auditLog('LOGIN', 'System', currentUser.id, {
@@ -1378,6 +1386,13 @@ const ALL_PAGES = [
   { id:'employees',   label:'Employees',             section:'HR & Payroll' },
   { id:'attendance',  label:'Attendance',            section:'HR & Payroll' },
   { id:'payroll',     label:'Payroll',               section:'HR & Payroll' },
+  { id:'leaves',      label:'Leave Management',      section:'HR & Payroll' },
+  { id:'performance', label:'Performance',           section:'HR & Payroll' },
+  { id:'training',    label:'Training',              section:'HR & Payroll' },
+  { id:'discipline',  label:'Disciplinary',          section:'HR & Payroll' },
+  { id:'documents',   label:'201 File / Documents',  section:'HR & Payroll' },
+  { id:'orgchart',    label:'Org Chart',             section:'HR & Payroll' },
+  { id:'announcements',label:'Announcements',        section:'HR & Payroll' },
   { id:'chat',        label:'Team Chat',             section:'Communication' },
 ];
 
@@ -2045,7 +2060,13 @@ let state = {
   consignedItems: [],
   employees: [],
   payrolls: [],
-  attendance: [],
+  attendance:      [],
+  leaves:          [],
+  performances:    [],
+  trainings:       [],
+  disciplinary:    [],
+  empDocuments:    [],
+  announcements:   [],
 };
 
 // Persist to localStorage
@@ -2079,6 +2100,32 @@ function auditLog(action, module, recordId, details={}, before=null, after=null)
       });
   };
   writeLog();
+}
+
+// ── MOBILE ATTENDANCE SYNC ────────────────────────────────────────────────────
+let _mobileAttUnsubscribe = null;
+function startMobileAttSync() {
+  if(!db || _mobileAttUnsubscribe) return;
+  _mobileAttUnsubscribe = db.collection('companies/anmol/att_sync')
+    .onSnapshot(snap => {
+      snap.docChanges().forEach(change => {
+        const data = change.doc.data();
+        if(change.type === 'added' || change.type === 'modified') {
+          // Merge into state.attendance
+          if(!state.attendance) state.attendance = [];
+          const mobileId = 'MOB-' + change.doc.id.slice(-8).toUpperCase();
+          const existing = state.attendance.find(a=>a.id===mobileId||a.mobileId===change.doc.id);
+          if(existing) {
+            Object.assign(existing, { ...data, id:mobileId, mobileId:change.doc.id, source:'mobile' });
+          } else {
+            state.attendance.push({ ...data, id:mobileId, mobileId:change.doc.id, source:'mobile', notes:(data.notes||'')+'[Mobile App]' });
+          }
+          try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+          // Re-render if on attendance page
+          if(state.page === 'attendance') render();
+        }
+      });
+    }, err => console.warn('Mobile att sync error:', err));
 }
 
 function save() {
@@ -2247,7 +2294,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2280,7 +2327,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog };
+  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -13934,6 +13981,541 @@ function saveEmployeePhoto(empId) {
   closeModal();
   alert('✅ Face photo saved! Attendance verification is now active for ' + emp.name);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HRIS MODULE — Leave Management, Performance, Training, Discipline, Documents,
+//               Org Chart, Announcements
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── LEAVE MANAGEMENT ──────────────────────────────────────────────────────────
+const LEAVE_TYPES = ['Vacation Leave','Sick Leave','Emergency Leave','Maternity Leave','Paternity Leave','Solo Parent Leave','Special Leave','Unpaid Leave'];
+
+function renderLeaves(c, ta) {
+  const isAdm = isAdmin();
+  ta.innerHTML = `
+    <select id="leave-emp-filter" onchange="renderCurrentPage()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="">All Employees</option>
+      ${(state.employees||[]).map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+    </select>
+    <select id="leave-status-filter" onchange="renderCurrentPage()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      <option value="">All Status</option>
+      <option>Pending</option><option>Approved</option><option>Rejected</option>
+    </select>
+    ${isAdm?`<button class="btn primary" onclick="showAddLeave()"><i class="ti ti-plus"></i>File Leave</button>`:`<button class="btn primary" onclick="showAddLeave()"><i class="ti ti-plus"></i>File Leave</button>`}`;
+
+  const empF = document.getElementById('leave-emp-filter')?.value||'';
+  const sF   = document.getElementById('leave-status-filter')?.value?.toLowerCase()||'';
+  let leaves = (state.leaves||[]);
+  if(!isAdm) leaves = leaves.filter(l=>l.empId===currentUser?.id||l.empName===currentUser?.name);
+  if(empF) leaves = leaves.filter(l=>l.empId===empF);
+  if(sF)   leaves = leaves.filter(l=>(l.status||'pending')===sF);
+  leaves = [...leaves].reverse();
+
+  // Summary cards
+  const pending  = (state.leaves||[]).filter(l=>l.status==='pending').length;
+  const approved = (state.leaves||[]).filter(l=>l.status==='approved').length;
+  const today2   = today();
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-clock"></i>Pending</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Approved This Year</div><div class="kpi-value pos">${(state.leaves||[]).filter(l=>l.status==='approved'&&l.startDate?.startsWith(today2.slice(0,4))).length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-users"></i>On Leave Today</div><div class="kpi-value" style="color:var(--accent)">${(state.leaves||[]).filter(l=>l.status==='approved'&&l.startDate<=today2&&l.endDate>=today2).length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-calendar"></i>Total Filed</div><div class="kpi-value">${(state.leaves||[]).length}</div></div>
+</div>
+<table>
+  <thead><tr><th>ID</th><th>Employee</th><th>Leave Type</th><th>Start</th><th>End</th><th style="text-align:right">Days</th><th>Reason</th><th>Filed On</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${!leaves.length?`<tr><td colspan="10">${emptyState('ti-beach','No Leave Records','All leave applications will appear here.','File Leave','showAddLeave()')}</td></tr>`:''}
+  ${leaves.map(l=>{
+    const emp=(state.employees||[]).find(e=>e.id===l.empId)||{name:l.empName||'—'};
+    const days=Math.ceil((new Date(l.endDate)-new Date(l.startDate))/(1000*60*60*24))+1;
+    const clr=l.status==='approved'?'var(--green)':l.status==='rejected'?'var(--red)':'var(--amber)';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${l.id}</td>
+      <td style="font-weight:500">${emp.name}</td>
+      <td style="font-size:12px">${l.type||'Vacation Leave'}</td>
+      <td>${l.startDate}</td><td>${l.endDate}</td>
+      <td style="text-align:right;font-weight:600">${days}</td>
+      <td style="font-size:12px;color:var(--text-secondary);max-width:160px">${l.reason||'—'}</td>
+      <td style="font-size:11px;color:var(--text-tertiary)">${l.filedOn||'—'}</td>
+      <td><span class="badge" style="background:${clr}22;color:${clr};font-weight:600">${(l.status||'pending').toUpperCase()}</span></td>
+      <td><div class="action-btns">
+        ${isAdm&&l.status==='pending'?`<button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approveLeave('${l.id}','approved')">Approve</button><button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="approveLeave('${l.id}','rejected')">Reject</button>`:''}
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteLeave('${l.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddLeave() {
+  const empOpts = (state.employees||[]).map(e=>`<option value="${e.id}" data-name="${e.name}">${e.name}</option>`).join('');
+  const typeOpts = LEAVE_TYPES.map(t=>`<option>${t}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-beach" style="margin-right:6px;color:var(--accent)"></i>File Leave Application</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Employee</label>
+    <select id="leave-emp" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="">— Select employee —</option>${empOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Leave Type</label>
+    <select id="leave-type" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${typeOpts}</select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Start Date</label><input type="date" id="leave-start" value="${today()}"></div>
+  <div class="form-group"><label>End Date</label><input type="date" id="leave-end" value="${today()}"></div>
+</div>
+<div class="form-group"><label>Reason / Description</label>
+  <textarea id="leave-reason" rows="3" placeholder="Briefly describe the reason for leave…" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div class="form-group"><label>With Pay</label>
+  <select id="leave-pay" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+    <option value="yes">With Pay</option><option value="no">Without Pay</option><option value="half">Half Pay</option>
+  </select>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveLeave()"><i class="ti ti-check"></i>Submit Application</button>
+</div>`);
+}
+
+function saveLeave() {
+  const empSel = document.getElementById('leave-emp');
+  const empId  = empSel?.value;
+  const empName = empSel?.options[empSel?.selectedIndex]?.dataset?.name||'';
+  if(!empId) { alert('Please select an employee.'); return; }
+  const start = document.getElementById('leave-start').value;
+  const end   = document.getElementById('leave-end').value;
+  if(!start||!end||end<start) { alert('Please enter valid start and end dates.'); return; }
+  if(!state.leaves) state.leaves=[];
+  const id = 'LV-'+String(state.leaves.length+1).padStart(4,'0');
+  state.leaves.push({ id, empId, empName, type:document.getElementById('leave-type').value, startDate:start, endDate:end, reason:document.getElementById('leave-reason').value.trim(), pay:document.getElementById('leave-pay').value, status:'pending', filedOn:today(), filedBy:currentUser?.name||'' });
+  auditLog('CREATE','Leave',id,{description:`${empName} filed ${document.getElementById('leave-type').value} from ${start} to ${end}`});
+  save(); closeModal(); render();
+}
+
+function approveLeave(id, status) {
+  const l=(state.leaves||[]).find(x=>x.id===id); if(!l) return;
+  l.status=status; l.approvedBy=currentUser?.name||''; l.approvedOn=today();
+  auditLog('UPDATE','Leave',id,{description:`Leave ${id} ${status} by ${currentUser?.name}`});
+  save(); render();
+}
+
+function deleteLeave(id) {
+  if(!confirm('Delete this leave record?')) return;
+  state.leaves=(state.leaves||[]).filter(l=>l.id!==id);
+  save(); render();
+}
+
+// ── PERFORMANCE EVALUATION ────────────────────────────────────────────────────
+function renderPerformance(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddPerformance()"><i class="ti ti-plus"></i>New Evaluation</button>`;
+  const perfs = [...(state.performances||[])].reverse();
+  c.innerHTML = `
+<table>
+  <thead><tr><th>ID</th><th>Employee</th><th>Period</th><th>KPI Score</th><th>Rating</th><th>Evaluator</th><th>Date</th><th>Remarks</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${!perfs.length?`<tr><td colspan="9">${emptyState('ti-star','No Performance Records','Add employee evaluations and KPI scores.','New Evaluation','showAddPerformance()')}</td></tr>`:''}
+  ${perfs.map(p=>{
+    const emp=(state.employees||[]).find(e=>e.id===p.empId)||{name:p.empName||'—'};
+    const ratingColor=p.score>=90?'var(--green)':p.score>=75?'var(--accent)':p.score>=60?'var(--amber)':'var(--red)';
+    const ratingLabel=p.score>=90?'Excellent':p.score>=75?'Very Good':p.score>=60?'Satisfactory':'Needs Improvement';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${p.id}</td>
+      <td style="font-weight:500">${emp.name}</td>
+      <td>${p.period||'—'}</td>
+      <td style="text-align:right"><span style="font-size:18px;font-weight:700;color:${ratingColor}">${p.score||0}</span><span style="font-size:11px;color:var(--text-secondary)">/100</span></td>
+      <td><span class="badge" style="background:${ratingColor}22;color:${ratingColor};font-weight:600">${ratingLabel}</span></td>
+      <td style="font-size:12px">${p.evaluator||'—'}</td>
+      <td style="font-size:12px;color:var(--text-tertiary)">${p.date||'—'}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${p.remarks||'—'}</td>
+      <td><button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deletePerf('${p.id}')"><i class="ti ti-trash"></i></button></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddPerformance() {
+  const empOpts=(state.employees||[]).map(e=>`<option value="${e.id}" data-name="${e.name}">${e.name}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-star" style="margin-right:6px;color:var(--accent)"></i>New Performance Evaluation</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Employee</label><select id="perf-emp" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px"><option value="">— Select —</option>${empOpts}</select></div>
+  <div class="form-group"><label>Evaluation Period</label><input type="text" id="perf-period" placeholder="e.g. Q1 2025, Jan-Jun 2025"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Evaluation Date</label><input type="date" id="perf-date" value="${today()}"></div>
+  <div class="form-group"><label>Evaluator</label><input type="text" id="perf-evaluator" value="${currentUser?.name||''}"></div>
+</div>
+<div style="margin-bottom:14px">
+  <label style="display:block;font-size:12px;color:var(--text-secondary);font-weight:500;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px">KPI Scores (each out of 100)</label>
+  ${['Quality of Work','Punctuality & Attendance','Teamwork & Collaboration','Communication Skills','Initiative & Creativity'].map((k,i)=>`
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <span style="flex:1;font-size:13px">${k}</span>
+    <input type="number" id="kpi-${i}" min="0" max="100" value="75" style="width:70px;padding:6px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px;text-align:right;font-family:var(--font)" oninput="calcOverallScore()">
+  </div>`).join('')}
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border-light);margin-top:4px">
+    <span style="flex:1;font-size:14px;font-weight:700">Overall Score</span>
+    <span id="overall-score" style="font-size:22px;font-weight:700;color:var(--accent)">75</span>
+  </div>
+</div>
+<div class="form-group"><label>Remarks / Comments</label>
+  <textarea id="perf-remarks" rows="3" placeholder="Additional comments or notes…" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="savePerformance()"><i class="ti ti-check"></i>Save Evaluation</button>
+</div>`);
+}
+
+function calcOverallScore() {
+  const scores=[0,1,2,3,4].map(i=>parseFloat(document.getElementById('kpi-'+i)?.value)||0);
+  const avg=Math.round(scores.reduce((s,v)=>s+v,0)/scores.length);
+  const el=document.getElementById('overall-score');
+  if(el){ el.textContent=avg; el.style.color=avg>=90?'var(--green)':avg>=75?'var(--accent)':avg>=60?'var(--amber)':'var(--red)'; }
+}
+
+function savePerformance() {
+  const empSel=document.getElementById('perf-emp');
+  const empId=empSel?.value;
+  const empName=empSel?.options[empSel?.selectedIndex]?.dataset?.name||'';
+  if(!empId){alert('Please select an employee.');return;}
+  const scores=[0,1,2,3,4].map(i=>parseFloat(document.getElementById('kpi-'+i)?.value)||0);
+  const score=Math.round(scores.reduce((s,v)=>s+v,0)/scores.length);
+  if(!state.performances)state.performances=[];
+  const id='PF-'+String(state.performances.length+1).padStart(3,'0');
+  state.performances.push({id,empId,empName,period:document.getElementById('perf-period').value,date:document.getElementById('perf-date').value,evaluator:document.getElementById('perf-evaluator').value,score,kpiScores:scores,remarks:document.getElementById('perf-remarks').value.trim()});
+  auditLog('CREATE','Performance',id,{description:`Performance evaluation for ${empName} — Score: ${score}`});
+  save(); closeModal(); render();
+}
+
+function deletePerf(id) { if(!confirm('Delete?'))return; state.performances=(state.performances||[]).filter(p=>p.id!==id); save(); render(); }
+
+// ── TRAINING & DEVELOPMENT ────────────────────────────────────────────────────
+function renderTraining(c, ta) {
+  ta.innerHTML=`<button class="btn primary" onclick="showAddTraining()"><i class="ti ti-plus"></i>Add Training</button>`;
+  const trainings=[...(state.trainings||[])].reverse();
+  c.innerHTML=`
+<table>
+  <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Date</th><th>Duration</th><th>Provider</th><th>Participants</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${!trainings.length?`<tr><td colspan="9">${emptyState('ti-school','No Training Records','Track employee trainings, seminars, and certifications.','Add Training','showAddTraining()')}</td></tr>`:''}
+  ${trainings.map(t=>{
+    const clr=t.status==='completed'?'var(--green)':t.status==='ongoing'?'var(--accent)':'var(--amber)';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${t.id}</td>
+      <td style="font-weight:500">${t.title}</td>
+      <td><span class="badge" style="font-size:11px">${t.category||'General'}</span></td>
+      <td>${t.date}</td>
+      <td style="font-size:12px">${t.duration||'—'}</td>
+      <td style="font-size:12px;color:var(--text-secondary)">${t.provider||'—'}</td>
+      <td style="font-size:12px">${(t.participants||[]).length} employee${(t.participants||[]).length!==1?'s':''}</td>
+      <td><span class="badge" style="background:${clr}22;color:${clr}">${t.status||'scheduled'}</span></td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 7px;font-size:11px" onclick="viewTrainingParticipants('${t.id}')"><i class="ti ti-users"></i></button>
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteTraining('${t.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddTraining() {
+  const empOpts=(state.employees||[]).map(e=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;cursor:pointer"><input type="checkbox" value="${e.id}" class="train-emp-chk"> ${e.name} <span style="color:var(--text-tertiary);font-size:11px">${e.department||''}</span></label>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-school" style="margin-right:6px;color:var(--accent)"></i>Add Training Program</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Training Title</label><input type="text" id="train-title" placeholder="e.g. Good Manufacturing Practice Seminar"></div>
+  <div class="form-group"><label>Category</label>
+    <select id="train-cat" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option>Compliance & Regulatory</option><option>Product Knowledge</option><option>Leadership</option><option>Safety & Health</option><option>Customer Service</option><option>Technical Skills</option><option>HR & Policies</option><option>Other</option>
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date</label><input type="date" id="train-date" value="${today()}"></div>
+  <div class="form-group"><label>Duration</label><input type="text" id="train-dur" placeholder="e.g. 1 day, 4 hours, 2 weeks"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Training Provider</label><input type="text" id="train-provider" placeholder="e.g. FDA Philippines, internal"></div>
+  <div class="form-group"><label>Status</label>
+    <select id="train-status" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option>scheduled</option><option>ongoing</option><option>completed</option><option>cancelled</option>
+    </select>
+  </div>
+</div>
+<div class="form-group"><label>Location / Platform</label><input type="text" id="train-loc" placeholder="e.g. Conference Room A, Zoom, Manila Hotel"></div>
+<div class="form-group"><label>Participants</label>
+  <div style="max-height:180px;overflow-y:auto;padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary)">${empOpts}</div>
+</div>
+<div class="form-group"><label>Notes / Description</label>
+  <textarea id="train-notes" rows="2" placeholder="Objectives, requirements, or notes…" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveTraining()"><i class="ti ti-check"></i>Save Training</button>
+</div>`);
+}
+
+function saveTraining() {
+  const title=document.getElementById('train-title').value.trim();
+  if(!title){alert('Please enter a training title.');return;}
+  const participants=[...document.querySelectorAll('.train-emp-chk:checked')].map(c=>c.value);
+  if(!state.trainings)state.trainings=[];
+  const id='TR-'+String(state.trainings.length+1).padStart(3,'0');
+  state.trainings.push({id,title,category:document.getElementById('train-cat').value,date:document.getElementById('train-date').value,duration:document.getElementById('train-dur').value,provider:document.getElementById('train-provider').value,status:document.getElementById('train-status').value,location:document.getElementById('train-loc').value,participants,notes:document.getElementById('train-notes').value.trim()});
+  auditLog('CREATE','Training',id,{description:`Training: ${title} — ${participants.length} participant(s)`});
+  save(); closeModal(); render();
+}
+
+function viewTrainingParticipants(id) {
+  const t=(state.trainings||[]).find(x=>x.id===id); if(!t) return;
+  const names=(t.participants||[]).map(pid=>(state.employees||[]).find(e=>e.id===pid)?.name||pid);
+  showModal(`<div class="modal-head"><h3>${t.title}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${t.date} · ${t.duration||'—'} · ${t.provider||'—'}</div>
+<div style="font-size:13px;font-weight:600;margin-bottom:8px">${names.length} Participant${names.length!==1?'s':''}</div>
+${names.map(n=>`<div style="padding:8px 12px;border-bottom:0.5px solid var(--border-light);display:flex;align-items:center;gap:8px"><i class="ti ti-user" style="color:var(--accent);font-size:14px"></i>${n}</div>`).join('')}
+<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>`);
+}
+
+function deleteTraining(id) { if(!confirm('Delete?'))return; state.trainings=(state.trainings||[]).filter(t=>t.id!==id); save(); render(); }
+
+// ── DISCIPLINARY RECORDS ──────────────────────────────────────────────────────
+const INFRACTION_TYPES=['Tardiness','Absenteeism','Insubordination','Violation of Company Policy','Breach of Confidentiality','Misconduct','Negligence','Other'];
+const SANCTION_TYPES=['Verbal Warning','Written Warning','Suspension (1-3 days)','Suspension (4-7 days)','Final Warning','Termination'];
+
+function renderDiscipline(c, ta) {
+  ta.innerHTML=`<button class="btn primary" onclick="showAddDiscipline()"><i class="ti ti-plus"></i>New Record</button>`;
+  const records=[...(state.disciplinary||[])].reverse();
+  c.innerHTML=`
+<table>
+  <thead><tr><th>ID</th><th>Employee</th><th>Infraction</th><th>Date</th><th>Sanction</th><th>Status</th><th>Recorded By</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${!records.length?`<tr><td colspan="8">${emptyState('ti-alert-triangle','No Disciplinary Records','All disciplinary actions will be tracked here.','New Record','showAddDiscipline()')}</td></tr>`:''}
+  ${records.map(r=>{
+    const emp=(state.employees||[]).find(e=>e.id===r.empId)||{name:r.empName||'—'};
+    const clr=r.status==='resolved'?'var(--green)':r.status==='pending'?'var(--amber)':'var(--red)';
+    return `<tr>
+      <td class="mono" style="font-size:11px">${r.id}</td>
+      <td style="font-weight:500">${emp.name}</td>
+      <td style="font-size:12px">${r.infraction||'—'}</td>
+      <td>${r.date}</td>
+      <td><span class="badge" style="background:var(--red-bg);color:var(--red);font-size:11px">${r.sanction||'—'}</span></td>
+      <td><span class="badge" style="background:${clr}22;color:${clr}">${r.status||'open'}</span></td>
+      <td style="font-size:12px;color:var(--text-secondary)">${r.recordedBy||'—'}</td>
+      <td><div class="action-btns">
+        ${r.status!=='resolved'?`<button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="resolveDiscipline('${r.id}')">Resolve</button>`:''}
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteDiscipline('${r.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddDiscipline() {
+  const empOpts=(state.employees||[]).map(e=>`<option value="${e.id}" data-name="${e.name}">${e.name}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-alert-triangle" style="margin-right:6px;color:var(--amber)"></i>New Disciplinary Record</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Employee</label><select id="disc-emp" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px"><option value="">— Select —</option>${empOpts}</select></div>
+  <div class="form-group"><label>Date of Incident</label><input type="date" id="disc-date" value="${today()}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Infraction Type</label><select id="disc-infraction" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${INFRACTION_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+  <div class="form-group"><label>Sanction Applied</label><select id="disc-sanction" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${SANCTION_TYPES.map(t=>`<option>${t}</option>`).join('')}</select></div>
+</div>
+<div class="form-group"><label>Details / Description</label>
+  <textarea id="disc-details" rows="3" placeholder="Describe the incident in detail…" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div class="form-group"><label>Recorded By</label><input type="text" id="disc-by" value="${currentUser?.name||''}"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveDiscipline()"><i class="ti ti-check"></i>Save Record</button>
+</div>`);
+}
+
+function saveDiscipline() {
+  const empSel=document.getElementById('disc-emp');
+  const empId=empSel?.value; const empName=empSel?.options[empSel?.selectedIndex]?.dataset?.name||'';
+  if(!empId){alert('Please select an employee.');return;}
+  if(!state.disciplinary)state.disciplinary=[];
+  const id='DR-'+String(state.disciplinary.length+1).padStart(3,'0');
+  state.disciplinary.push({id,empId,empName,date:document.getElementById('disc-date').value,infraction:document.getElementById('disc-infraction').value,sanction:document.getElementById('disc-sanction').value,details:document.getElementById('disc-details').value.trim(),recordedBy:document.getElementById('disc-by').value.trim(),status:'open'});
+  auditLog('CREATE','Disciplinary',id,{description:`Disciplinary record for ${empName}: ${document.getElementById('disc-infraction').value}`});
+  save(); closeModal(); render();
+}
+
+function resolveDiscipline(id) {
+  const r=(state.disciplinary||[]).find(x=>x.id===id); if(!r) return;
+  r.status='resolved'; r.resolvedBy=currentUser?.name; r.resolvedOn=today();
+  save(); render();
+}
+
+function deleteDiscipline(id) { if(!confirm('Delete?'))return; state.disciplinary=(state.disciplinary||[]).filter(r=>r.id!==id); save(); render(); }
+
+// ── 201 FILE / DOCUMENTS ──────────────────────────────────────────────────────
+function renderDocuments(c, ta) {
+  ta.innerHTML=`<button class="btn primary" onclick="showAddDocument()"><i class="ti ti-plus"></i>Add Document</button>`;
+  const docs=[...(state.empDocuments||[])].reverse();
+  const empFilter=window._docEmpFilter||'';
+  c.innerHTML=`
+<div style="margin-bottom:12px">
+  <select onchange="window._docEmpFilter=this.value;renderCurrentPage()" style="padding:7px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">
+    <option value="">All Employees</option>
+    ${(state.employees||[]).map(e=>`<option value="${e.id}" ${empFilter===e.id?'selected':''}>${e.name}</option>`).join('')}
+  </select>
+</div>
+<table>
+  <thead><tr><th>ID</th><th>Employee</th><th>Document Type</th><th>Description</th><th>Date Filed</th><th>Expires</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${!docs.filter(d=>!empFilter||d.empId===empFilter).length?`<tr><td colspan="8">${emptyState('ti-folder','No Documents','Employee 201 files and documents will appear here.','Add Document','showAddDocument()')}</td></tr>`:''}
+  ${docs.filter(d=>!empFilter||d.empId===empFilter).map(d=>{
+    const emp=(state.employees||[]).find(e=>e.id===d.empId)||{name:d.empName||'—'};
+    const expired=d.expiry&&d.expiry<today();
+    return `<tr>
+      <td class="mono" style="font-size:11px">${d.id}</td>
+      <td style="font-weight:500">${emp.name}</td>
+      <td><span class="badge" style="font-size:11px">${d.docType||'—'}</span></td>
+      <td style="font-size:12px;color:var(--text-secondary)">${d.description||'—'}</td>
+      <td style="font-size:12px">${d.dateFiled||'—'}</td>
+      <td style="font-size:12px;color:${expired?'var(--red)':'var(--text-secondary)'};font-weight:${expired?'600':'400'}">${d.expiry||'N/A'}${expired?' ⚠':''}</td>
+      <td><span class="badge" style="background:${expired?'var(--red-bg)':'rgba(16,185,129,0.12)'};color:${expired?'var(--red)':'var(--green)'}">${expired?'Expired':'Active'}</span></td>
+      <td><div class="action-btns">
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteDoc('${d.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddDocument() {
+  const empOpts=(state.employees||[]).map(e=>`<option value="${e.id}" data-name="${e.name}">${e.name}</option>`).join('');
+  const docTypes=['Resume / CV','Employment Contract','NBI Clearance','Police Clearance','Medical Certificate','SSS ID','PhilHealth ID','Pag-IBIG ID','TIN Card','Birth Certificate','Diploma / TOR','PRC License','Drug Test Result','Company ID','Performance Review','Resignation Letter','Other'];
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-folder" style="margin-right:6px;color:var(--accent)"></i>Add Employee Document</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Employee</label><select id="doc-emp" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px"><option value="">— Select —</option>${empOpts}</select></div>
+  <div class="form-group"><label>Document Type</label><select id="doc-type" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${docTypes.map(t=>`<option>${t}</option>`).join('')}</select></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Filed</label><input type="date" id="doc-filed" value="${today()}"></div>
+  <div class="form-group"><label>Expiry Date (if applicable)</label><input type="date" id="doc-expiry"></div>
+</div>
+<div class="form-group"><label>Description / Notes</label><input type="text" id="doc-desc" placeholder="e.g. Original copy on file, notarized"></div>
+<div class="form-group"><label>Document Number / Reference</label><input type="text" id="doc-ref" placeholder="License no., certificate no., etc."></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveDocument()"><i class="ti ti-check"></i>Save</button>
+</div>`);
+}
+
+function saveDocument() {
+  const empSel=document.getElementById('doc-emp');
+  const empId=empSel?.value; const empName=empSel?.options[empSel?.selectedIndex]?.dataset?.name||'';
+  if(!empId){alert('Please select an employee.');return;}
+  if(!state.empDocuments)state.empDocuments=[];
+  const id='DOC-'+String(state.empDocuments.length+1).padStart(4,'0');
+  state.empDocuments.push({id,empId,empName,docType:document.getElementById('doc-type').value,dateFiled:document.getElementById('doc-filed').value,expiry:document.getElementById('doc-expiry').value||'',description:document.getElementById('doc-desc').value.trim(),reference:document.getElementById('doc-ref').value.trim()});
+  save(); closeModal(); render();
+}
+
+function deleteDoc(id) { if(!confirm('Delete?'))return; state.empDocuments=(state.empDocuments||[]).filter(d=>d.id!==id); save(); render(); }
+
+// ── ORG CHART ─────────────────────────────────────────────────────────────────
+function renderOrgChart(c, ta) {
+  ta.innerHTML='';
+  const emps=state.employees||[];
+  const depts=[...new Set(emps.map(e=>e.department||'General'))];
+  c.innerHTML=`
+<div style="text-align:center;margin-bottom:24px">
+  <div style="display:inline-block;background:var(--accent);color:#fff;border-radius:var(--radius-md);padding:14px 28px;font-size:15px;font-weight:700">${getCompanyProfile().name||'Anmol Pharmaceuticals US Corp.'}</div>
+</div>
+${!emps.length?emptyState('ti-hierarchy','No Employees','Add employees to see the org chart.','Add Employee','showAddEmployee()'):''}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px">
+${depts.map(dept=>{
+  const deptEmps=emps.filter(e=>(e.department||'General')===dept);
+  return `<div style="background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light);overflow:hidden">
+    <div style="background:var(--accent);padding:10px 14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#fff">${dept}</div>
+    ${deptEmps.map(e=>`<div style="padding:10px 14px;border-bottom:0.5px solid var(--border-light);display:flex;align-items:center;gap:10px">
+      <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--accent)">
+        ${e.photo?`<img src="${e.photo}" style="width:100%;height:100%;object-fit:cover">`:(e.name||'?').charAt(0)}
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:500">${e.name}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">${e.position||'—'}</div>
+        <div style="font-size:10px;color:${e.status==='active'?'var(--green)':'var(--red)'}">${e.status||'active'}</div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}).join('')}
+</div>`;
+}
+
+// ── ANNOUNCEMENTS ─────────────────────────────────────────────────────────────
+function renderAnnouncements(c, ta) {
+  ta.innerHTML=`${isAdmin()?`<button class="btn primary" onclick="showAddAnnouncement()"><i class="ti ti-plus"></i>Post Announcement</button>`:''}`;
+  const anns=[...(state.announcements||[])].reverse();
+  c.innerHTML=`
+${!anns.length?emptyState('ti-speakerphone','No Announcements','Post company announcements for all employees.','Post Announcement','showAddAnnouncement()'):''}
+${anns.map(a=>{
+  const typeClr=a.type==='urgent'?'var(--red)':a.type==='important'?'var(--amber)':'var(--accent)';
+  const typeIcon=a.type==='urgent'?'ti-alert-circle':a.type==='important'?'ti-info-circle':'ti-speakerphone';
+  return `<div style="background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light);padding:18px 20px;margin-bottom:12px;border-left:3px solid ${typeClr}">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <i class="ti ${typeIcon}" style="color:${typeClr};font-size:16px"></i>
+        <span style="font-size:15px;font-weight:700">${a.title}</span>
+        ${a.type!=='general'?`<span class="badge" style="background:${typeClr}22;color:${typeClr};font-size:10px;text-transform:uppercase">${a.type}</span>`:''}
+      </div>
+      ${isAdmin()?`<button class="btn danger" style="padding:2px 7px;font-size:11px;flex-shrink:0" onclick="deleteAnnouncement('${a.id}')"><i class="ti ti-trash"></i></button>`:''}
+    </div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;line-height:1.6">${a.body.replace(/\n/g,'<br>')}</div>
+    <div style="font-size:11px;color:var(--text-tertiary)">Posted by <strong>${a.postedBy}</strong> · ${a.date}${a.expiresOn?` · Expires: ${a.expiresOn}`:''}</div>
+  </div>`;
+}).join('')}`;
+}
+
+function showAddAnnouncement() {
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-speakerphone" style="margin-right:6px;color:var(--accent)"></i>Post Announcement</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Title</label><input type="text" id="ann-title" placeholder="Announcement title"></div>
+  <div class="form-group"><label>Type</label>
+    <select id="ann-type" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="general">General</option><option value="important">Important</option><option value="urgent">Urgent</option>
+    </select>
+  </div>
+</div>
+<div class="form-group"><label>Message</label>
+  <textarea id="ann-body" rows="5" placeholder="Write your announcement here…" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div class="form-group"><label>Expires On (optional)</label><input type="date" id="ann-expires"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveAnnouncement()"><i class="ti ti-send"></i>Post</button>
+</div>`);
+}
+
+function saveAnnouncement() {
+  const title=document.getElementById('ann-title').value.trim();
+  const body=document.getElementById('ann-body').value.trim();
+  if(!title||!body){alert('Please enter a title and message.');return;}
+  if(!state.announcements)state.announcements=[];
+  const id='ANN-'+String(state.announcements.length+1).padStart(3,'0');
+  state.announcements.push({id,title,body,type:document.getElementById('ann-type').value,date:today(),postedBy:currentUser?.name||'',expiresOn:document.getElementById('ann-expires').value||''});
+  auditLog('CREATE','Announcement',id,{description:`Posted announcement: ${title}`});
+  save(); closeModal(); render();
+}
+
+function deleteAnnouncement(id) { if(!confirm('Delete this announcement?'))return; state.announcements=(state.announcements||[]).filter(a=>a.id!==id); save(); render(); }
 
 function renderEmployees(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddEmployee()"><i class="ti ti-plus"></i>Add Employee</button>`;
