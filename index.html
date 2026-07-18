@@ -14695,8 +14695,10 @@ function renderAttendance(c, ta) {
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn${viewMode==='day'?' primary':''}" onclick="window._attViewMode='day';render()">Day View</button>
       <button class="btn${viewMode==='history'?' primary':''}" onclick="window._attViewMode='history';render()">Full History</button>
-      ${viewMode==='day'?`<input type="date" value="${filterDate}" onchange="window._attDate=this.value;render()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font)">`:
-      `<input type="text" id="att-hist-search" placeholder="Search by name or date\u2026" oninput="filterAttHistory()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">`}
+      ${viewMode==='day'?`
+        <input type="date" value="${filterDate}" onchange="window._attDate=this.value;render()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+        <button class="btn danger" onclick="markAllAbsent('${filterDate}')" title="Auto-mark all employees with no record as Absent" style="font-size:12px"><i class="ti ti-user-off"></i>Mark All Absent</button>
+      `:`<input type="text" id="att-hist-search" placeholder="Search by name or date\u2026" oninput="filterAttHistory()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-card);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">`}
     </div>
     <button class="btn primary" onclick="showLogAttendance()"><i class="ti ti-plus"></i>Log Attendance</button>`;
 
@@ -14747,11 +14749,11 @@ function renderAttendance(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-clock-plus"></i>Total OT Hours</div><div class="kpi-value">${totalOT.toFixed(2)}</div></div>
 </div>
 <table>
-  <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Location</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Location</th><th>Remarks</th><th>Actions</th></tr></thead>
   <tbody>
   ${emps.map(emp=>{
     const rec = dayRecords.find(a=>a.empId===emp.id);
-    if(!rec) return `<tr>
+    if(!rec) return `<tr style="background:rgba(239,68,68,0.04)">
       <td style="font-weight:500">
         <div style="display:flex;align-items:center;gap:8px">
           <div style="width:28px;height:28px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--bg-secondary);border:1px solid var(--border-light);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-tertiary)">
@@ -14759,21 +14761,37 @@ function renderAttendance(c, ta) {
           </div>
           <span>${emp.name}</span>
         </div>
-      </td><td style="font-size:12px">${emp.department||'—'}</td>
-      <td colspan="5" style="color:var(--text-tertiary);font-size:12px">No record</td>
-      <td></td>
-      <td><button class="btn" style="padding:2px 8px;font-size:11px" onclick="showLogAttendanceSingle('${emp.id}','${filterDate}')">Log</button></td>
+      </td>
+      <td style="font-size:12px">${emp.department||'—'}</td>
+      <td class="mono" style="color:var(--text-tertiary)">—</td>
+      <td class="mono" style="color:var(--text-tertiary)">—</td>
+      <td style="text-align:right;color:var(--text-tertiary)">—</td>
+      <td style="text-align:right;color:var(--text-tertiary)">—</td>
+      <td><span class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">ABSENT</span></td>
+      <td style="text-align:center;color:var(--text-tertiary)">—</td>
+      <td style="text-align:center;color:var(--text-tertiary)">—</td>
+      <td style="font-size:11px;color:var(--red)">No biometric record</td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showLogAttendanceSingle('${emp.id}','${filterDate}')"><i class="ti ti-edit"></i>Log</button>
+        <button class="btn danger" style="padding:2px 8px;font-size:11px" onclick="markAbsent('${emp.id}','${filterDate}')"><i class="ti ti-user-off"></i>Mark Absent</button>
+      </div></td>
     </tr>`;
+    // Build remarks for records with missing time in or out
+    const remarks = [];
+    if(!rec.timeIn)  remarks.push('<span style="color:var(--red);font-size:11px">No time-in biometric</span>');
+    if(rec.timeIn && !rec.timeOut) remarks.push('<span style="color:var(--amber);font-size:11px">No time-out biometric</span>');
+    if(rec.notes)    remarks.push(`<span style="font-size:11px;color:var(--text-tertiary)">${rec.notes}</span>`);
     return `<tr>
       <td style="font-weight:500">${emp.name}</td>
       <td style="font-size:12px">${emp.department||'—'}</td>
-      <td class="mono">${rec.timeIn||'—'}</td>
-      <td class="mono">${rec.timeOut||'—'}</td>
+      <td class="mono">${rec.timeIn||'<span style="color:var(--red)">Missing</span>'}</td>
+      <td class="mono">${rec.timeOut||'<span style="color:var(--amber)">—</span>'}</td>
       <td style="text-align:right">${rec.hoursWorked?(+rec.hoursWorked).toFixed(2):'0.00'}</td>
       <td style="text-align:right;color:${(rec.overtimeHours||0)>0?'var(--amber)':'var(--text-tertiary)'}">${(rec.overtimeHours||0).toFixed(2)}</td>
       <td><span class="badge" style="background:${rec.status==='present'?'rgba(16,185,129,0.15)':rec.status==='absent'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'};color:${rec.status==='present'?'var(--green)':rec.status==='absent'?'var(--red)':'var(--amber)'}">${rec.status||'present'}</span></td>
-      <td style="text-align:center">${rec.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i></span>':'—'}</td>
-      <td style="font-size:11px;color:var(--text-secondary)">${rec.source==='mobile_app'?'<i class="ti ti-device-mobile" style="font-size:11px;margin-right:3px;color:var(--accent)"></i>':''}${rec.locTag==='office'?'<span style="color:var(--green)">🏢 Office</span>':rec.locTag==='outside'?'<span style="color:var(--amber)">⚠ Outside</span>':'—'}</td>
+      <td style="text-align:center">${rec.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i> '+( rec.faceConfidence||'')+'%</span>':'—'}</td>
+      <td style="font-size:11px">${rec.source==='mobile_app'?'<i class="ti ti-device-mobile" style="font-size:11px;margin-right:3px;color:var(--accent)"></i>':''}${rec.locTag==='office'?'<span style="color:var(--green)">🏢 Office</span>':rec.locTag==='outside'?'<span style="color:var(--amber)">⚠ Outside</span>':'—'}</td>
+      <td style="font-size:11px;max-width:160px">${remarks.join('<br>')||'—'}</td>
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAttendance('${rec.id}')"><i class="ti ti-edit"></i></button>
         ${!rec.timeOut?`<button class="btn primary" style="padding:2px 7px;font-size:11px" onclick="recordTimeOut('${rec.id}')"><i class="ti ti-clock-off"></i>Out</button>`:''}
@@ -14783,6 +14801,37 @@ function renderAttendance(c, ta) {
   }).join('')}
   </tbody>
 </table>`;
+}
+
+function markAbsent(empId, date) {
+  const emp = (state.employees||[]).find(e=>e.id===empId);
+  if(!emp) return;
+  if(!confirm(`Mark ${emp.name} as Absent on ${date}?`)) return;
+  if(!state.attendance) state.attendance=[];
+  const existing = state.attendance.find(a=>a.empId===empId&&a.date===date);
+  if(existing) { existing.status='absent'; existing.notes=(existing.notes||'')+' [Marked absent by admin]'; }
+  else {
+    const id='ATT-'+String(state.attendance.length+1).padStart(4,'0');
+    state.attendance.push({ id, empId, empName:emp.name, date, status:'absent', timeIn:'', timeOut:'', hoursWorked:0, overtimeHours:0, notes:'No biometric record — marked absent by admin', createdAt:new Date().toISOString() });
+    auditLog('CREATE','Attendance',id,{description:`${emp.name} marked absent on ${date} (no biometric)`});
+  }
+  save(); render();
+}
+
+function markAllAbsent(date) {
+  const emps = state.employees||[];
+  const recs = (state.attendance||[]).filter(a=>a.date===date);
+  const missing = emps.filter(e=>!recs.find(r=>r.empId===e.id));
+  if(!missing.length) { alert('All employees already have a record for this date.'); return; }
+  if(!confirm(`Mark ${missing.length} employee${missing.length>1?'s':''} with no record as Absent on ${date}?\n\n${missing.map(e=>e.name).join(', ')}`)) return;
+  if(!state.attendance) state.attendance=[];
+  missing.forEach(emp=>{
+    const id='ATT-'+String(state.attendance.length+1).padStart(4,'0');
+    state.attendance.push({ id, empId:emp.id, empName:emp.name, date, status:'absent', timeIn:'', timeOut:'', hoursWorked:0, overtimeHours:0, notes:'No biometric record — auto-marked absent', createdAt:new Date().toISOString() });
+  });
+  auditLog('CREATE','Attendance',date,{description:`${missing.length} employee(s) auto-marked absent on ${date}`});
+  save(); render();
+  alert(`✅ ${missing.length} employee${missing.length>1?'s':''} marked as Absent.`);
 }
 
 function filterAttHistory() {

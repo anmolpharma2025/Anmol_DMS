@@ -344,7 +344,7 @@ body{display:flex;flex-direction:column;height:100dvh}
 <!-- ══ CAMERA SCREEN ══ -->
 <div class="screen" id="camera-screen">
   <video id="cam-video" autoplay playsinline muted></video>
-  <canvas id="cam-canvas" width="480" height="480"></canvas>
+  <canvas id="cam-canvas" width="640" height="640"></canvas>
 
   <div class="cam-top">
     <button class="cam-back" onclick="stopCamera()"><i class="ti ti-arrow-left"></i></button>
@@ -760,28 +760,25 @@ async function captureAndVerify() {
           content: [
             { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:storedBase64 } },
             { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:liveBase64   } },
-            { type:'text',  text:
-`You are a biometric attendance system. Analyze the two images:
+            { type:'text', text:`You are a biometric attendance verification system. Be LENIENT — lighting differences, angles, and image quality are expected.
 
-IMAGE 1: Registered employee photo (stored reference)
-IMAGE 2: Live camera capture (current attempt)
+IMAGE 1: Registered employee photo (reference, may be from profile upload)
+IMAGE 2: Live camera capture (current clock-in attempt, may have slightly different lighting/angle)
 
-Step 1 - LIVENESS CHECK on Image 2:
-Is Image 2 a LIVE person in front of the camera, or a SPOOF (someone holding up a phone showing a face, a printed photo, a photo on a screen, or any non-live image)?
-Clues for LIVE: natural skin texture, slight depth, natural shadows, normal lighting variation, possible motion blur.
-Clues for SPOOF: flat image, screen glare, picture-in-picture, holding device/paper.
+STEP 1 - LIVENESS: Is Image 2 a live person OR a spoof (printed photo, phone screen showing a face)?
+- LIVE: natural person in front of camera
+- SPOOF: flat image, screen glare, picture-of-picture, holding paper/device
 
-Step 2 - FACE MATCH:
-Are Image 1 and Image 2 the same person?
+STEP 2 - IDENTITY MATCH: Focus on permanent facial features only — bone structure, eye spacing, nose shape, face outline. IGNORE differences in: lighting, angle up to 30 degrees, expression, slight blur, hairstyle, glasses. Be generous — if facial structure is consistent with the same person, count it as a match.
 
-Reply ONLY in this exact format:
+Reply ONLY:
 LIVENESS: LIVE
-MATCH: MATCH 87%
+MATCH: MATCH 85%
 
 or
 
 LIVENESS: SPOOF
-MATCH: NO_MATCH 12%`
+MATCH: NO_MATCH 20%`
             }
           ]
         }]
@@ -818,7 +815,7 @@ MATCH: NO_MATCH 12%`
       return;
     }
 
-    if(isMatch && pct >= 65) {
+    if(isMatch && pct >= 55) {
       // ✅ SUCCESS
       oval.className = 'face-oval success';
       status.textContent = `✅ Verified — ${pct}% match`;
@@ -830,7 +827,7 @@ MATCH: NO_MATCH 12%`
     } else {
       // ❌ NO MATCH
       oval.className = 'face-oval fail';
-      status.textContent = `❌ Face not recognized (${pct}% match). Try again.`;
+      status.textContent = `❌ Not recognized (${pct}%). Face the camera directly in good light.`;
       btn.className = 'cam-btn fail';
       btn.innerHTML = '<i class="ti ti-refresh"></i>Try Again';
       btn.disabled  = false;
