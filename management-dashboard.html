@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Anmol Management">
+<meta name="theme-color" content="#060d1a">
+<title>Anmol Pharmaceuticals — Management</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-font-smoothing:antialiased}
+:root{
+  --bg:#060d1a;--bg2:#0a1326;--card:#0f1c32;--card2:#142040;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --green:#00d68f;--green2:rgba(0,214,143,0.12);
+  --red:#ff4757;--red2:rgba(255,71,87,0.12);
+  --amber:#ffa502;--amber2:rgba(255,165,2,0.12);
+  --blue:#4f8ef7;--blue2:rgba(79,142,247,0.12);
+  --purple:#a78bfa;--purple2:rgba(167,139,250,0.12);
+  --text:#e8f0ff;--text2:#6b82a8;--text3:#2d3d5a;
+  --font:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',sans-serif;
+  --r:16px;--r-sm:10px;
+  --safe-top:env(safe-area-inset-top);
+  --safe-bottom:env(safe-area-inset-bottom);
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font)}
+body{overflow-x:hidden}
+
+/* ── HEADER ── */
+.app-header{
+  position:sticky;top:0;z-index:100;
+  background:rgba(6,13,26,0.92);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  padding:calc(var(--safe-top) + 12px) 16px 12px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px
+}
+.app-brand{display:flex;align-items:center;gap:10px}
+.app-logo{width:34px;height:34px;background:linear-gradient(135deg,#4f8ef7,#a78bfa);border-radius:9px;display:flex;align-items:center;justify-content:center}
+.app-logo i{font-size:18px;color:#fff}
+.app-name{font-size:15px;font-weight:700;letter-spacing:-0.01em}
+.app-sub{font-size:10px;color:var(--text2);margin-top:1px}
+.header-right{display:flex;align-items:center;gap:8px}
+.refresh-btn{background:var(--card);border:1px solid var(--border2);border-radius:8px;padding:7px 10px;color:var(--text2);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px}
+.refresh-btn:active{opacity:0.7}
+.last-refresh{font-size:10px;color:var(--text3)}
+
+/* ── PERIOD TABS ── */
+.period-bar{
+  display:flex;gap:6px;padding:12px 16px;overflow-x:auto;
+  scrollbar-width:none;-ms-overflow-style:none
+}
+.period-bar::-webkit-scrollbar{display:none}
+.period-tab{
+  flex-shrink:0;padding:7px 16px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;
+  background:var(--card);border:1px solid var(--border);color:var(--text2);
+  transition:all 0.15s
+}
+.period-tab.active{background:var(--blue);border-color:var(--blue);color:#fff}
+.period-tab:active{opacity:0.8}
+
+/* ── SCROLL CONTAINER ── */
+.dash-body{padding:0 0 calc(var(--safe-bottom) + 24px)}
+
+/* ── SECTION LABEL ── */
+.sec-label{
+  font-size:10px;font-weight:700;color:var(--text2);
+  text-transform:uppercase;letter-spacing:0.1em;
+  padding:16px 16px 8px;display:flex;align-items:center;gap:6px
+}
+
+/* ── KPI SCROLL ROW ── */
+.kpi-scroll{
+  display:flex;gap:10px;padding:0 16px;
+  overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none
+}
+.kpi-scroll::-webkit-scrollbar{display:none}
+.kpi-card{
+  flex-shrink:0;width:160px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:16px;
+  position:relative;overflow:hidden
+}
+.kpi-card::before{
+  content:'';position:absolute;top:-20px;right:-20px;
+  width:80px;height:80px;border-radius:50%;
+  background:var(--accent-color,var(--blue));
+  opacity:0.06
+}
+.kpi-icon{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+.kpi-icon i{font-size:17px}
+.kpi-amt{font-size:20px;font-weight:800;letter-spacing:-0.02em;line-height:1}
+.kpi-label{font-size:11px;color:var(--text2);margin-top:5px;font-weight:500}
+.kpi-trend{font-size:10px;margin-top:6px;display:flex;align-items:center;gap:3px;font-weight:600}
+.kpi-trend.up{color:var(--green)}
+.kpi-trend.down{color:var(--red)}
+.kpi-trend.neutral{color:var(--text2)}
+
+/* ── ALERT CHIPS ── */
+.alert-row{display:flex;gap:8px;padding:0 16px;overflow-x:auto;scrollbar-width:none}
+.alert-row::-webkit-scrollbar{display:none}
+.alert-chip{
+  flex-shrink:0;display:flex;align-items:center;gap:6px;
+  padding:8px 14px;border-radius:99px;font-size:12px;font-weight:600;
+  cursor:pointer;border:1px solid transparent
+}
+.alert-chip:active{opacity:0.8}
+.alert-chip.red{background:var(--red2);color:var(--red);border-color:rgba(255,71,87,0.25)}
+.alert-chip.amber{background:var(--amber2);color:var(--amber);border-color:rgba(255,165,2,0.25)}
+.alert-chip.purple{background:var(--purple2);color:var(--purple);border-color:rgba(167,139,250,0.25)}
+.alert-chip.blue{background:var(--blue2);color:var(--blue);border-color:rgba(79,142,247,0.25)}
+.alert-chip.green{background:var(--green2);color:var(--green);border-color:rgba(0,214,143,0.25)}
+.chip-num{font-size:15px;font-weight:800}
+
+/* ── CHART CARDS ── */
+.chart-card{
+  margin:0 16px 12px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:18px 16px
+}
+.chart-title{font-size:13px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.chart-title-text{display:flex;align-items:center;gap:7px}
+.chart-title span{font-size:11px;color:var(--text2);font-weight:500}
+.bar-row{margin-bottom:11px}
+.bar-meta{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.bar-name{font-size:12px;font-weight:500;color:var(--text);max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-val{font-size:11px;color:var(--text2);flex-shrink:0}
+.bar-track{height:6px;background:var(--bg2);border-radius:99px;overflow:hidden}
+.bar-fill{height:100%;border-radius:99px;transition:width 0.6s cubic-bezier(.4,0,.2,1)}
+
+/* ── AGING TABLE ── */
+.aging-table{width:100%;border-collapse:collapse}
+.aging-table td{padding:8px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.aging-table tr:last-child td{border-bottom:none}
+.aging-bucket{color:var(--text2)}
+.aging-amount{text-align:right;font-weight:700}
+.aging-bar-wrap{width:80px;padding-left:12px}
+.aging-mini{height:4px;background:var(--bg2);border-radius:99px;overflow:hidden;margin-top:3px}
+.aging-mini-fill{height:100%;border-radius:99px}
+
+/* ── HR GRID ── */
+.hr-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.hr-box{
+  background:var(--bg2);border-radius:var(--r-sm);
+  padding:14px 12px;text-align:center;border:1px solid var(--border)
+}
+.hr-box-num{font-size:28px;font-weight:800;line-height:1}
+.hr-box-label{font-size:10px;color:var(--text2);margin-top:4px;font-weight:500}
+.outside-list{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+.outside-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 10px;background:var(--amber2);border-radius:var(--r-sm);
+  border:1px solid rgba(255,165,2,0.2);font-size:12px
+}
+.outside-name{font-weight:600}
+.outside-badge{color:var(--amber);font-size:10px;font-weight:700}
+
+/* ── ALERTS LIST ── */
+.alert-item{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:13px 0;border-bottom:1px solid var(--border)
+}
+.alert-item:last-child{border-bottom:none}
+.alert-dot{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.alert-dot i{font-size:17px}
+.alert-content{flex:1;min-width:0}
+.alert-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alert-desc{font-size:11px;color:var(--text2);margin-top:2px}
+.alert-badge{flex-shrink:0;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px}
+
+/* ── NET INCOME METER ── */
+.net-meter{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--r);padding:18px 16px;margin:0 16px 12px
+}
+.net-label{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px}
+.net-row{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.net-amount{font-size:32px;font-weight:800;letter-spacing:-0.03em}
+.net-sub{font-size:12px;color:var(--text2)}
+.breakdown-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:7px}
+.breakdown-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px}
+
+/* ── LOADING / EMPTY ── */
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 24px;color:var(--text2);gap:12px}
+.spinner{width:28px;height:28px;border:2px solid var(--border2);border-top-color:var(--blue);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-msg{font-size:13px;color:var(--text2);text-align:center}
+
+/* ── TOAST ── */
+.toast{
+  position:fixed;bottom:calc(var(--safe-bottom) + 16px);left:16px;right:16px;
+  padding:13px 16px;border-radius:var(--r-sm);font-size:13px;font-weight:600;
+  z-index:999;animation:toastUp 0.3s ease;display:flex;align-items:center;gap:8px
+}
+@keyframes toastUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.toast.success{background:var(--green);color:#000}
+.toast.error{background:var(--red);color:#fff}
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="app-brand">
+    <div class="app-logo"><i class="ti ti-chart-pie"></i></div>
+    <div>
+      <div class="app-name">Management</div>
+      <div class="app-sub">Anmol Pharmaceuticals</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="last-refresh" id="last-refresh">—</div>
+    <button class="refresh-btn" onclick="loadData()"><i class="ti ti-refresh"></i>Refresh</button>
+  </div>
+</div>
+
+<div class="period-bar">
+  <div class="period-tab active" data-p="month" onclick="setPeriod('month',this)">This Month</div>
+  <div class="period-tab" data-p="quarter" onclick="setPeriod('quarter',this)">This Quarter</div>
+  <div class="period-tab" data-p="year" onclick="setPeriod('year',this)">This Year</div>
+  <div class="period-tab" data-p="all" onclick="setPeriod('all',this)">All Time</div>
+</div>
+
+<div class="dash-body" id="dash-body">
+  <div class="loading"><div class="spinner"></div><div class="empty-msg">Loading dashboard…</div></div>
+</div>
+
+<script>
+// ── FIREBASE ─────────────────────────────────────────────────────────────────
+let db = null;
+const FB_CONFIG = {
+  apiKey:"AIzaSyCtApiphcSMdEo-hmIkefIeQGvmusG2B6M",
+  authDomain:"anmol-accounting.firebaseapp.com",
+  projectId:"anmol-accounting",
+  storageBucket:"anmol-accounting.firebasestorage.app",
+  messagingSenderId:"838744686940",
+  appId:"1:838744686940:web:28d9b95c27031abf794199"
+};
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let period = 'month';
+let erpState = null;
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+const today = () => new Date().toISOString().split('T')[0];
+const fmt   = n => '₱' + (Math.abs(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtS  = n => (n<0?'-':'+') + fmt(n);
+const fmtK  = n => Math.abs(n)>=1000000 ? '₱'+(n/1000000).toFixed(2)+'M' : Math.abs(n)>=1000 ? '₱'+(n/1000).toFixed(1)+'k' : fmt(n);
+
+function getInvoiceStatus(inv, collections) {
+  if(inv.status==='cancelled') return 'cancelled';
+  const paid = collections.filter(c=>(c.invoices||[]).includes(inv.id)||c.invoice===inv.id).reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  if(paid>=(inv.amount||0)&&(inv.amount||0)>0) return 'paid';
+  if(inv.due&&inv.due<today()) return 'overdue';
+  return 'pending';
+}
+
+function inPeriod(date) {
+  if(!date) return false;
+  if(period==='all') return true;
+  const now = new Date(), d = date.slice(0,10);
+  if(period==='month')   return d.startsWith(now.toISOString().slice(0,7));
+  if(period==='year')    return d.startsWith(String(now.getFullYear()));
+  if(period==='quarter') {
+    const qs = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
+    return d >= qs.toISOString().slice(0,10) && d <= today();
+  }
+  return true;
+}
+
+const COLORS = ['#4f8ef7','#00d68f','#ffa502','#a78bfa','#ff6b81'];
+
+// ── FIREBASE INIT ─────────────────────────────────────────────────────────────
+function initFirebase() {
+  if(typeof firebase==='undefined') { setTimeout(initFirebase,100); return; }
+  if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+  db = firebase.firestore();
+  loadData();
+}
+
+// ── LOAD DATA ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  document.getElementById('dash-body').innerHTML =
+    '<div class="loading"><div class="spinner"></div><div class="empty-msg">Loading…</div></div>';
+  try {
+    const doc = await db.doc('companies/anmol').get();
+    if(!doc.exists) throw new Error('No data found');
+    erpState = JSON.parse(doc.data().data || '{}');
+    document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+    render();
+  } catch(e) {
+    document.getElementById('dash-body').innerHTML =
+      `<div class="loading"><i class="ti ti-wifi-off" style="font-size:32px;color:var(--red)"></i><div class="empty-msg">${e.message}</div></div>`;
+  }
+}
+
+// ── PERIOD SWITCH ─────────────────────────────────────────────────────────────
+function setPeriod(p, el) {
+  period = p;
+  document.querySelectorAll('.period-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  if(erpState) render();
+}
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
+function render() {
+  const s = erpState;
+  const now = new Date();
+  const todayStr = today();
+  const invoices    = s.invoices||[];
+  const collections = s.collections||[];
+  const expenses    = s.expenses||[];
+  const journal     = s.journal||[];
+  const pos         = s.purchaseOrders||[];
+  const sos         = s.salesOrders||[];
+  const employees   = s.employees||[];
+  const attendance  = s.attendance||[];
+  const inventory   = s.inventory||[];
+  const accounts    = s.accounts||[];
+  const empDocs     = s.empDocuments||[];
+  const leaves      = s.leaves||[];
+
+  const expAccIds = new Set(accounts.filter(a=>a.type==='Expense').map(a=>String(a.id)));
+  const lastMonth = new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
+
+  // Filtered sets
+  const filtInv = invoices.filter(i=>i.status!=='cancelled'&&inPeriod(i.date));
+  const prevInv  = invoices.filter(i=>i.status!=='cancelled'&&i.date?.startsWith(lastMonth));
+  const filtCol  = collections.filter(c=>inPeriod(c.date));
+  const filtExp  = expenses.filter(e=>inPeriod(e.date));
+  const dvExp    = journal.filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))&&inPeriod(j.date));
+  const filtPO   = pos.filter(p=>inPeriod(p.date));
+
+  // KPIs
+  const totalRev  = filtInv.reduce((s,i)=>s+(i.amount||0),0);
+  const prevRev   = prevInv.reduce((s,i)=>s+(i.amount||0),0);
+  const revTrend  = prevRev>0 ? ((totalRev-prevRev)/prevRev*100).toFixed(1) : null;
+  const totalExp  = filtExp.reduce((s,e)=>s+(e.amount||0),0) + dvExp.reduce((s,j)=>s+(j.amount||0),0);
+  const totalPur  = filtPO.reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+  const totalCol  = filtCol.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  const netIncome = totalRev - totalPur - totalExp;
+
+  // AR
+  const unpaid    = invoices.filter(i=>{ const st=getInvoiceStatus(i,collections); return st==='pending'||st==='overdue'; });
+  const totalAR   = unpaid.reduce((s,i)=>s+(i.amount||0),0);
+  const overdueInvs = invoices.filter(i=>getInvoiceStatus(i,collections)==='overdue');
+
+  // AR Aging
+  const aging = {cur:0,d30:0,d60:0,d90:0,d90p:0};
+  unpaid.forEach(i=>{
+    if(!i.due) return;
+    const d = Math.floor((now-new Date(i.due))/864e5);
+    if(d<=0) aging.cur+=i.amount||0;
+    else if(d<=30) aging.d30+=i.amount||0;
+    else if(d<=60) aging.d60+=i.amount||0;
+    else if(d<=90) aging.d90+=i.amount||0;
+    else           aging.d90p+=i.amount||0;
+  });
+
+  // Top 5 customers
+  const custMap = {};
+  filtInv.forEach(i=>{ if(!custMap[i.customer]) custMap[i.customer]=0; custMap[i.customer]+=(i.amount||0); });
+  const top5Cust = Object.entries(custMap).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxCust  = top5Cust.length ? top5Cust[0][1] : 1;
+
+  // Top 5 products
+  const prodMap = {};
+  filtInv.forEach(inv=>(inv.lines||[]).forEach(l=>{
+    const k=l.desc||l.itemId||'?';
+    if(!prodMap[k]) prodMap[k]={qty:0,rev:0};
+    prodMap[k].qty+=(l.qty||0); prodMap[k].rev+=(l.lineTotal||0);
+  }));
+  const top5Prod = Object.entries(prodMap).sort((a,b)=>b[1].rev-a[1].rev).slice(0,5);
+  const maxProd  = top5Prod.length ? top5Prod[0][1].rev : 1;
+
+  // HR
+  const todayAtt   = attendance.filter(a=>a.date===todayStr);
+  const present    = todayAtt.filter(a=>a.status==='present').length;
+  const absent     = employees.filter(e=>!todayAtt.find(a=>a.empId===e.id)).length;
+  const outside    = todayAtt.filter(a=>a.locTag==='outside');
+  const pendLeave  = leaves.filter(l=>l.status==='pending').length;
+
+  // Inventory
+  const outStock   = inventory.filter(i=>(i.qty||0)===0);
+  const lowStock   = inventory.filter(i=>(i.qty||0)>0&&(i.qty||0)<=(i.reorderLevel||5));
+  const expDocs    = empDocs.filter(d=>{
+    if(!d.expiry) return false;
+    return Math.floor((new Date(d.expiry)-now)/864e5)<=30;
+  });
+
+  const pendPO = pos.filter(p=>p.status==='pending');
+  const pendSO = sos.filter(s=>s.status==='pending');
+
+  const periodLabel = {month:'This Month',quarter:'This Quarter',year:'This Year',all:'All Time'}[period];
+
+  // ── Build HTML ──────────────────────────────────────────────────────────────
+  let html = '';
+
+  // ── Alert chips ──
+  const chips = [
+    [overdueInvs.length, 'Overdue', 'red', 'ti-file-invoice'],
+    [pendPO.length+pendSO.length, 'Pending', 'amber', 'ti-clock-pause'],
+    [outStock.length, 'Out of Stock', 'red', 'ti-package-off'],
+    [lowStock.length, 'Low Stock', 'amber', 'ti-package'],
+    [pendLeave, 'Leave Requests', 'blue', 'ti-beach'],
+    [expDocs.length, 'Expiring Docs', 'purple', 'ti-file-alert'],
+  ].filter(([n])=>n>0);
+
+  if(chips.length) {
+    html += `<div class="sec-label"><i class="ti ti-bell"></i>Action Required</div>
+    <div class="alert-row">
+      ${chips.map(([n,lbl,clr,ico])=>`
+      <div class="alert-chip ${clr}">
+        <i class="ti ${ico}"></i>
+        <span class="chip-num">${n}</span>
+        <span>${lbl}</span>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  // ── Financial KPI scroll ──
+  html += `<div class="sec-label"><i class="ti ti-coin"></i>Financials — ${periodLabel}</div>
+  <div class="kpi-scroll">
+    ${kpiCard('ti-trending-up','Revenue',fmtK(totalRev),'var(--green)','var(--green2)',
+      revTrend ? `<div class="kpi-trend ${+revTrend>=0?'up':'down'}"><i class="ti ti-trending-${+revTrend>=0?'up':'down'}"></i>${Math.abs(revTrend)}% vs last mo</div>` : `<div class="kpi-trend neutral">${filtInv.length} invoices</div>`)}
+    ${kpiCard('ti-coin','Net Income',fmtK(netIncome),netIncome>=0?'var(--green)':'var(--red)',netIncome>=0?'var(--green2)':'var(--red2)',
+      `<div class="kpi-trend ${netIncome>=0?'up':'down'}"><i class="ti ti-${netIncome>=0?'plus':'minus'}"></i>Rev − Pur − Exp</div>`)}
+    ${kpiCard('ti-cash','Collections',fmtK(totalCol),'var(--blue)','var(--blue2)',
+      `<div class="kpi-trend neutral"><i class="ti ti-file-invoice"></i>AR: ${fmtK(totalAR)}</div>`)}
+    ${kpiCard('ti-receipt','Expenses',fmtK(totalExp),'var(--red)','var(--red2)',
+      `<div class="kpi-trend neutral"><i class="ti ti-shopping-cart"></i>Pur: ${fmtK(totalPur)}</div>`)}
+    ${kpiCard('ti-file-alert','Overdue AR',fmtK(overdueInvs.reduce((s,i)=>s+(i.amount||0),0)),'var(--amber)','var(--amber2)',
+      `<div class="kpi-trend down"><i class="ti ti-alert-triangle"></i>${overdueInvs.length} invoices</div>`)}
+  </div>`;
+
+  // ── HR KPIs ──
+  html += `<div class="sec-label"><i class="ti ti-users"></i>HR — Today ${todayStr}</div>
+  <div class="kpi-scroll">
+    ${kpiCard('ti-check','Present',String(present),'var(--green)','var(--green2)',
+      `<div class="kpi-trend neutral">${employees.length} total employees</div>`)}
+    ${kpiCard('ti-x','Absent',String(absent),'var(--red)','var(--red2)',
+      `<div class="kpi-trend neutral">No clock-in record</div>`)}
+    ${kpiCard('ti-map-pin-off','Outside',String(outside.length),'var(--amber)','var(--amber2)',
+      `<div class="kpi-trend neutral">Not in office</div>`)}
+    ${kpiCard('ti-beach','Leave Pending',String(pendLeave),'var(--blue)','var(--blue2)',
+      `<div class="kpi-trend neutral">Awaiting approval</div>`)}
+  </div>`;
+
+  // ── Net income breakdown ──
+  html += `<div class="sec-label"><i class="ti ti-chart-bar"></i>Income Breakdown</div>
+  <div class="net-meter">
+    <div class="net-label">Net Income — ${periodLabel}</div>
+    <div class="net-row">
+      <div class="net-amount" style="color:${netIncome>=0?'var(--green)':'var(--red)'}">${fmtK(netIncome)}</div>
+      <div class="net-sub">${netIncome>=0?'Profit':'Loss'}</div>
+    </div>
+    ${[
+      [totalRev,   'Revenue',   'var(--green)'],
+      [totalPur,   'Purchases', 'var(--blue)'],
+      [totalExp,   'Expenses',  'var(--red)'],
+    ].map(([amt,label,color])=>`
+    <div class="breakdown-row">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="breakdown-dot" style="background:${color}"></div>
+        <span style="font-size:12px;color:var(--text2)">${label}</span>
+      </div>
+      <span style="font-size:12px;font-weight:600;color:${color}">${fmt(amt)}</span>
+    </div>
+    <div style="height:4px;background:var(--bg2);border-radius:99px;overflow:hidden;margin-bottom:10px">
+      <div style="height:100%;width:${totalRev>0?(amt/totalRev*100).toFixed(1):0}%;background:${color};border-radius:99px"></div>
+    </div>`).join('')}
+  </div>`;
+
+  // ── Top Customers ──
+  html += `<div class="sec-label"><i class="ti ti-star"></i>Top Customers — ${periodLabel}</div>
+  <div class="chart-card">
+    <div class="chart-title">
+      <div class="chart-title-text"><i class="ti ti-building-store" style="color:var(--amber)"></i>By Revenue</div>
+      <span>${top5Cust.length} customers</span>
+    </div>
+    ${top5Cust.length===0?`<div class="empty-msg" style="padding:16px">No sales in this period.</div>`:
+    top5Cust.map(([name,rev],i)=>`
+    <div class="bar-row">
+      <div class="bar-meta">
+        <span class="bar-name" title="${name}">${name}</span>
+        <span class="bar-val">${fmtK(rev)}</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(rev/maxCust*100).toFixed(1)}%;background:${COLORS[i]}"></div></div>
+    </div>`).join('')}
+  </div>`;
+
+  // ── Top Products ──
+  html += `<div class="sec-label"><i class="ti ti-package"></i>Top Products — ${periodLabel}</div>
+  <div class="chart-card">
+    <div class="chart-title">
+      <div class="chart-title-text"><i class="ti ti-pill" style="color:var(--blue)"></i>By Revenue</div>
+      <span>${top5Prod.length} products</span>
+    </div>
+    ${top5Prod.length===0?`<div class="empty-msg" style="padding:16px">No product sales in this period.</div>`:
+    top5Prod.map(([name,d],i)=>`
+    <div class="bar-row">
+      <div class="bar-meta">
+        <span class="bar-name" title="${name}">${name}</span>
+        <span class="bar-val">${d.qty} pcs · ${fmtK(d.rev)}</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(d.rev/maxProd*100).toFixed(1)}%;background:${COLORS[i]}"></div></div>
+    </div>`).join('')}
+  </div>`;
+
+  // ── AR Aging ──
+  html += `<div class="sec-label"><i class="ti ti-clock-dollar"></i>AR Aging</div>
+  <div class="chart-card">
+    ${totalAR===0?`<div style="text-align:center;padding:16px;color:var(--green)"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:6px"></i>No outstanding AR — all collected!</div>`:
+    `<table class="aging-table">
+      ${[
+        ['Current (not due)', aging.cur,  'var(--green)'],
+        ['1–30 days overdue', aging.d30,  'var(--blue)'],
+        ['31–60 days',        aging.d60,  'var(--amber)'],
+        ['61–90 days',        aging.d90,  'var(--red)'],
+        ['90+ days',          aging.d90p, '#7f1d1d'],
+      ].map(([lbl,amt,clr])=>`<tr>
+        <td class="aging-bucket">${lbl}</td>
+        <td class="aging-amount" style="color:${clr}">${fmtK(amt)}</td>
+        <td class="aging-bar-wrap">
+          <div class="aging-mini"><div class="aging-mini-fill" style="width:${totalAR>0?(amt/totalAR*100).toFixed(1):0}%;background:${clr}"></div></div>
+          <div style="font-size:10px;color:var(--text2);text-align:right">${totalAR>0?(amt/totalAR*100).toFixed(0):0}%</div>
+        </td>
+      </tr>`).join('')}
+      <tr style="border-top:2px solid var(--border2)">
+        <td style="font-weight:700;padding-top:10px">Total AR</td>
+        <td class="aging-amount" style="color:var(--blue);padding-top:10px">${fmt(totalAR)}</td>
+        <td></td>
+      </tr>
+    </table>`}
+  </div>`;
+
+  // ── HR Detail ──
+  html += `<div class="sec-label"><i class="ti ti-id-badge"></i>HR Today</div>
+  <div class="chart-card">
+    <div class="hr-grid">
+      ${[
+        [present,'Present','var(--green)','var(--green2)'],
+        [absent,'Absent','var(--red)','var(--red2)'],
+        [outside.length,'Outside Office','var(--amber)','var(--amber2)'],
+        [pendLeave,'Pending Leaves','var(--purple)','var(--purple2)'],
+      ].map(([n,lbl,clr,bg])=>`
+      <div class="hr-box" style="border-color:${clr}22;background:${bg}">
+        <div class="hr-box-num" style="color:${clr}">${n}</div>
+        <div class="hr-box-label">${lbl}</div>
+      </div>`).join('')}
+    </div>
+    ${outside.length?`
+    <div class="outside-list">
+      <div style="font-size:11px;color:var(--amber);font-weight:700;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.07em">Outside office today</div>
+      ${outside.map(a=>{
+        const emp=(employees).find(e=>e.id===a.empId)||{name:a.empName||'Unknown'};
+        return `<div class="outside-item">
+          <span class="outside-name">${emp.name}</span>
+          <span class="outside-badge">⚠ ${a.locDist?a.locDist+'m away':'Outside'}</span>
+        </div>`;
+      }).join('')}
+    </div>`:''}
+  </div>`;
+
+  // ── Alerts Detail ──
+  const allAlerts = [
+    ...overdueInvs.slice(0,5).map(i=>({
+      icon:'ti-file-invoice',color:'var(--red)',bg:'var(--red2)',
+      title:`${i.id} — ${i.customer}`,
+      desc:`Due ${i.due} · ${fmt(i.amount)}`,badge:'OVERDUE',badgeColor:'var(--red)'
+    })),
+    ...pendPO.slice(0,3).map(p=>({
+      icon:'ti-truck-delivery',color:'var(--amber)',bg:'var(--amber2)',
+      title:`${p.id} — ${p.supplier}`,desc:'PO pending approval',badge:'PENDING',badgeColor:'var(--amber)'
+    })),
+    ...outStock.slice(0,3).map(it=>({
+      icon:'ti-package-off',color:'var(--red)',bg:'var(--red2)',
+      title:it.name,desc:'Out of stock',badge:'0 PCS',badgeColor:'var(--red)'
+    })),
+    ...lowStock.slice(0,3).map(it=>({
+      icon:'ti-package',color:'var(--amber)',bg:'var(--amber2)',
+      title:it.name,desc:`Only ${it.qty} ${it.unit||'pcs'} left`,badge:'LOW',badgeColor:'var(--amber)'
+    })),
+    ...expDocs.slice(0,3).map(d=>{
+      const emp=employees.find(e=>e.id===d.empId)||{name:d.empName||'?'};
+      return {icon:'ti-file-alert',color:'var(--purple)',bg:'var(--purple2)',title:`${emp.name} — ${d.docType}`,desc:`Expires ${d.expiry}`,badge:'EXPIRING',badgeColor:'var(--purple)'};
+    }),
+    ...leaves.filter(l=>l.status==='pending').slice(0,3).map(l=>({
+      icon:'ti-beach',color:'var(--blue)',bg:'var(--blue2)',
+      title:`${l.empName} — ${l.type}`,desc:`${l.startDate} to ${l.endDate}`,badge:'PENDING',badgeColor:'var(--blue)'
+    })),
+  ];
+
+  if(allAlerts.length) {
+    html += `<div class="sec-label"><i class="ti ti-alert-circle"></i>Action Required (${allAlerts.length})</div>
+    <div class="chart-card">
+      ${allAlerts.map(a=>`
+      <div class="alert-item">
+        <div class="alert-dot" style="background:${a.bg}"><i class="ti ${a.icon}" style="color:${a.color}"></i></div>
+        <div class="alert-content">
+          <div class="alert-title">${a.title}</div>
+          <div class="alert-desc">${a.desc}</div>
+        </div>
+        <div class="alert-badge" style="background:${a.bg};color:${a.badgeColor}">${a.badge}</div>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    html += `<div class="chart-card" style="margin:0 16px 12px;text-align:center;padding:24px;color:var(--green)">
+      <i class="ti ti-circle-check" style="font-size:32px;display:block;margin-bottom:8px"></i>
+      <div style="font-size:14px;font-weight:600">All clear!</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">No urgent actions needed.</div>
+    </div>`;
+  }
+
+  document.getElementById('dash-body').innerHTML = html;
+}
+
+function kpiCard(icon, label, value, color, bg, sub='') {
+  return `<div class="kpi-card" style="--accent-color:${color}">
+    <div class="kpi-icon" style="background:${bg}"><i class="ti ${icon}" style="color:${color}"></i></div>
+    <div class="kpi-amt" style="color:${color}">${value}</div>
+    <div class="kpi-label">${label}</div>
+    ${sub}
+  </div>`;
+}
+
+window.addEventListener('load', initFirebase);
+</script>
+</body>
+</html>
