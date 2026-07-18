@@ -217,7 +217,7 @@
     <div class="action-card clock-in" id="btn-clock-in" onclick="startClockIn()">
       <i class="ti ti-clock-play"></i>
       <div class="label">Clock In</div>
-      <div class="sub">Face verification</div>
+      <div class="sub">Via face verification</div>
     </div>
     <div class="action-card clock-out" id="btn-clock-out" onclick="startClockOut()">
       <i class="ti ti-clock-stop"></i>
@@ -427,14 +427,13 @@ async function enterHome() {
 async function loadTodayRecord() {
   todayRecord = null;
   try {
-    // Check Firebase attendance collection
     const snap = await db.collection('companies/anmol/attendance_mobile')
       .where('empId','==', currentEmp?.id || currentUser.id)
-      .where('date','==', today())
-      .limit(1)
       .get();
-    if(!snap.empty) todayRecord = { firestoreId: snap.docs[0].id, ...snap.docs[0].data() };
-  } catch(e) { console.warn(e); }
+    const all = snap.docs.map(d=>({firestoreId:d.id,...d.data()}));
+    // Find today's record client-side (avoids needing composite index)
+    todayRecord = all.find(r=>r.date===today()) || null;
+  } catch(e) { console.warn('loadTodayRecord:', e); }
   updateTodayUI();
 }
 
@@ -472,10 +471,10 @@ async function loadRecentAttendance() {
   try {
     const snap = await db.collection('companies/anmol/attendance_mobile')
       .where('empId','==', currentEmp?.id || currentUser.id)
-      .orderBy('date','desc')
-      .limit(5)
       .get();
-    const records = snap.docs.map(d=>d.data());
+    const records = snap.docs.map(d=>d.data())
+      .sort((a,b)=>b.date.localeCompare(a.date))
+      .slice(0,5);
     if(!records.length) {
       listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No attendance records yet.</div>';
       return;
@@ -490,7 +489,8 @@ async function loadRecentAttendance() {
         <span class="history-badge ${r.status==='present'?'badge-present':r.status==='absent'?'badge-absent':'badge-leave'}">${r.status||'present'}</span>
       </div>`).join('');
   } catch(e) {
-    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Could not load records.</div>';
+    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Could not load. Check internet connection.</div>';
+    console.error('loadRecentAttendance:', e);
   }
 }
 
@@ -498,73 +498,27 @@ async function loadRecentAttendance() {
 async function startClockIn() {
   if(todayRecord) { showToast('Already clocked in today!', 'info'); return; }
   clockMode = 'in';
-  // If employee has no photo — try biometric only
-  if(!currentEmp?.photo) {
-    await promptBiometric('Clock In', 'Confirm your identity to record attendance.');
-    return;
+  if(currentEmp?.photo) {
+    // Face verification via camera
+    openCamera('Clock In — Face Verification', 'Verify & Clock In');
+  } else {
+    // No photo — record directly with manual confirmation
+    if(confirm('No face photo registered for your account.\n\nClock in now?')) {
+      await recordAttendance(false, 'manual');
+    }
   }
-  // Open camera for face verification
-  openCamera('Clock In — Face Verification', 'Verify & Clock In');
 }
 
 async function startClockOut() {
-  if(!todayRecord) { showToast('You haven\'t clocked in yet.', 'error'); return; }
+  if(!todayRecord) { showToast("You haven\'t clocked in yet.", 'error'); return; }
   if(todayRecord.timeOut) { showToast('Already clocked out today.', 'info'); return; }
   clockMode = 'out';
-  // Try biometric first, fallback to simple confirm
-  await promptBiometric('Clock Out', 'Confirm your identity to record time out.');
-}
-
-// ── BIOMETRIC PROMPT (WebAuthn / device biometric) ────────────────────────────
-async function promptBiometric(title, subtitle) {
-  // Check if WebAuthn is available (device biometric)
-  if(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
-    // Show biometric overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'bio-overlay';
-    overlay.innerHTML = `
-      <div class="bio-icon"><i class="ti ti-fingerprint"></i></div>
-      <div class="bio-title">${title}</div>
-      <div class="bio-sub">${subtitle}<br>Use your fingerprint, Face ID, or PIN.</div>
-      <div class="bio-btns">
-        <button class="bio-btn cancel" onclick="this.closest('.bio-overlay').remove()">Cancel</button>
-        <button class="bio-btn confirm" id="bio-confirm-btn">Authenticate</button>
-      </div>`;
-    document.body.appendChild(overlay);
-    document.getElementById('bio-confirm-btn').onclick = async () => {
-      try {
-        // Use WebAuthn credential for verification
-        await navigator.credentials.get({
-          publicKey: {
-            challenge: crypto.getRandomValues(new Uint8Array(32)),
-            userVerification: 'required',
-            timeout: 30000,
-            rpId: window.location.hostname || 'localhost'
-          }
-        });
-        overlay.remove();
-        await recordAttendance(true, 'biometric');
-      } catch(e) {
-        if(e.name==='NotAllowedError') {
-          overlay.remove();
-          // Fallback to simple confirm
-          if(confirm(`${title}\n\nBiometric authentication was cancelled. Record attendance anyway?`)) {
-            await recordAttendance(false, 'manual');
-          }
-        } else {
-          overlay.remove();
-          await recordAttendance(false, 'manual');
-        }
-      }
-    };
+  if(currentEmp?.photo) {
+    openCamera('Clock Out — Face Verification', 'Verify & Clock Out');
+    document.getElementById('cam-capture-btn').innerHTML = \`<i class="ti ti-camera" style="margin-right:8px"></i>Verify & Clock Out\`;
   } else {
-    // No biometric available — show camera or simple confirm
-    if(currentEmp?.photo && clockMode==='in') {
-      openCamera(title, subtitle);
-    } else {
-      if(confirm(`${title}\n\n${subtitle}\n\nProceed?`)) {
-        await recordAttendance(false, 'manual');
-      }
+    if(confirm('Clock out now?')) {
+      await recordAttendance(false, 'manual');
     }
   }
 }
@@ -608,7 +562,6 @@ async function captureAndVerify() {
   btn.innerHTML = '<span class="spinner"></span>Verifying…';
   ring.className = 'face-ring scanning';
   status.textContent = 'Comparing faces with AI…';
-
   try {
     const video = document.getElementById('cam-video');
     const canvas = document.getElementById('cam-canvas');
@@ -622,13 +575,21 @@ async function captureAndVerify() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 100,
+        max_tokens: 150,
         messages: [{
           role: 'user',
           content: [
             { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:storedBase64 } },
             { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:capturedBase64 } },
-            { type:'text', text:'Compare these two face photos. First is the registered employee photo. Second is a live camera capture. Same person? Reply ONLY: MATCH X% or NO_MATCH X%' }
+            { type:'text', text:`You are a biometric attendance verification system.
+
+TASK 1 - LIVENESS CHECK: Examine the SECOND image carefully. Is this a LIVE person (real face in front of camera) or a SPOOF attempt (photo of a photo, printed image, phone screen showing a face, or image held up to camera)? Look for: natural skin texture, depth cues, natural lighting/shadows, camera reflection in eyes, slight motion blur. Reply LIVE or SPOOF.
+
+TASK 2 - FACE MATCH: Compare the two faces. Same person? Reply MATCH X% or NO_MATCH X%.
+
+Reply in this exact format only:
+LIVENESS: LIVE or SPOOF
+MATCH: MATCH X% or NO_MATCH X%` }
           ]
         }]
       })
@@ -636,12 +597,24 @@ async function captureAndVerify() {
 
     const data = await res.json();
     const reply = (data.content||[]).map(b=>b.text||'').join('').trim().toUpperCase();
-    const isMatch = reply.startsWith('MATCH');
-    const conf = parseInt((reply.match(/(\d+)%/)||[0,0])[1])||0;
+
+    // Parse liveness and match
+    const isLive  = !reply.includes('LIVENESS: SPOOF');
+    const isMatch = reply.includes('MATCH:') && !reply.includes('NO_MATCH');
+    const conf    = parseInt((reply.match(/(\d+)%/)||[0,0])[1])||0;
+
+    if(!isLive) {
+      ring.className = 'face-ring fail';
+      status.textContent = '⚠️ Spoof detected — please use live face only';
+      btn.className = 'cam-btn fail';
+      btn.innerHTML = '<i class="ti ti-refresh" style="margin-right:8px"></i>Try Again';
+      btn.disabled = false;
+      return;
+    }
 
     if(isMatch && conf >= 65) {
       ring.className = 'face-ring success';
-      status.textContent = `✅ Verified (${conf}% match)`;
+      status.textContent = `✅ Verified — Live face (${conf}% match)`;
       btn.className = 'cam-btn success';
       btn.innerHTML = '✓ Identity Confirmed';
       await new Promise(r=>setTimeout(r,1200));
@@ -725,22 +698,41 @@ async function recordAttendance(verified, method) {
 
 // ── SYNC TO MAIN ERP ATTENDANCE ───────────────────────────────────────────────
 async function syncToMainAttendance(rec, mobileId) {
-  // Write to same collection that the web ERP reads
   try {
-    await db.collection('companies/anmol/att_sync').doc(mobileId).set({
-      ...rec,
-      source: 'mobile_app',
-      synced: true
-    });
-  } catch(e) { console.warn('Sync failed:', e); }
+    // Read current ERP state
+    const erpDoc = await db.doc('companies/anmol').get();
+    if(!erpDoc.exists) return;
+    const erpData = erpDoc.data();
+    const attendance = erpData.attendance || [];
+
+    // Check if already exists
+    const attId = 'MOB-' + mobileId.slice(-8).toUpperCase();
+    const existingIdx = attendance.findIndex(a=>a.id===attId||a.mobileId===mobileId);
+    const attRec = { ...rec, id: attId, mobileId, source:'mobile_app' };
+
+    if(existingIdx >= 0) {
+      attendance[existingIdx] = attRec;
+    } else {
+      attendance.push(attRec);
+    }
+
+    await db.doc('companies/anmol').update({ attendance });
+  } catch(e) { console.warn('ERP sync failed:', e.message); }
 }
 
 async function syncTimeOutToMain(mobileId, timeOut, hours, ot) {
   try {
-    await db.collection('companies/anmol/att_sync').doc(mobileId).update({
-      timeOut, hoursWorked:hours, overtimeHours:ot
-    });
-  } catch(e) { console.warn('Sync timeout failed:', e); }
+    const erpDoc = await db.doc('companies/anmol').get();
+    if(!erpDoc.exists) return;
+    const erpData = erpDoc.data();
+    const attendance = erpData.attendance || [];
+    const attId = 'MOB-' + mobileId.slice(-8).toUpperCase();
+    const idx = attendance.findIndex(a=>a.id===attId||a.mobileId===mobileId);
+    if(idx>=0) {
+      attendance[idx] = { ...attendance[idx], timeOut, hoursWorked:hours, overtimeHours:ot };
+      await db.doc('companies/anmol').update({ attendance });
+    }
+  } catch(e) { console.warn('ERP timeout sync failed:', e.message); }
 }
 
 // ── HISTORY ───────────────────────────────────────────────────────────────────
@@ -750,26 +742,24 @@ async function loadHistory() {
   try {
     const snap = await db.collection('companies/anmol/attendance_mobile')
       .where('empId','==', currentEmp?.id || currentUser.id)
-      .orderBy('date','desc')
-      .limit(60)
       .get();
-    const records = snap.docs.map(d=>d.data());
+    const records = snap.docs.map(d=>d.data())
+      .sort((a,b)=>b.date.localeCompare(a.date))
+      .slice(0,60);
     if(!records.length) {
       body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">No attendance history yet.</div>';
       return;
     }
-    // Group by month
     const byMonth = {};
     records.forEach(r=>{
       const m = r.date?.slice(0,7)||'Unknown';
       if(!byMonth[m]) byMonth[m]=[];
       byMonth[m].push(r);
     });
-    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
     body.innerHTML = Object.entries(byMonth).map(([m,recs])=>{
       const [yr,mo] = m.split('-');
-      const label = `${months[parseInt(mo)-1]||mo} ${yr}`;
-      return `<div class="hist-month">${label}</div>` +
+      return `<div class="hist-month">${months[parseInt(mo)-1]||mo} ${yr}</div>` +
         recs.map(r=>`
         <div class="hist-row">
           <div class="hist-row-top">
@@ -785,7 +775,8 @@ async function loadHistory() {
         </div>`).join('');
     }).join('');
   } catch(e) {
-    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">Error loading history.</div>';
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">Error loading history. Check connection.</div>';
+    console.error('loadHistory:', e);
   }
 }
 

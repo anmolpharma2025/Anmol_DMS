@@ -2103,29 +2103,12 @@ function auditLog(action, module, recordId, details={}, before=null, after=null)
 }
 
 // ── MOBILE ATTENDANCE SYNC ────────────────────────────────────────────────────
-let _mobileAttUnsubscribe = null;
+// Mobile app writes directly to the main attendance array in companies/anmol
+// The existing fbListen() already handles real-time updates — no extra listener needed
 function startMobileAttSync() {
-  if(!db || _mobileAttUnsubscribe) return;
-  _mobileAttUnsubscribe = db.collection('companies/anmol/att_sync')
-    .onSnapshot(snap => {
-      snap.docChanges().forEach(change => {
-        const data = change.doc.data();
-        if(change.type === 'added' || change.type === 'modified') {
-          // Merge into state.attendance
-          if(!state.attendance) state.attendance = [];
-          const mobileId = 'MOB-' + change.doc.id.slice(-8).toUpperCase();
-          const existing = state.attendance.find(a=>a.id===mobileId||a.mobileId===change.doc.id);
-          if(existing) {
-            Object.assign(existing, { ...data, id:mobileId, mobileId:change.doc.id, source:'mobile' });
-          } else {
-            state.attendance.push({ ...data, id:mobileId, mobileId:change.doc.id, source:'mobile', notes:(data.notes||'')+'[Mobile App]' });
-          }
-          try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
-          // Re-render if on attendance page
-          if(state.page === 'attendance') render();
-        }
-      });
-    }, err => console.warn('Mobile att sync error:', err));
+  // Real-time sync is handled by fbListen() which watches the entire companies/anmol doc
+  // Mobile attendance records prefixed with 'MOB-' are automatically included
+  console.log('Mobile attendance sync: handled by main Firebase listener');
 }
 
 function save() {
