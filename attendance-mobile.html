@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Anmol Attendance">
+<meta name="theme-color" content="#0f1729">
+<title>Anmol Pharmaceuticals — Attendance</title>
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="data:application/manifest+json,{
+  %22name%22:%22Anmol%20Attendance%22,
+  %22short_name%22:%22Attendance%22,
+  %22start_url%22:%22./%22,
+  %22display%22:%22standalone%22,
+  %22background_color%22:%22%230f1729%22,
+  %22theme_color%22:%22%230f1729%22,
+  %22orientation%22:%22portrait%22,
+  %22icons%22:[{%22src%22:%22data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A//www.w3.org/2000/svg'%20viewBox%3D'0%200%20512%20512'%3E%3Crect%20width%3D'512'%20height%3D'512'%20rx%3D'80'%20fill%3D'%230f1729'/%3E%3Ccircle%20cx%3D'256'%20cy%3D'200'%20r%3D'100'%20fill%3D'%234f8ef7'%20opacity%3D'.9'/%3E%3Crect%20x%3D'106'%20y%3D'340'%20width%3D'300'%20height%3D'130'%20rx%3D'65'%20fill%3D'%234f8ef7'%20opacity%3D'.9'/%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22,%22purpose%22:%22any%20maskable%22}]
+}">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%230f1729'/><circle cx='256' cy='200' r='100' fill='%234f8ef7' opacity='.9'/><rect x='106' y='340' width='300' height='130' rx='65' fill='%234f8ef7' opacity='.9'/></svg>">
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  :root{
+    --bg:#0f1729;--bg2:#141e33;--card:#1a2540;--border:#2a3a5a;
+    --accent:#4f8ef7;--green:#10b981;--red:#ef4444;--amber:#f59e0b;
+    --text:#e8ecf4;--text2:#8a9bc0;--text3:#4a5a7a;
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --radius:16px;--radius-sm:10px;
+  }
+  html,body{height:100%;overflow:hidden}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px;display:flex;flex-direction:column;height:100dvh}
+
+  /* ── SCREENS ── */
+  .screen{display:none;flex-direction:column;height:100dvh;overflow-y:auto;overflow-x:hidden}
+  .screen.active{display:flex}
+
+  /* ── LOGIN SCREEN ── */
+  #login-screen{align-items:center;justify-content:center;padding:32px 24px;background:linear-gradient(160deg,#0f1729 60%,#1a2540)}
+  .logo{width:72px;height:72px;background:var(--accent);border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;box-shadow:0 8px 32px rgba(79,142,247,0.4)}
+  .logo i{font-size:36px;color:#fff}
+  .app-title{font-size:22px;font-weight:700;margin-bottom:6px;text-align:center}
+  .app-sub{font-size:13px;color:var(--text2);margin-bottom:40px;text-align:center}
+  .form-field{width:100%;margin-bottom:14px}
+  .form-field label{display:block;font-size:12px;color:var(--text2);margin-bottom:6px;font-weight:500;text-transform:uppercase;letter-spacing:0.06em}
+  .form-field input{width:100%;padding:14px 16px;background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:15px;font-family:var(--font);outline:none;-webkit-appearance:none}
+  .form-field input:focus{border-color:var(--accent)}
+  .btn-primary{width:100%;padding:16px;background:var(--accent);border:none;border-radius:var(--radius-sm);color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px;font-family:var(--font)}
+  .btn-primary:active{opacity:0.85;transform:scale(0.98)}
+  .login-error{color:var(--red);font-size:13px;text-align:center;margin-top:10px;min-height:20px}
+
+  /* ── HOME SCREEN ── */
+  #home-screen{padding:0;background:var(--bg)}
+  .home-header{background:linear-gradient(135deg,#1a2540,#0f1729);padding:env(safe-area-inset-top) 20px 24px;padding-top:calc(env(safe-area-inset-top) + 16px)}
+  .home-header .greeting{font-size:13px;color:var(--text2);margin-bottom:4px}
+  .home-header .user-name{font-size:22px;font-weight:700}
+  .home-header .dept{font-size:12px;color:var(--accent);margin-top:2px}
+  .status-card{margin:16px;padding:18px 20px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border)}
+  .status-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px}
+  .status-val{font-size:28px;font-weight:700;color:var(--green)}
+  .status-val.absent{color:var(--text3)}
+  .time-row{display:flex;gap:12px;margin-top:12px}
+  .time-box{flex:1;background:var(--bg2);border-radius:var(--radius-sm);padding:10px 12px;border:1px solid var(--border)}
+  .time-box-label{font-size:10px;color:var(--text2);margin-bottom:3px}
+  .time-box-val{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums}
+  .action-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 16px}
+  .action-card{background:var(--card);border-radius:var(--radius);padding:20px 16px;border:1px solid var(--border);text-align:center;cursor:pointer;transition:transform 0.1s,background 0.1s;-webkit-tap-highlight-color:transparent}
+  .action-card:active{transform:scale(0.96);background:#1f2e4a}
+  .action-card i{font-size:28px;display:block;margin-bottom:8px}
+  .action-card .label{font-size:13px;font-weight:600}
+  .action-card .sub{font-size:11px;color:var(--text2);margin-top:2px}
+  .action-card.clock-in i{color:var(--green)}
+  .action-card.clock-out i{color:var(--red)}
+  .action-card.history i{color:var(--accent)}
+  .action-card.profile i{color:var(--amber)}
+  .section-title{font-size:12px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;margin:20px 16px 10px}
+  .history-list{margin:0 16px 24px}
+  .history-item{background:var(--card);border-radius:var(--radius-sm);padding:14px 16px;border:1px solid var(--border);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .history-date{font-size:13px;font-weight:600}
+  .history-time{font-size:12px;color:var(--text2);margin-top:2px}
+  .history-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px}
+  .badge-present{background:rgba(16,185,129,0.15);color:var(--green)}
+  .badge-absent{background:rgba(239,68,68,0.15);color:var(--red)}
+  .badge-leave{background:rgba(245,158,11,0.15);color:var(--amber)}
+
+  /* ── CAMERA SCREEN ── */
+  #camera-screen{background:#000;position:relative;align-items:center;justify-content:center}
+  .cam-header{position:absolute;top:0;left:0;right:0;padding:env(safe-area-inset-top) 16px 12px;padding-top:calc(env(safe-area-inset-top) + 12px);background:linear-gradient(to bottom,rgba(0,0,0,0.8),transparent);z-index:10;display:flex;align-items:center;gap:12px}
+  .cam-back{background:none;border:none;color:#fff;font-size:28px;cursor:pointer;padding:4px;display:flex;align-items:center}
+  .cam-title{color:#fff;font-size:16px;font-weight:600}
+  #cam-video{width:100%;height:100dvh;object-fit:cover;position:absolute;inset:0}
+  .face-ring-wrap{position:absolute;z-index:5;display:flex;flex-direction:column;align-items:center;gap:20px}
+  .face-ring{width:240px;height:240px;border-radius:50%;border:3px solid rgba(255,255,255,0.6);position:relative;overflow:hidden}
+  .face-ring.scanning{border-color:var(--accent)}
+  .face-ring.success{border-color:var(--green)}
+  .face-ring.fail{border-color:var(--red)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .face-ring-progress{position:absolute;inset:-3px;border-radius:50%;border:3px solid transparent;border-top-color:var(--accent);animation:spin 1.2s linear infinite;display:none}
+  .face-ring.scanning .face-ring-progress{display:block}
+  .cam-status{color:#fff;font-size:14px;font-weight:500;text-align:center;background:rgba(0,0,0,0.6);padding:8px 20px;border-radius:99px;max-width:280px}
+  .cam-btn{background:var(--accent);border:none;border-radius:99px;padding:16px 40px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:var(--font);box-shadow:0 4px 24px rgba(79,142,247,0.5)}
+  .cam-btn:active{opacity:0.85;transform:scale(0.96)}
+  .cam-btn.success{background:var(--green)}
+  .cam-btn.fail{background:var(--red)}
+  .cam-btn:disabled{opacity:0.4}
+  #cam-canvas{display:none}
+
+  /* ── BIOMETRIC OVERLAY ── */
+  .bio-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;backdrop-filter:blur(8px)}
+  .bio-icon{width:100px;height:100px;border-radius:50%;background:rgba(79,142,247,0.15);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center}
+  .bio-icon i{font-size:48px;color:var(--accent)}
+  .bio-title{color:#fff;font-size:20px;font-weight:700;text-align:center}
+  .bio-sub{color:rgba(255,255,255,0.6);font-size:14px;text-align:center;max-width:260px}
+  .bio-btns{display:flex;gap:12px}
+  .bio-btn{padding:14px 28px;border-radius:99px;font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font);border:none}
+  .bio-btn.confirm{background:var(--accent);color:#fff}
+  .bio-btn.cancel{background:rgba(255,255,255,0.1);color:#fff}
+
+  /* ── TOAST ── */
+  .toast{position:fixed;bottom:calc(env(safe-area-inset-bottom) + 24px);left:50%;transform:translateX(-50%);padding:14px 24px;border-radius:99px;font-size:14px;font-weight:600;z-index:200;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,0.4);animation:slideUp 0.3s ease}
+  @keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+  .toast.success{background:var(--green);color:#fff}
+  .toast.error{background:var(--red);color:#fff}
+  .toast.info{background:var(--accent);color:#fff}
+
+  /* ── SPINNER ── */
+  .spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+
+  /* ── PROFILE SCREEN ── */
+  #profile-screen{padding:0}
+  .profile-header{background:linear-gradient(135deg,#1a2540,#0f1729);padding:env(safe-area-inset-top) 20px 32px;padding-top:calc(env(safe-area-inset-top) + 16px);text-align:center}
+  .profile-avatar{width:90px;height:90px;border-radius:50%;margin:0 auto 12px;overflow:hidden;border:3px solid var(--accent);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:700;color:var(--accent)}
+  .profile-avatar img{width:100%;height:100%;object-fit:cover}
+  .profile-name{font-size:20px;font-weight:700}
+  .profile-dept{font-size:13px;color:var(--text2);margin-top:4px}
+  .profile-section{margin:16px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+  .profile-row{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+  .profile-row:last-child{border-bottom:none}
+  .profile-row i{font-size:18px;color:var(--accent);width:24px;flex-shrink:0}
+  .profile-row-content{flex:1}
+  .profile-row-label{font-size:11px;color:var(--text2);margin-bottom:2px}
+  .profile-row-val{font-size:14px;font-weight:500}
+  .logout-btn{margin:16px;width:calc(100% - 32px);padding:14px;background:rgba(239,68,68,0.1);border:1.5px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:15px;font-weight:600;cursor:pointer;font-family:var(--font)}
+
+  /* ── HISTORY SCREEN ── */
+  #history-screen{padding:0}
+  .hist-header{background:var(--card);padding:env(safe-area-inset-top) 16px 16px;padding-top:calc(env(safe-area-inset-top) + 12px);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+  .hist-header h2{font-size:18px;font-weight:700}
+  .hist-back{background:none;border:none;color:var(--accent);font-size:24px;cursor:pointer;padding:4px;display:flex}
+  .hist-body{padding:16px;overflow-y:auto;flex:1}
+  .hist-month{font-size:11px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:0.07em;margin:16px 0 8px}
+  .hist-row{background:var(--card);border-radius:var(--radius-sm);padding:14px 16px;border:1px solid var(--border);margin-bottom:8px}
+  .hist-row-top{display:flex;justify-content:space-between;align-items:center}
+  .hist-date{font-size:15px;font-weight:600}
+  .hist-times{font-size:12px;color:var(--text2);margin-top:4px;display:flex;gap:16px}
+  .hist-verified{font-size:11px;color:var(--green);margin-top:4px;display:flex;align-items:center;gap:4px}
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN SCREEN ── -->
+<div class="screen active" id="login-screen">
+  <div class="logo"><i class="ti ti-pill"></i></div>
+  <div class="app-title">Anmol Pharmaceuticals</div>
+  <div class="app-sub">Employee Attendance App</div>
+  <div class="form-field">
+    <label>Username</label>
+    <input type="text" id="login-user" placeholder="Enter your username" autocomplete="username" autocapitalize="none">
+  </div>
+  <div class="form-field">
+    <label>Password</label>
+    <input type="password" id="login-pass" placeholder="Enter your password" autocomplete="current-password">
+  </div>
+  <button class="btn-primary" id="login-btn" onclick="doLogin()">Sign In</button>
+  <div class="login-error" id="login-error"></div>
+</div>
+
+<!-- ── HOME SCREEN ── -->
+<div class="screen" id="home-screen">
+  <div class="home-header">
+    <div class="greeting" id="home-greeting">Good morning</div>
+    <div class="user-name" id="home-name">—</div>
+    <div class="dept" id="home-dept">—</div>
+  </div>
+
+  <!-- Today's status -->
+  <div class="status-card">
+    <div class="status-label">Today's Status</div>
+    <div class="status-val absent" id="today-status">Not Yet Clocked In</div>
+    <div class="time-row">
+      <div class="time-box">
+        <div class="time-box-label">Time In</div>
+        <div class="time-box-val" id="today-in">—</div>
+      </div>
+      <div class="time-box">
+        <div class="time-box-label">Time Out</div>
+        <div class="time-box-val" id="today-out">—</div>
+      </div>
+      <div class="time-box">
+        <div class="time-box-label">Hours</div>
+        <div class="time-box-val" id="today-hours">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action grid -->
+  <div class="action-grid">
+    <div class="action-card clock-in" id="btn-clock-in" onclick="startClockIn()">
+      <i class="ti ti-clock-play"></i>
+      <div class="label">Clock In</div>
+      <div class="sub">Face verification</div>
+    </div>
+    <div class="action-card clock-out" id="btn-clock-out" onclick="startClockOut()">
+      <i class="ti ti-clock-stop"></i>
+      <div class="label">Clock Out</div>
+      <div class="sub">End your shift</div>
+    </div>
+    <div class="action-card history" onclick="showScreen('history-screen');loadHistory()">
+      <i class="ti ti-history"></i>
+      <div class="label">History</div>
+      <div class="sub">View past records</div>
+    </div>
+    <div class="action-card profile" onclick="showScreen('profile-screen')">
+      <i class="ti ti-user-circle"></i>
+      <div class="label">Profile</div>
+      <div class="sub">Account details</div>
+    </div>
+  </div>
+
+  <!-- Recent attendance -->
+  <div class="section-title">Recent Attendance</div>
+  <div class="history-list" id="recent-list"></div>
+</div>
+
+<!-- ── CAMERA SCREEN ── -->
+<div class="screen" id="camera-screen">
+  <div class="cam-header">
+    <button class="cam-back" onclick="stopCamera()"><i class="ti ti-arrow-left"></i></button>
+    <div class="cam-title" id="cam-title">Face Verification</div>
+  </div>
+  <video id="cam-video" autoplay playsinline muted></video>
+  <div class="face-ring-wrap">
+    <div class="face-ring" id="face-ring">
+      <div class="face-ring-progress"></div>
+    </div>
+    <div class="cam-status" id="cam-status">Position your face in the circle</div>
+    <button class="cam-btn" id="cam-capture-btn" onclick="captureAndVerify()">
+      <i class="ti ti-camera" style="margin-right:8px"></i>Verify & Clock In
+    </button>
+  </div>
+  <canvas id="cam-canvas" width="400" height="400"></canvas>
+</div>
+
+<!-- ── HISTORY SCREEN ── -->
+<div class="screen" id="history-screen">
+  <div class="hist-header">
+    <button class="hist-back" onclick="showScreen('home-screen')"><i class="ti ti-arrow-left"></i></button>
+    <h2>Attendance History</h2>
+  </div>
+  <div class="hist-body" id="history-body">
+    <div style="text-align:center;padding:40px;color:var(--text2)">Loading…</div>
+  </div>
+</div>
+
+<!-- ── PROFILE SCREEN ── -->
+<div class="screen" id="profile-screen">
+  <div class="profile-header">
+    <button onclick="showScreen('home-screen')" style="background:none;border:none;color:var(--accent);font-size:24px;cursor:pointer;margin-bottom:12px;text-align:left;width:100%;display:flex"><i class="ti ti-arrow-left"></i></button>
+    <div class="profile-avatar" id="profile-avatar">?</div>
+    <div class="profile-name" id="profile-name">—</div>
+    <div class="profile-dept" id="profile-dept">—</div>
+  </div>
+  <div class="profile-section">
+    <div class="profile-row"><i class="ti ti-id-badge"></i><div class="profile-row-content"><div class="profile-row-label">Employee ID</div><div class="profile-row-val" id="prof-id">—</div></div></div>
+    <div class="profile-row"><i class="ti ti-mail"></i><div class="profile-row-content"><div class="profile-row-label">Email</div><div class="profile-row-val" id="prof-email">—</div></div></div>
+    <div class="profile-row"><i class="ti ti-briefcase"></i><div class="profile-row-content"><div class="profile-row-label">Position</div><div class="profile-row-val" id="prof-pos">—</div></div></div>
+    <div class="profile-row"><i class="ti ti-building"></i><div class="profile-row-content"><div class="profile-row-label">Department</div><div class="profile-row-val" id="prof-dept">—</div></div></div>
+    <div class="profile-row" id="prof-face-row"><i class="ti ti-shield-check"></i><div class="profile-row-content"><div class="profile-row-label">Face Verification</div><div class="profile-row-val" id="prof-face-status">—</div></div></div>
+  </div>
+  <button class="logout-btn" onclick="doLogout()"><i class="ti ti-logout" style="margin-right:6px"></i>Sign Out</button>
+</div>
+
+<!-- Firebase + App Logic -->
+<script>
+// ── FIREBASE CONFIG ─────────────────────────────────────────────────────────
+const FB_CONFIG = {
+  apiKey: "AIzaSyCtApiphcSMdEo-hmIkefIeQGvmusG2B6M",
+  authDomain: "anmol-accounting.firebaseapp.com",
+  projectId: "anmol-accounting",
+  storageBucket: "anmol-accounting.firebasestorage.app",
+  messagingSenderId: "838744686940",
+  appId: "1:838744686940:web:28d9b95c27031abf794199"
+};
+firebase.initializeApp(FB_CONFIG);
+const db = firebase.firestore();
+
+// ── CONSTANTS ───────────────────────────────────────────────────────────────
+const FB_DOC       = 'companies/anmol';
+const ATT_PATH     = 'companies/anmol/attendance_mobile'; // separate mobile collection
+const WORKER_URL   = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let currentUser   = null;  // logged-in user object
+let currentEmp    = null;  // matched employee record
+let todayRecord   = null;  // today's attendance record
+let cameraStream  = null;
+let clockMode     = 'in';  // 'in' | 'out'
+let appState      = { employees: [], users: [] };
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+const today = () => new Date().toISOString().split('T')[0];
+const timeNow = () => new Date().toTimeString().slice(0,5);
+const getGreeting = () => { const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening'; };
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function showToast(msg, type='info', duration=3000) {
+  document.querySelectorAll('.toast').forEach(t=>t.remove());
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), duration);
+}
+
+function fmtTime(t) { if(!t) return '—'; return t; }
+function fmtHours(h) { if(!h) return '—'; return (+h).toFixed(2)+'h'; }
+
+// ── LOAD APP DATA FROM FIREBASE ──────────────────────────────────────────────
+async function loadAppData() {
+  try {
+    const doc = await db.doc(FB_DOC).get();
+    if(doc.exists) {
+      const d = doc.data();
+      appState.employees = d.employees || [];
+      appState.users     = d.users     || [];
+    }
+    // Also load meta (users/roles)
+    const meta = await db.doc('companies/anmol_meta').get();
+    if(meta.exists && meta.data().users) {
+      appState.users = meta.data().users;
+    }
+  } catch(e) {
+    console.warn('Load error:', e);
+  }
+}
+
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-btn');
+  errEl.textContent = '';
+  if(!username||!password) { errEl.textContent = 'Please enter username and password.'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Signing in…';
+  await loadAppData();
+
+  // Find user
+  const user = appState.users.find(u=>
+    (u.username?.toLowerCase()===username.toLowerCase()||u.name?.toLowerCase()===username.toLowerCase()) &&
+    (u.password===password)
+  );
+
+  if(!user) {
+    errEl.textContent = 'Invalid username or password.';
+    btn.disabled = false;
+    btn.innerHTML = 'Sign In';
+    return;
+  }
+
+  currentUser = user;
+  // Find matching employee by name or email
+  currentEmp = appState.employees.find(e=>
+    e.name?.toLowerCase()===user.name?.toLowerCase() ||
+    e.email?.toLowerCase()===user.username?.toLowerCase() ||
+    e.email?.toLowerCase()===user.email?.toLowerCase()
+  ) || null;
+
+  localStorage.setItem('anmol_att_session', JSON.stringify({ userId:user.id, name:user.name, role:user.role }));
+  enterHome();
+  btn.disabled = false;
+  btn.innerHTML = 'Sign In';
+}
+
+async function enterHome() {
+  showScreen('home-screen');
+  // Set header
+  document.getElementById('home-greeting').textContent = getGreeting();
+  document.getElementById('home-name').textContent = currentUser.name || 'Employee';
+  document.getElementById('home-dept').textContent = currentEmp?.department || currentUser.role || '';
+
+  // Profile screen
+  document.getElementById('profile-name').textContent = currentUser.name;
+  document.getElementById('profile-dept').textContent = currentEmp?.department || '—';
+  const profAvatar = document.getElementById('profile-avatar');
+  if(currentEmp?.photo) {
+    profAvatar.innerHTML = `<img src="${currentEmp.photo}" alt="photo">`;
+  } else {
+    profAvatar.textContent = (currentUser.name||'?').charAt(0).toUpperCase();
+  }
+  document.getElementById('prof-id').textContent = currentEmp?.id || '—';
+  document.getElementById('prof-email').textContent = currentEmp?.email || currentUser.username || '—';
+  document.getElementById('prof-pos').textContent = currentEmp?.position || '—';
+  document.getElementById('prof-dept').textContent = currentEmp?.department || '—';
+  document.getElementById('prof-face-status').textContent = currentEmp?.photo ? '✅ Photo registered' : '⚠️ No photo — face verification unavailable';
+
+  await loadTodayRecord();
+  await loadRecentAttendance();
+}
+
+// ── TODAY RECORD ─────────────────────────────────────────────────────────────
+async function loadTodayRecord() {
+  todayRecord = null;
+  try {
+    // Check Firebase attendance collection
+    const snap = await db.collection('companies/anmol/attendance_mobile')
+      .where('empId','==', currentEmp?.id || currentUser.id)
+      .where('date','==', today())
+      .limit(1)
+      .get();
+    if(!snap.empty) todayRecord = { firestoreId: snap.docs[0].id, ...snap.docs[0].data() };
+  } catch(e) { console.warn(e); }
+  updateTodayUI();
+}
+
+function updateTodayUI() {
+  const statusEl  = document.getElementById('today-status');
+  const inEl      = document.getElementById('today-in');
+  const outEl     = document.getElementById('today-out');
+  const hoursEl   = document.getElementById('today-hours');
+  const btnIn     = document.getElementById('btn-clock-in');
+  const btnOut    = document.getElementById('btn-clock-out');
+
+  if(!todayRecord) {
+    statusEl.textContent = 'Not Yet Clocked In';
+    statusEl.className = 'status-val absent';
+    inEl.textContent = '—'; outEl.textContent = '—'; hoursEl.textContent = '—';
+    btnIn.style.opacity = '1'; btnIn.style.pointerEvents = '';
+    btnOut.style.opacity = '0.4'; btnOut.style.pointerEvents = 'none';
+    return;
+  }
+  statusEl.textContent = todayRecord.timeOut ? 'Shift Complete ✓' : 'Currently Clocked In';
+  statusEl.className = 'status-val';
+  statusEl.style.color = todayRecord.timeOut ? 'var(--accent)' : 'var(--green)';
+  inEl.textContent  = fmtTime(todayRecord.timeIn);
+  outEl.textContent = fmtTime(todayRecord.timeOut) || '—';
+  hoursEl.textContent = fmtHours(todayRecord.hoursWorked);
+  btnIn.style.opacity = '0.4'; btnIn.style.pointerEvents = 'none';
+  btnOut.style.opacity = todayRecord.timeOut ? '0.4' : '1';
+  btnOut.style.pointerEvents = todayRecord.timeOut ? 'none' : '';
+}
+
+// ── RECENT ATTENDANCE ─────────────────────────────────────────────────────────
+async function loadRecentAttendance() {
+  const listEl = document.getElementById('recent-list');
+  listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2)">Loading…</div>';
+  try {
+    const snap = await db.collection('companies/anmol/attendance_mobile')
+      .where('empId','==', currentEmp?.id || currentUser.id)
+      .orderBy('date','desc')
+      .limit(5)
+      .get();
+    const records = snap.docs.map(d=>d.data());
+    if(!records.length) {
+      listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">No attendance records yet.</div>';
+      return;
+    }
+    listEl.innerHTML = records.map(r=>`
+      <div class="history-item">
+        <div>
+          <div class="history-date">${r.date}</div>
+          <div class="history-time">In: ${r.timeIn||'—'} &nbsp;·&nbsp; Out: ${r.timeOut||'—'} &nbsp;·&nbsp; ${fmtHours(r.hoursWorked)}</div>
+          ${r.verifiedFace?'<div style="font-size:11px;color:var(--green);margin-top:2px"><i class="ti ti-shield-check" style="font-size:11px"></i> Face verified</div>':''}
+        </div>
+        <span class="history-badge ${r.status==='present'?'badge-present':r.status==='absent'?'badge-absent':'badge-leave'}">${r.status||'present'}</span>
+      </div>`).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px">Could not load records.</div>';
+  }
+}
+
+// ── CLOCK IN ──────────────────────────────────────────────────────────────────
+async function startClockIn() {
+  if(todayRecord) { showToast('Already clocked in today!', 'info'); return; }
+  clockMode = 'in';
+  // If employee has no photo — try biometric only
+  if(!currentEmp?.photo) {
+    await promptBiometric('Clock In', 'Confirm your identity to record attendance.');
+    return;
+  }
+  // Open camera for face verification
+  openCamera('Clock In — Face Verification', 'Verify & Clock In');
+}
+
+async function startClockOut() {
+  if(!todayRecord) { showToast('You haven\'t clocked in yet.', 'error'); return; }
+  if(todayRecord.timeOut) { showToast('Already clocked out today.', 'info'); return; }
+  clockMode = 'out';
+  // Try biometric first, fallback to simple confirm
+  await promptBiometric('Clock Out', 'Confirm your identity to record time out.');
+}
+
+// ── BIOMETRIC PROMPT (WebAuthn / device biometric) ────────────────────────────
+async function promptBiometric(title, subtitle) {
+  // Check if WebAuthn is available (device biometric)
+  if(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()) {
+    // Show biometric overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'bio-overlay';
+    overlay.innerHTML = `
+      <div class="bio-icon"><i class="ti ti-fingerprint"></i></div>
+      <div class="bio-title">${title}</div>
+      <div class="bio-sub">${subtitle}<br>Use your fingerprint, Face ID, or PIN.</div>
+      <div class="bio-btns">
+        <button class="bio-btn cancel" onclick="this.closest('.bio-overlay').remove()">Cancel</button>
+        <button class="bio-btn confirm" id="bio-confirm-btn">Authenticate</button>
+      </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('bio-confirm-btn').onclick = async () => {
+      try {
+        // Use WebAuthn credential for verification
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            userVerification: 'required',
+            timeout: 30000,
+            rpId: window.location.hostname || 'localhost'
+          }
+        });
+        overlay.remove();
+        await recordAttendance(true, 'biometric');
+      } catch(e) {
+        if(e.name==='NotAllowedError') {
+          overlay.remove();
+          // Fallback to simple confirm
+          if(confirm(`${title}\n\nBiometric authentication was cancelled. Record attendance anyway?`)) {
+            await recordAttendance(false, 'manual');
+          }
+        } else {
+          overlay.remove();
+          await recordAttendance(false, 'manual');
+        }
+      }
+    };
+  } else {
+    // No biometric available — show camera or simple confirm
+    if(currentEmp?.photo && clockMode==='in') {
+      openCamera(title, subtitle);
+    } else {
+      if(confirm(`${title}\n\n${subtitle}\n\nProceed?`)) {
+        await recordAttendance(false, 'manual');
+      }
+    }
+  }
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+function openCamera(title, btnLabel) {
+  document.getElementById('cam-title').textContent = title;
+  document.getElementById('cam-capture-btn').innerHTML = `<i class="ti ti-camera" style="margin-right:8px"></i>${btnLabel}`;
+  document.getElementById('cam-capture-btn').className = 'cam-btn';
+  document.getElementById('cam-capture-btn').disabled = false;
+  document.getElementById('cam-status').textContent = 'Position your face in the circle';
+  document.getElementById('face-ring').className = 'face-ring';
+  showScreen('camera-screen');
+  navigator.mediaDevices.getUserMedia({ video: { facingMode:'user', width:400, height:400 }, audio:false })
+    .then(stream => {
+      cameraStream = stream;
+      const video = document.getElementById('cam-video');
+      video.srcObject = stream;
+    })
+    .catch(err => {
+      stopCamera();
+      showToast('Camera unavailable: ' + err.message, 'error');
+    });
+}
+
+function stopCamera() {
+  if(cameraStream) { cameraStream.getTracks().forEach(t=>t.stop()); cameraStream=null; }
+  showScreen('home-screen');
+}
+
+async function captureAndVerify() {
+  if(!currentEmp?.photo) {
+    stopCamera();
+    await recordAttendance(false, 'manual');
+    return;
+  }
+  const btn = document.getElementById('cam-capture-btn');
+  const ring = document.getElementById('face-ring');
+  const status = document.getElementById('cam-status');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Verifying…';
+  ring.className = 'face-ring scanning';
+  status.textContent = 'Comparing faces with AI…';
+
+  try {
+    const video = document.getElementById('cam-video');
+    const canvas = document.getElementById('cam-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, 400, 400);
+    const capturedBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+    const storedBase64   = currentEmp.photo.split(',')[1] || currentEmp.photo;
+
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 100,
+        messages: [{
+          role: 'user',
+          content: [
+            { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:storedBase64 } },
+            { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:capturedBase64 } },
+            { type:'text', text:'Compare these two face photos. First is the registered employee photo. Second is a live camera capture. Same person? Reply ONLY: MATCH X% or NO_MATCH X%' }
+          ]
+        }]
+      })
+    });
+
+    const data = await res.json();
+    const reply = (data.content||[]).map(b=>b.text||'').join('').trim().toUpperCase();
+    const isMatch = reply.startsWith('MATCH');
+    const conf = parseInt((reply.match(/(\d+)%/)||[0,0])[1])||0;
+
+    if(isMatch && conf >= 65) {
+      ring.className = 'face-ring success';
+      status.textContent = `✅ Verified (${conf}% match)`;
+      btn.className = 'cam-btn success';
+      btn.innerHTML = '✓ Identity Confirmed';
+      await new Promise(r=>setTimeout(r,1200));
+      stopCamera();
+      await recordAttendance(true, 'face');
+    } else {
+      ring.className = 'face-ring fail';
+      status.textContent = `❌ Not recognized (${conf}% match)`;
+      btn.className = 'cam-btn fail';
+      btn.innerHTML = '<i class="ti ti-refresh" style="margin-right:8px"></i>Try Again';
+      btn.disabled = false;
+    }
+  } catch(err) {
+    ring.className = 'face-ring fail';
+    status.textContent = 'Verification failed. Try again.';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-refresh" style="margin-right:8px"></i>Try Again';
+  }
+}
+
+// ── RECORD ATTENDANCE ─────────────────────────────────────────────────────────
+async function recordAttendance(verified, method) {
+  const empId   = currentEmp?.id || currentUser.id;
+  const empName = currentEmp?.name || currentUser.name;
+  const now     = timeNow();
+  const todayStr = today();
+
+  try {
+    if(clockMode === 'in') {
+      // Create new attendance record
+      const rec = {
+        empId, empName,
+        date:          todayStr,
+        timeIn:        now,
+        timeOut:       '',
+        hoursWorked:   0,
+        overtimeHours: 0,
+        status:        'present',
+        verifiedFace:  verified,
+        verifyMethod:  method,
+        notes:         `Clocked in via mobile app (${method})`,
+        createdAt:     new Date().toISOString()
+      };
+      const docRef = await db.collection('companies/anmol/attendance_mobile').add(rec);
+      todayRecord = { firestoreId: docRef.id, ...rec };
+
+      // Also write to main attendance collection for ERP sync
+      await syncToMainAttendance(rec, docRef.id);
+
+      showToast(`✅ Clocked in at ${now}`, 'success', 4000);
+    } else {
+      // Clock out
+      if(!todayRecord?.firestoreId) { showToast('Clock-in record not found.', 'error'); return; }
+      const [ih,im] = (todayRecord.timeIn||'00:00').split(':').map(Number);
+      const [oh,om] = now.split(':').map(Number);
+      const mins = (oh*60+om) - (ih*60+im);
+      const hours = parseFloat(Math.min(mins/60, 24).toFixed(2));
+      const ot    = parseFloat(Math.max(0, hours-8).toFixed(2));
+
+      await db.collection('companies/anmol/attendance_mobile').doc(todayRecord.firestoreId).update({
+        timeOut:       now,
+        hoursWorked:   hours,
+        overtimeHours: ot,
+        verifyMethod:  method
+      });
+      todayRecord.timeOut = now;
+      todayRecord.hoursWorked = hours;
+      todayRecord.overtimeHours = ot;
+
+      // Sync update to main attendance
+      await syncTimeOutToMain(todayRecord.firestoreId, now, hours, ot);
+
+      showToast(`👋 Clocked out at ${now} · ${hours}h worked`, 'success', 4000);
+    }
+    updateTodayUI();
+    loadRecentAttendance();
+  } catch(e) {
+    showToast('Error saving attendance: ' + e.message, 'error');
+  }
+}
+
+// ── SYNC TO MAIN ERP ATTENDANCE ───────────────────────────────────────────────
+async function syncToMainAttendance(rec, mobileId) {
+  // Write to same collection that the web ERP reads
+  try {
+    await db.collection('companies/anmol/att_sync').doc(mobileId).set({
+      ...rec,
+      source: 'mobile_app',
+      synced: true
+    });
+  } catch(e) { console.warn('Sync failed:', e); }
+}
+
+async function syncTimeOutToMain(mobileId, timeOut, hours, ot) {
+  try {
+    await db.collection('companies/anmol/att_sync').doc(mobileId).update({
+      timeOut, hoursWorked:hours, overtimeHours:ot
+    });
+  } catch(e) { console.warn('Sync timeout failed:', e); }
+}
+
+// ── HISTORY ───────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const body = document.getElementById('history-body');
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">Loading…</div>';
+  try {
+    const snap = await db.collection('companies/anmol/attendance_mobile')
+      .where('empId','==', currentEmp?.id || currentUser.id)
+      .orderBy('date','desc')
+      .limit(60)
+      .get();
+    const records = snap.docs.map(d=>d.data());
+    if(!records.length) {
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">No attendance history yet.</div>';
+      return;
+    }
+    // Group by month
+    const byMonth = {};
+    records.forEach(r=>{
+      const m = r.date?.slice(0,7)||'Unknown';
+      if(!byMonth[m]) byMonth[m]=[];
+      byMonth[m].push(r);
+    });
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    body.innerHTML = Object.entries(byMonth).map(([m,recs])=>{
+      const [yr,mo] = m.split('-');
+      const label = `${months[parseInt(mo)-1]||mo} ${yr}`;
+      return `<div class="hist-month">${label}</div>` +
+        recs.map(r=>`
+        <div class="hist-row">
+          <div class="hist-row-top">
+            <div class="hist-date">${r.date}</div>
+            <span class="history-badge ${r.status==='present'?'badge-present':r.status==='absent'?'badge-absent':'badge-leave'}">${r.status||'present'}</span>
+          </div>
+          <div class="hist-times">
+            <span><i class="ti ti-clock-play" style="font-size:11px;margin-right:3px"></i>${r.timeIn||'—'}</span>
+            <span><i class="ti ti-clock-stop" style="font-size:11px;margin-right:3px"></i>${r.timeOut||'—'}</span>
+            <span><i class="ti ti-hourglass" style="font-size:11px;margin-right:3px"></i>${fmtHours(r.hoursWorked)}</span>
+          </div>
+          ${r.verifiedFace?'<div class="hist-verified"><i class="ti ti-shield-check" style="font-size:11px"></i>Face verified</div>':''}
+        </div>`).join('');
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text2)">Error loading history.</div>';
+  }
+}
+
+// ── LOGOUT ────────────────────────────────────────────────────────────────────
+function doLogout() {
+  if(!confirm('Sign out?')) return;
+  currentUser = null; currentEmp = null; todayRecord = null;
+  localStorage.removeItem('anmol_att_session');
+  document.getElementById('login-user').value = '';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+  showScreen('login-screen');
+}
+
+// ── KEYBOARD: Login on Enter ─────────────────────────────────────────────────
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if(e.key==='Enter') doLogin();
+});
+
+// ── AUTO LOGIN from session ──────────────────────────────────────────────────
+(async () => {
+  const saved = localStorage.getItem('anmol_att_session');
+  if(saved) {
+    try {
+      const s = JSON.parse(saved);
+      await loadAppData();
+      const user = appState.users.find(u=>u.id===s.userId&&u.name===s.name);
+      if(user) {
+        currentUser = user;
+        currentEmp = appState.employees.find(e=>
+          e.name?.toLowerCase()===user.name?.toLowerCase() ||
+          e.email?.toLowerCase()===user.username?.toLowerCase()
+        ) || null;
+        await enterHome();
+        return;
+      }
+    } catch(e) {}
+    localStorage.removeItem('anmol_att_session');
+  }
+})();
+
+// ── ENTER KEY on login username ───────────────────────────────────────────────
+document.getElementById('login-user').addEventListener('keydown', e => {
+  if(e.key==='Enter') document.getElementById('login-pass').focus();
+});
+</script>
+
+</body>
+</html>
