@@ -2410,7 +2410,7 @@ function renderMgmtDashboard(c, ta) {
   const maxProd  = top5Prod.length ? top5Prod[0][1].rev : 1;
 
   // Net income YTD
-  const purYTD = pos.filter(p=>p.date?.startsWith(thisYear)).reduce((s,p)=>(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),ls),0);
+  const purYTD = pos.filter(p=>p.date?.startsWith(thisYear)).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   const netYTD = revYTD - purYTD - expYTD;
 
   // Pending SO
