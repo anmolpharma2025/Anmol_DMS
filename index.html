@@ -2313,16 +2313,38 @@ function render() {
 // MANAGEMENT DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
 function renderMgmtDashboard(c, ta) {
-  ta.innerHTML = `<span style="font-size:12px;color:var(--text-secondary)">Auto-refreshes on data change</span>
+  const period = window._mgmtPeriod || 'month';
+  window._mgmtPeriod = period;
+
+  ta.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn${period==='month'?' primary':''}" onclick="window._mgmtPeriod='month';renderCurrentPage()">This Month</button>
+      <button class="btn${period==='quarter'?' primary':''}" onclick="window._mgmtPeriod='quarter';renderCurrentPage()">This Quarter</button>
+      <button class="btn${period==='year'?' primary':''}" onclick="window._mgmtPeriod='year';renderCurrentPage()">This Year</button>
+      <button class="btn${period==='all'?' primary':''}" onclick="window._mgmtPeriod='all';renderCurrentPage()">All Time</button>
+    </div>
     <button class="btn" onclick="renderCurrentPage()"><i class="ti ti-refresh"></i>Refresh</button>`;
 
   const now      = new Date();
   const todayStr = now.toISOString().split('T')[0];
   const thisMonth= todayStr.slice(0,7);
-  const lastMonth= new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
+  const thisQ    = `${now.getFullYear()}-Q${Math.ceil((now.getMonth()+1)/3)}`;
   const thisYear = String(now.getFullYear());
+  const lastMonth= new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
 
-  // ── Financial KPIs ──
+  // Period filter function
+  function inPd(date) {
+    if(!date) return false;
+    if(period==='all') return true;
+    if(period==='month') return date.startsWith(thisMonth);
+    if(period==='year')  return date.startsWith(thisYear);
+    if(period==='quarter') {
+      const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
+      return date >= qStart.toISOString().slice(0,10) && date <= todayStr;
+    }
+    return true;
+  }
+
   const invoices   = state.invoices||[];
   const collections= state.collections||[];
   const expenses   = state.expenses||[];
@@ -2330,78 +2352,62 @@ function renderMgmtDashboard(c, ta) {
   const pos        = state.purchaseOrders||[];
   const employees  = state.employees||[];
   const attendance = state.attendance||[];
-  const leaves     = state.leaves||[];
   const inventory  = state.inventory||[];
-
   const expAccIds  = new Set((state.accounts||[]).filter(a=>a.type==='Expense').map(a=>String(a.id)));
 
+  // Filtered invoices for selected period
+  const filtInv = invoices.filter(i=>i.status!=='cancelled'&&inPd(i.date));
+  const prevInv = invoices.filter(i=>i.status!=='cancelled'&&i.date?.startsWith(lastMonth));
+
   // Revenue
-  const revThisMonth = invoices.filter(i=>i.date?.startsWith(thisMonth)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
-  const revLastMonth = invoices.filter(i=>i.date?.startsWith(lastMonth)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
-  const revYTD       = invoices.filter(i=>i.date?.startsWith(thisYear)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
-  const revTrend     = revLastMonth>0 ? ((revThisMonth-revLastMonth)/revLastMonth*100).toFixed(1) : null;
+  const totalRev  = filtInv.reduce((s,i)=>s+(i.amount||0),0);
+  const prevRev   = prevInv.reduce((s,i)=>s+(i.amount||0),0);
+  const revTrend  = prevRev>0 ? ((totalRev-prevRev)/prevRev*100).toFixed(1) : null;
 
   // Expenses
-  const expDV = journal.filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit)));
-  const expThisMonth = expenses.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0)
-    + expDV.filter(j=>j.date?.startsWith(thisMonth)).reduce((s,j)=>s+(j.amount||0),0);
-  const expYTD = expenses.filter(e=>e.date?.startsWith(thisYear)).reduce((s,e)=>s+(e.amount||0),0)
-    + expDV.filter(j=>j.date?.startsWith(thisYear)).reduce((s,j)=>s+(j.amount||0),0);
+  const filtExp = expenses.filter(e=>inPd(e.date)).reduce((s,e)=>s+(e.amount||0),0)
+    + journal.filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))&&inPd(j.date)).reduce((s,j)=>s+(j.amount||0),0);
 
   // Collections
-  const colThisMonth = collections.filter(c=>c.date?.startsWith(thisMonth)).reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  const filtCol = collections.filter(c=>inPd(c.date)).reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+
+  // Purchases
+  const filtPur = pos.filter(p=>inPd(p.date)).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+
+  // Net income
+  const netIncome = totalRev - filtPur - filtExp;
 
   // AR
   const unpaidInvs = invoices.filter(i=>getInvoiceStatus(i)==='pending'||getInvoiceStatus(i)==='overdue');
   const totalAR    = unpaidInvs.reduce((s,i)=>s+(i.amount||0),0);
   const overdueAR  = unpaidInvs.filter(i=>i.due&&i.due<todayStr).reduce((s,i)=>s+(i.amount||0),0);
 
-  // AR Aging buckets
-  const aging = { c30:0, c60:0, c90:0, c90p:0 };
+  // AR Aging
+  const aging = {cur:0,c30:0,c60:0,c90:0,c90p:0};
   unpaidInvs.forEach(i=>{
     if(!i.due) return;
-    const days = Math.floor((now - new Date(i.due))/(1000*60*60*24));
-    if(days<=0) {}
+    const days=Math.floor((now-new Date(i.due))/(864e5));
+    if(days<=0)      aging.cur+=i.amount||0;
     else if(days<=30) aging.c30+=i.amount||0;
     else if(days<=60) aging.c60+=i.amount||0;
     else if(days<=90) aging.c90+=i.amount||0;
     else              aging.c90p+=i.amount||0;
   });
 
-  // HR Today
-  const todayAtt   = attendance.filter(a=>a.date===todayStr);
-  const presentToday  = todayAtt.filter(a=>a.status==='present').length;
-  const absentToday   = employees.filter(e=>!todayAtt.find(a=>a.empId===e.id)).length;
-  const outsideOffice = todayAtt.filter(a=>a.locTag==='outside').length;
-  const pendingLeaves = (leaves||[]).filter(l=>l.status==='pending').length;
-
-  // Inventory alerts
-  const lowStock   = inventory.filter(i=>(i.qty||0)<=(i.reorderLevel||5)&&(i.qty||0)>0);
-  const outOfStock = inventory.filter(i=>(i.qty||0)===0);
-
-  // Operations alerts
-  const pendingPO  = pos.filter(p=>p.status==='pending');
-  const overdueInvs= invoices.filter(i=>getInvoiceStatus(i)==='overdue');
-  const expDocs    = (state.empDocuments||[]).filter(d=>{
-    if(!d.expiry) return false;
-    const days = Math.floor((new Date(d.expiry)-now)/(1000*60*60*24));
-    return days>=0&&days<=30;
+  // Top 5 customers — ALL time or filtered period
+  const custRev = {};
+  filtInv.forEach(i=>{
+    if(!custRev[i.customer]) custRev[i.customer]=0;
+    custRev[i.customer]+=(i.amount||0);
   });
+  const top5Cust = Object.entries(custRev).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxCust  = top5Cust.length ? top5Cust[0][1] : 1;
 
-  // Top 5 customers this month
-  const custRevMonth = {};
-  invoices.filter(i=>i.date?.startsWith(thisMonth)&&i.status!=='cancelled').forEach(i=>{
-    if(!custRevMonth[i.customer]) custRevMonth[i.customer]=0;
-    custRevMonth[i.customer]+=(i.amount||0);
-  });
-  const top5CustMonth = Object.entries(custRevMonth).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const maxCust = top5CustMonth.length ? top5CustMonth[0][1] : 1;
-
-  // Top 5 products YTD
+  // Top 5 products
   const prodSales = {};
-  invoices.filter(i=>i.date?.startsWith(thisYear)&&i.status!=='cancelled').forEach(inv=>{
+  filtInv.forEach(inv=>{
     (inv.lines||[]).forEach(l=>{
-      const k = l.desc||l.itemId||'Unknown';
+      const k=l.desc||l.itemId||'Unknown';
       if(!prodSales[k]) prodSales[k]={qty:0,rev:0};
       prodSales[k].qty+=(l.qty||0); prodSales[k].rev+=(l.lineTotal||0);
     });
@@ -2409,219 +2415,239 @@ function renderMgmtDashboard(c, ta) {
   const top5Prod = Object.entries(prodSales).sort((a,b)=>b[1].rev-a[1].rev).slice(0,5);
   const maxProd  = top5Prod.length ? top5Prod[0][1].rev : 1;
 
-  // Net income YTD
-  const purYTD = pos.filter(p=>p.date?.startsWith(thisYear)).reduce((s,p)=>s+(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
-  const netYTD = revYTD - purYTD - expYTD;
+  // HR Today
+  const todayAtt     = attendance.filter(a=>a.date===todayStr);
+  const presentToday = todayAtt.filter(a=>a.status==='present').length;
+  const absentToday  = employees.filter(e=>!todayAtt.find(a=>a.empId===e.id)).length;
+  const outsideOff   = todayAtt.filter(a=>a.locTag==='outside').length;
+  const pendingLeave = (state.leaves||[]).filter(l=>l.status==='pending').length;
 
-  // Pending SO
+  // Inventory alerts
+  const lowStock   = inventory.filter(i=>(i.qty||0)<=(i.reorderLevel||5)&&(i.qty||0)>0);
+  const outOfStock = inventory.filter(i=>(i.qty||0)===0);
+
+  // Pending
+  const pendingPO = pos.filter(p=>p.status==='pending');
   const pendingSO = (state.salesOrders||[]).filter(s=>s.status==='pending').length;
+  const overdueInvs= invoices.filter(i=>getInvoiceStatus(i)==='overdue');
+  const expDocs    = (state.empDocuments||[]).filter(d=>{
+    if(!d.expiry) return false;
+    const days=Math.floor((new Date(d.expiry)-now)/(864e5));
+    return days>=0&&days<=30;
+  });
 
-  const trendBadge = (val, suffix='%') => val===null ? '' :
-    `<span style="font-size:11px;font-weight:600;color:${+val>=0?'var(--green)':'var(--red)'}">
-      <i class="ti ti-trending-${+val>=0?'up':'down'}" style="font-size:10px"></i> ${Math.abs(val)}${suffix} vs last mo.
-    </span>`;
+  const periodLabel = period==='month'?'This Month':period==='quarter'?'This Quarter':period==='year'?'This Year':'All Time';
+  const barColors = ['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'];
+
+  const trendBadge = v => v===null?'':
+    `<span style="font-size:11px;color:${+v>=0?'var(--green)':'var(--red)'}">
+      <i class="ti ti-trending-${+v>=0?'up':'down'}" style="font-size:10px"></i>${Math.abs(v)}% vs last mo</span>`;
+
+  const bar = (val,max,color) =>
+    `<div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden;margin-top:5px">
+      <div style="height:100%;width:${max>0?(val/max*100).toFixed(1):0}%;background:${color};border-radius:4px"></div>
+    </div>`;
 
   c.innerHTML = `
+<style>
+.mgmt-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.mgmt-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.mgmt-kpi{padding:14px 16px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light)}
+.mgmt-kpi-label{font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.07em;font-weight:600;margin-bottom:6px}
+.mgmt-kpi-val{font-size:22px;font-weight:800;margin-bottom:3px}
+.mgmt-kpi-sub{font-size:11px;color:var(--text-secondary);line-height:1.4}
+.mgmt-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light);padding:16px}
+.mgmt-card-title{font-size:12px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:14px;display:flex;align-items:center;gap:6px}
+.mgmt-alert{padding:10px 13px;border-radius:var(--radius-sm);display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:8px}
+.mgmt-alert i{font-size:16px;flex-shrink:0;margin-top:1px}
+.mgmt-alert-title{font-size:12px;font-weight:600;margin-bottom:2px}
+.mgmt-alert-sub{font-size:11px;color:var(--text-secondary)}
+@media(max-width:700px){
+  .mgmt-grid-4{grid-template-columns:1fr 1fr}
+  .mgmt-grid-2{grid-template-columns:1fr}
+  .mgmt-kpi-val{font-size:18px}
+}
+@media(max-width:400px){
+  .mgmt-grid-4{grid-template-columns:1fr 1fr}
+  .mgmt-kpi{padding:10px 12px}
+  .mgmt-kpi-val{font-size:16px}
+}
+</style>
+
+<!-- Period label -->
+<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:12px">
+  <i class="ti ti-calendar" style="margin-right:6px"></i>Showing data for: <span style="color:var(--accent)">${periodLabel}</span>
+</div>
+
 <!-- ── ROW 1: Financial KPIs ── -->
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
-  <div class="kpi" style="border-left:3px solid var(--green)">
-    <div class="kpi-label"><i class="ti ti-trending-up"></i>Revenue This Month</div>
-    <div class="kpi-value pos">${fmt(revThisMonth)}</div>
-    <div class="kpi-sub">${trendBadge(revTrend)} YTD: ${fmt(revYTD)}</div>
+<div class="mgmt-grid-4">
+  <div class="mgmt-kpi" style="border-top:3px solid var(--green)">
+    <div class="mgmt-kpi-label"><i class="ti ti-trending-up"></i> Revenue</div>
+    <div class="mgmt-kpi-val" style="color:var(--green)">${fmt(totalRev)}</div>
+    <div class="mgmt-kpi-sub">${filtInv.length} invoices${trendBadge(revTrend)?'<br>'+trendBadge(revTrend):''}</div>
   </div>
-  <div class="kpi" style="border-left:3px solid var(--red)">
-    <div class="kpi-label"><i class="ti ti-receipt"></i>Expenses This Month</div>
-    <div class="kpi-value neg">${fmt(expThisMonth)}</div>
-    <div class="kpi-sub">YTD Total: ${fmt(expYTD)}</div>
+  <div class="mgmt-kpi" style="border-top:3px solid var(--red)">
+    <div class="mgmt-kpi-label"><i class="ti ti-receipt"></i> Expenses</div>
+    <div class="mgmt-kpi-val" style="color:var(--red)">${fmt(filtExp)}</div>
+    <div class="mgmt-kpi-sub">+ ${fmt(filtPur)} purchases</div>
   </div>
-  <div class="kpi" style="border-left:3px solid var(--accent)">
-    <div class="kpi-label"><i class="ti ti-cash"></i>Collections This Month</div>
-    <div class="kpi-value" style="color:var(--accent)">${fmt(colThisMonth)}</div>
-    <div class="kpi-sub">Outstanding AR: ${fmt(totalAR)}</div>
+  <div class="mgmt-kpi" style="border-top:3px solid var(--accent)">
+    <div class="mgmt-kpi-label"><i class="ti ti-cash"></i> Collections</div>
+    <div class="mgmt-kpi-val" style="color:var(--accent)">${fmt(filtCol)}</div>
+    <div class="mgmt-kpi-sub">AR outstanding: ${fmt(totalAR)}</div>
   </div>
-  <div class="kpi" style="border-left:3px solid ${netYTD>=0?'var(--green)':'var(--red)'}">
-    <div class="kpi-label"><i class="ti ti-coin"></i>Net Income YTD</div>
-    <div class="kpi-value ${netYTD>=0?'pos':'neg'}">${fmtS(netYTD)}</div>
-    <div class="kpi-sub">Rev − Pur − Exp</div>
-  </div>
-</div>
-
-<!-- ── ROW 2: Operations + HR ── -->
-<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
-  <div class="kpi" style="border-left:3px solid var(--amber)">
-    <div class="kpi-label"><i class="ti ti-clock-pause"></i>Pending Approvals</div>
-    <div class="kpi-value" style="color:var(--amber)">${pendingPO.length+pendingSO}</div>
-    <div class="kpi-sub">${pendingPO.length} PO · ${pendingSO} SO</div>
-  </div>
-  <div class="kpi" style="border-left:3px solid var(--red)">
-    <div class="kpi-label"><i class="ti ti-alert-triangle"></i>Overdue Invoices</div>
-    <div class="kpi-value neg">${overdueInvs.length}</div>
-    <div class="kpi-sub">Value: ${fmt(overdueAR)}</div>
-  </div>
-  <div class="kpi" style="border-left:3px solid var(--green)">
-    <div class="kpi-label"><i class="ti ti-users"></i>Attendance Today</div>
-    <div class="kpi-value pos">${presentToday}</div>
-    <div class="kpi-sub">${absentToday} absent · ${outsideOffice} outside office</div>
-  </div>
-  <div class="kpi" style="border-left:3px solid var(--purple, #8b5cf6)">
-    <div class="kpi-label"><i class="ti ti-box"></i>Inventory Alerts</div>
-    <div class="kpi-value" style="color:#8b5cf6">${lowStock.length+outOfStock.length}</div>
-    <div class="kpi-sub">${outOfStock.length} out of stock · ${lowStock.length} low</div>
+  <div class="mgmt-kpi" style="border-top:3px solid ${netIncome>=0?'var(--green)':'var(--red)'}">
+    <div class="mgmt-kpi-label"><i class="ti ti-coin"></i> Net Income</div>
+    <div class="mgmt-kpi-val" style="color:${netIncome>=0?'var(--green)':'var(--red)'}">${fmtS(netIncome)}</div>
+    <div class="mgmt-kpi-sub">Rev − Pur − Exp</div>
   </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-  <!-- ── AR Aging ── -->
-  <div class="report-section">
-    <div class="section-head"><span class="section-title"><i class="ti ti-clock-dollar" style="margin-right:6px;color:var(--amber)"></i>Accounts Receivable Aging</span></div>
-    ${totalAR===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No outstanding receivables 🎉</div>`:`
-    <table style="width:100%;font-size:13px;border-collapse:collapse">
-      <thead><tr style="white-space:nowrap">
-        <th>Bucket</th><th style="text-align:right">Amount</th><th style="text-align:right">% of AR</th><th>Bar</th>
-      </tr></thead>
-      <tbody>
-        ${[
-          ['Current (not due)', unpaidInvs.filter(i=>!i.due||i.due>=todayStr).reduce((s,i)=>s+(i.amount||0),0), 'var(--green)'],
-          ['1–30 days overdue', aging.c30, 'var(--amber)'],
-          ['31–60 days overdue', aging.c60, 'var(--orange, #f97316)'],
-          ['61–90 days overdue', aging.c90, 'var(--red)'],
-          ['90+ days overdue',   aging.c90p, '#7f1d1d']
-        ].map(([label,amt,color])=>`<tr>
-          <td style="padding:6px 0;color:var(--text-secondary)">${label}</td>
-          <td style="text-align:right;font-weight:600;color:${color}">${fmt(amt)}</td>
-          <td style="text-align:right;color:var(--text-tertiary);font-size:11px">${totalAR>0?(amt/totalAR*100).toFixed(0):0}%</td>
-          <td style="padding-left:10px;width:100px"><div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden"><div style="height:100%;width:${totalAR>0?(amt/totalAR*100).toFixed(1):0}%;background:${color};border-radius:4px"></div></div></td>
-        </tr>`).join('')}
-      </tbody>
-      <tfoot><tr style="border-top:1px solid var(--border-light)">
-        <td style="font-weight:700;padding-top:8px">Total AR</td>
-        <td style="text-align:right;font-weight:700;padding-top:8px;color:var(--accent)">${fmt(totalAR)}</td>
-        <td colspan="2"></td>
-      </tr></tfoot>
-    </table>`}
+<!-- ── ROW 2: Ops + HR ── -->
+<div class="mgmt-grid-4" style="margin-bottom:16px">
+  <div class="mgmt-kpi" style="border-top:3px solid var(--amber)">
+    <div class="mgmt-kpi-label"><i class="ti ti-clock-pause"></i> Pending</div>
+    <div class="mgmt-kpi-val" style="color:var(--amber)">${pendingPO.length+pendingSO}</div>
+    <div class="mgmt-kpi-sub">${pendingPO.length} PO · ${pendingSO} SO</div>
   </div>
-
-  <!-- ── Top Customers This Month ── -->
-  <div class="report-section">
-    <div class="section-head"><span class="section-title"><i class="ti ti-star" style="margin-right:6px;color:var(--amber)"></i>Top Customers — ${new Date().toLocaleString('en',{month:'long'})}</span></div>
-    ${top5CustMonth.length===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No sales this month yet.</div>`
-    :top5CustMonth.map(([name,rev],i)=>`
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:500;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
-        <span style="font-size:11px;color:var(--text-secondary)">${fmt(rev)}</span>
-      </div>
-      <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:${(rev/maxCust*100).toFixed(1)}%;background:${['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'][i]};border-radius:4px"></div>
-      </div>
-    </div>`).join('')}
+  <div class="mgmt-kpi" style="border-top:3px solid var(--red)">
+    <div class="mgmt-kpi-label"><i class="ti ti-alert-triangle"></i> Overdue Invoices</div>
+    <div class="mgmt-kpi-val" style="color:var(--red)">${overdueInvs.length}</div>
+    <div class="mgmt-kpi-sub">${fmt(overdueAR)} at risk</div>
+  </div>
+  <div class="mgmt-kpi" style="border-top:3px solid var(--green)">
+    <div class="mgmt-kpi-label"><i class="ti ti-users"></i> Attendance Today</div>
+    <div class="mgmt-kpi-val" style="color:var(--green)">${presentToday}/${employees.length}</div>
+    <div class="mgmt-kpi-sub">${absentToday} absent · ${outsideOff} outside</div>
+  </div>
+  <div class="mgmt-kpi" style="border-top:3px solid #8b5cf6">
+    <div class="mgmt-kpi-label"><i class="ti ti-package"></i> Stock Alerts</div>
+    <div class="mgmt-kpi-val" style="color:#8b5cf6">${outOfStock.length+lowStock.length}</div>
+    <div class="mgmt-kpi-sub">${outOfStock.length} out · ${lowStock.length} low</div>
   </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-  <!-- ── Top Products YTD ── -->
-  <div class="report-section">
-    <div class="section-head"><span class="section-title"><i class="ti ti-package" style="margin-right:6px;color:var(--accent)"></i>Top Products YTD</span></div>
-    ${top5Prod.length===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No product sales yet.</div>`
-    :top5Prod.map(([name,d],i)=>`
-    <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-        <span style="font-size:12px;font-weight:500;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
-        <span style="font-size:11px;color:var(--text-secondary)">${d.qty} units · ${fmt(d.rev)}</span>
-      </div>
-      <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:${(d.rev/maxProd*100).toFixed(1)}%;background:${['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'][i]};border-radius:4px"></div>
-      </div>
-    </div>`).join('')}
+<!-- ── ROW 3: Charts ── -->
+<div class="mgmt-grid-2">
+  <!-- Top Customers -->
+  <div class="mgmt-card">
+    <div class="mgmt-card-title"><i class="ti ti-star" style="color:var(--amber)"></i>Top Customers — ${periodLabel}</div>
+    ${top5Cust.length===0
+      ?`<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:13px">No sales in this period.</div>`
+      :top5Cust.map(([name,rev],i)=>`
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <span style="font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+          <span style="font-size:11px;color:var(--text-secondary);flex-shrink:0">${fmt(rev)}</span>
+        </div>
+        ${bar(rev,maxCust,barColors[i])}
+      </div>`).join('')}
   </div>
 
-  <!-- ── HR Today ── -->
-  <div class="report-section">
-    <div class="section-head"><span class="section-title"><i class="ti ti-users" style="margin-right:6px;color:var(--green)"></i>HR Today — ${todayStr}</span></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
-      <div style="padding:10px 12px;background:rgba(16,185,129,0.1);border-radius:var(--radius-sm);border:1px solid rgba(16,185,129,0.2);text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--green)">${presentToday}</div>
-        <div style="font-size:11px;color:var(--text-secondary)">Present</div>
-      </div>
-      <div style="padding:10px 12px;background:rgba(239,68,68,0.1);border-radius:var(--radius-sm);border:1px solid rgba(239,68,68,0.2);text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--red)">${absentToday}</div>
-        <div style="font-size:11px;color:var(--text-secondary)">Absent / No Record</div>
-      </div>
-      <div style="padding:10px 12px;background:rgba(245,158,11,0.1);border-radius:var(--radius-sm);border:1px solid rgba(245,158,11,0.2);text-align:center">
-        <div style="font-size:24px;font-weight:700;color:var(--amber)">${outsideOffice}</div>
-        <div style="font-size:11px;color:var(--text-secondary)">Outside Office</div>
-      </div>
-      <div style="padding:10px 12px;background:rgba(139,92,246,0.1);border-radius:var(--radius-sm);border:1px solid rgba(139,92,246,0.2);text-align:center">
-        <div style="font-size:24px;font-weight:700;color:#8b5cf6">${pendingLeaves}</div>
-        <div style="font-size:11px;color:var(--text-secondary)">Pending Leaves</div>
-      </div>
+  <!-- Top Products -->
+  <div class="mgmt-card">
+    <div class="mgmt-card-title"><i class="ti ti-package" style="color:var(--accent)"></i>Top Products — ${periodLabel}</div>
+    ${top5Prod.length===0
+      ?`<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:13px">No product sales in this period.</div>`
+      :top5Prod.map(([name,d],i)=>`
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <span style="font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+          <span style="font-size:11px;color:var(--text-secondary);flex-shrink:0">${d.qty} pcs · ${fmt(d.rev)}</span>
+        </div>
+        ${bar(d.rev,maxProd,barColors[i])}
+      </div>`).join('')}
+  </div>
+</div>
+
+<!-- ── AR Aging + HR ── -->
+<div class="mgmt-grid-2">
+  <!-- AR Aging -->
+  <div class="mgmt-card">
+    <div class="mgmt-card-title"><i class="ti ti-clock-dollar" style="color:var(--amber)"></i>AR Aging</div>
+    ${totalAR===0
+      ?`<div style="text-align:center;padding:16px;color:var(--green);font-size:13px"><i class="ti ti-circle-check" style="font-size:20px;display:block;margin-bottom:4px"></i>No outstanding AR</div>`
+      :[['Current',aging.cur,'var(--green)'],['1–30 days',aging.c30,'var(--accent)'],['31–60 days',aging.c60,'var(--amber)'],['61–90 days',aging.c90,'var(--red)'],['90+ days',aging.c90p,'#7f1d1d']].map(([label,amt,color])=>`
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-size:12px;color:var(--text-secondary)">${label}</span>
+          <span style="font-size:12px;font-weight:600;color:${color}">${fmt(amt)}</span>
+        </div>
+        ${bar(amt,totalAR,color)}
+      </div>`).join('')}
+    ${totalAR>0?`<div style="border-top:1px solid var(--border-light);padding-top:10px;display:flex;justify-content:space-between;font-weight:700;font-size:13px"><span>Total AR</span><span style="color:var(--accent)">${fmt(totalAR)}</span></div>`:''}
+  </div>
+
+  <!-- HR Today -->
+  <div class="mgmt-card">
+    <div class="mgmt-card-title"><i class="ti ti-users" style="color:var(--green)"></i>HR Today — ${todayStr}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      ${[
+        [presentToday,'Present','var(--green)','rgba(16,185,129,0.1)'],
+        [absentToday,'Absent','var(--red)','rgba(239,68,68,0.1)'],
+        [outsideOff,'Outside Office','var(--amber)','rgba(245,158,11,0.1)'],
+        [pendingLeave,'Pending Leaves','#8b5cf6','rgba(139,92,246,0.1)']
+      ].map(([n,lbl,clr,bg])=>`
+      <div style="padding:10px;background:${bg};border-radius:var(--radius-sm);text-align:center">
+        <div style="font-size:22px;font-weight:800;color:${clr}">${n}</div>
+        <div style="font-size:10px;color:var(--text-secondary);margin-top:2px">${lbl}</div>
+      </div>`).join('')}
     </div>
-    ${todayAtt.filter(a=>a.locTag==='outside').length?`
-    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--amber)"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>Clocked in outside office:</div>
-    ${todayAtt.filter(a=>a.locTag==='outside').map(a=>{
-      const emp=(state.employees||[]).find(e=>e.id===a.empId)||{name:a.empName||a.empId};
-      return `<div style="font-size:12px;padding:5px 10px;background:rgba(245,158,11,0.08);border-radius:var(--radius-sm);margin-bottom:4px;display:flex;justify-content:space-between">
-        <span>${emp.name}</span><span style="color:var(--text-secondary)">${a.locLabel||a.locDist+'m away'||'Outside'}</span>
-      </div>`;
-    }).join('')}`:''}
+    ${todayAtt.filter(a=>a.locTag==='outside').length?
+      todayAtt.filter(a=>a.locTag==='outside').map(a=>{
+        const emp=(state.employees||[]).find(e=>e.id===a.empId)||{name:a.empName||'?'};
+        return `<div style="font-size:11px;padding:5px 8px;background:rgba(245,158,11,0.08);border-radius:4px;margin-bottom:4px;display:flex;justify-content:space-between">
+          <span style="font-weight:500">${emp.name}</span><span style="color:var(--amber)">⚠ Outside</span>
+        </div>`;
+      }).join(''):'<div style="font-size:12px;color:var(--text-tertiary);text-align:center;padding:8px">All present employees are in office</div>'
+    }
   </div>
 </div>
 
-<!-- ── Alerts Panel ── -->
-<div class="report-section">
-  <div class="section-head"><span class="section-title"><i class="ti ti-bell" style="margin-right:6px;color:var(--red)"></i>Action Required</span></div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
-    ${overdueInvs.slice(0,5).map(i=>`
-    <div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('invoices')">
-      <i class="ti ti-file-invoice" style="font-size:18px;color:var(--red);flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${i.id} — ${i.customer}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">Due ${i.due} · ${fmt(i.amount)}</div></div>
+<!-- ── Alerts ── -->
+<div class="mgmt-card">
+  <div class="mgmt-card-title"><i class="ti ti-bell" style="color:var(--red)"></i>Action Required</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">
+    ${overdueInvs.slice(0,4).map(i=>`
+    <div class="mgmt-alert" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2)" onclick="navigate('invoices')">
+      <i class="ti ti-file-invoice" style="color:var(--red)"></i>
+      <div><div class="mgmt-alert-title">${i.id} — ${i.customer}</div><div class="mgmt-alert-sub">Due ${i.due} · ${fmt(i.amount)}</div></div>
     </div>`).join('')}
-
     ${pendingPO.slice(0,3).map(p=>`
-    <div style="padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('purchaseorders')">
-      <i class="ti ti-truck-delivery" style="font-size:18px;color:var(--amber);flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${p.id} — ${p.supplier}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">PO pending approval</div></div>
+    <div class="mgmt-alert" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2)" onclick="navigate('purchaseorders')">
+      <i class="ti ti-truck-delivery" style="color:var(--amber)"></i>
+      <div><div class="mgmt-alert-title">${p.id} — ${p.supplier}</div><div class="mgmt-alert-sub">Pending PO approval</div></div>
     </div>`).join('')}
-
     ${outOfStock.slice(0,3).map(it=>`
-    <div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('inventory')">
-      <i class="ti ti-package-off" style="font-size:18px;color:var(--red);flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${it.name}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">Out of stock</div></div>
+    <div class="mgmt-alert" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2)" onclick="navigate('inventory')">
+      <i class="ti ti-package-off" style="color:var(--red)"></i>
+      <div><div class="mgmt-alert-title">${it.name}</div><div class="mgmt-alert-sub">Out of stock</div></div>
     </div>`).join('')}
-
     ${lowStock.slice(0,3).map(it=>`
-    <div style="padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('inventory')">
-      <i class="ti ti-package" style="font-size:18px;color:var(--amber);flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${it.name}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">Low stock: ${it.qty} ${it.unit||'pcs'} remaining</div></div>
+    <div class="mgmt-alert" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2)" onclick="navigate('inventory')">
+      <i class="ti ti-package" style="color:var(--amber)"></i>
+      <div><div class="mgmt-alert-title">${it.name}</div><div class="mgmt-alert-sub">Only ${it.qty} ${it.unit||'pcs'} left</div></div>
     </div>`).join('')}
-
     ${expDocs.slice(0,3).map(d=>{
       const emp=(state.employees||[]).find(e=>e.id===d.empId)||{name:d.empName||'?'};
-      return `<div style="padding:10px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('documents')">
-      <i class="ti ti-file-alert" style="font-size:18px;color:#8b5cf6;flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${emp.name} — ${d.docType}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">Expires ${d.expiry}</div></div>
+      return `<div class="mgmt-alert" style="background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2)" onclick="navigate('documents')">
+      <i class="ti ti-file-alert" style="color:#8b5cf6"></i>
+      <div><div class="mgmt-alert-title">${emp.name} — ${d.docType}</div><div class="mgmt-alert-sub">Expires ${d.expiry}</div></div>
     </div>`;}).join('')}
-
-    ${pendingLeaves>0?`
-    <div style="padding:10px 14px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('leaves')">
-      <i class="ti ti-beach" style="font-size:18px;color:var(--accent);flex-shrink:0"></i>
-      <div><div style="font-size:12px;font-weight:600">${pendingLeaves} Leave Request${pendingLeaves>1?'s':''}</div>
-      <div style="font-size:11px;color:var(--text-secondary)">Awaiting approval</div></div>
+    ${pendingLeave>0?`
+    <div class="mgmt-alert" style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2)" onclick="navigate('leaves')">
+      <i class="ti ti-beach" style="color:var(--accent)"></i>
+      <div><div class="mgmt-alert-title">${pendingLeave} Leave Request${pendingLeave>1?'s':''}</div><div class="mgmt-alert-sub">Awaiting approval</div></div>
     </div>`:''}
-
-    ${(overdueInvs.length+pendingPO.length+outOfStock.length+lowStock.length+expDocs.length+pendingLeaves)===0?`
-    <div style="padding:16px;color:var(--green);font-size:13px;text-align:center;grid-column:1/-1">
-      <i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:6px"></i>
-      All clear — no urgent actions needed!
+    ${!overdueInvs.length&&!pendingPO.length&&!outOfStock.length&&!lowStock.length&&!expDocs.length&&!pendingLeave?`
+    <div style="grid-column:1/-1;text-align:center;padding:20px;color:var(--green)">
+      <i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:6px"></i>
+      All clear — no urgent actions!
     </div>`:''}
   </div>
 </div>`;
 }
+
 
 function navigate(page) {
   state.page = page;
