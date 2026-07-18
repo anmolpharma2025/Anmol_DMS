@@ -383,6 +383,7 @@
     </div>
     <div class="nav-section">Overview</div>
     <div class="nav-item active" data-page="dashboard"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></div>
+    <div class="nav-item" data-page="mgmt" title="Management Dashboard"><i class="ti ti-chart-pie"></i><span>Management</span></div>
 
     <div class="nav-section">Transactions</div>
     <div class="nav-item" title="General Journal" data-page="journal"><i class="ti ti-notebook"></i><span>General Journal</span></div>
@@ -1367,6 +1368,7 @@ function doLogin() {
 // All pages available for permission assignment
 const ALL_PAGES = [
   { id:'dashboard',   label:'Dashboard',            section:'Overview' },
+  { id:'mgmt',        label:'Management Dashboard', section:'Overview' },
   { id:'journal',      label:'General Journal',        section:'Transactions' },
   { id:'disbursement', label:'Disbursement Journal',   section:'Transactions' },
   { id:'salesorders', label:'Sales Orders',           section:'Transactions' },
@@ -2269,7 +2271,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2307,6 +2309,325 @@ function render() {
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// MANAGEMENT DASHBOARD
+// ══════════════════════════════════════════════════════════════════════════════
+function renderMgmtDashboard(c, ta) {
+  ta.innerHTML = `<span style="font-size:12px;color:var(--text-secondary)">Auto-refreshes on data change</span>
+    <button class="btn" onclick="renderCurrentPage()"><i class="ti ti-refresh"></i>Refresh</button>`;
+
+  const now      = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const thisMonth= todayStr.slice(0,7);
+  const lastMonth= new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
+  const thisYear = String(now.getFullYear());
+
+  // ── Financial KPIs ──
+  const invoices   = state.invoices||[];
+  const collections= state.collections||[];
+  const expenses   = state.expenses||[];
+  const journal    = state.journal||[];
+  const pos        = state.purchaseOrders||[];
+  const employees  = state.employees||[];
+  const attendance = state.attendance||[];
+  const leaves     = state.leaves||[];
+  const inventory  = state.inventory||[];
+
+  const expAccIds  = new Set((state.accounts||[]).filter(a=>a.type==='Expense').map(a=>String(a.id)));
+
+  // Revenue
+  const revThisMonth = invoices.filter(i=>i.date?.startsWith(thisMonth)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
+  const revLastMonth = invoices.filter(i=>i.date?.startsWith(lastMonth)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
+  const revYTD       = invoices.filter(i=>i.date?.startsWith(thisYear)&&i.status!=='cancelled').reduce((s,i)=>s+(i.amount||0),0);
+  const revTrend     = revLastMonth>0 ? ((revThisMonth-revLastMonth)/revLastMonth*100).toFixed(1) : null;
+
+  // Expenses
+  const expDV = journal.filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit)));
+  const expThisMonth = expenses.filter(e=>e.date?.startsWith(thisMonth)).reduce((s,e)=>s+(e.amount||0),0)
+    + expDV.filter(j=>j.date?.startsWith(thisMonth)).reduce((s,j)=>s+(j.amount||0),0);
+  const expYTD = expenses.filter(e=>e.date?.startsWith(thisYear)).reduce((s,e)=>s+(e.amount||0),0)
+    + expDV.filter(j=>j.date?.startsWith(thisYear)).reduce((s,j)=>s+(j.amount||0),0);
+
+  // Collections
+  const colThisMonth = collections.filter(c=>c.date?.startsWith(thisMonth)).reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+
+  // AR
+  const unpaidInvs = invoices.filter(i=>getInvoiceStatus(i)==='pending'||getInvoiceStatus(i)==='overdue');
+  const totalAR    = unpaidInvs.reduce((s,i)=>s+(i.amount||0),0);
+  const overdueAR  = unpaidInvs.filter(i=>i.due&&i.due<todayStr).reduce((s,i)=>s+(i.amount||0),0);
+
+  // AR Aging buckets
+  const aging = { c30:0, c60:0, c90:0, c90p:0 };
+  unpaidInvs.forEach(i=>{
+    if(!i.due) return;
+    const days = Math.floor((now - new Date(i.due))/(1000*60*60*24));
+    if(days<=0) {}
+    else if(days<=30) aging.c30+=i.amount||0;
+    else if(days<=60) aging.c60+=i.amount||0;
+    else if(days<=90) aging.c90+=i.amount||0;
+    else              aging.c90p+=i.amount||0;
+  });
+
+  // HR Today
+  const todayAtt   = attendance.filter(a=>a.date===todayStr);
+  const presentToday  = todayAtt.filter(a=>a.status==='present').length;
+  const absentToday   = employees.filter(e=>!todayAtt.find(a=>a.empId===e.id)).length;
+  const outsideOffice = todayAtt.filter(a=>a.locTag==='outside').length;
+  const pendingLeaves = (leaves||[]).filter(l=>l.status==='pending').length;
+
+  // Inventory alerts
+  const lowStock   = inventory.filter(i=>(i.qty||0)<=(i.reorderLevel||5)&&(i.qty||0)>0);
+  const outOfStock = inventory.filter(i=>(i.qty||0)===0);
+
+  // Operations alerts
+  const pendingPO  = pos.filter(p=>p.status==='pending');
+  const overdueInvs= invoices.filter(i=>getInvoiceStatus(i)==='overdue');
+  const expDocs    = (state.empDocuments||[]).filter(d=>{
+    if(!d.expiry) return false;
+    const days = Math.floor((new Date(d.expiry)-now)/(1000*60*60*24));
+    return days>=0&&days<=30;
+  });
+
+  // Top 5 customers this month
+  const custRevMonth = {};
+  invoices.filter(i=>i.date?.startsWith(thisMonth)&&i.status!=='cancelled').forEach(i=>{
+    if(!custRevMonth[i.customer]) custRevMonth[i.customer]=0;
+    custRevMonth[i.customer]+=(i.amount||0);
+  });
+  const top5CustMonth = Object.entries(custRevMonth).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxCust = top5CustMonth.length ? top5CustMonth[0][1] : 1;
+
+  // Top 5 products YTD
+  const prodSales = {};
+  invoices.filter(i=>i.date?.startsWith(thisYear)&&i.status!=='cancelled').forEach(inv=>{
+    (inv.lines||[]).forEach(l=>{
+      const k = l.desc||l.itemId||'Unknown';
+      if(!prodSales[k]) prodSales[k]={qty:0,rev:0};
+      prodSales[k].qty+=(l.qty||0); prodSales[k].rev+=(l.lineTotal||0);
+    });
+  });
+  const top5Prod = Object.entries(prodSales).sort((a,b)=>b[1].rev-a[1].rev).slice(0,5);
+  const maxProd  = top5Prod.length ? top5Prod[0][1].rev : 1;
+
+  // Net income YTD
+  const purYTD = pos.filter(p=>p.date?.startsWith(thisYear)).reduce((s,p)=>(p.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),ls),0);
+  const netYTD = revYTD - purYTD - expYTD;
+
+  // Pending SO
+  const pendingSO = (state.salesOrders||[]).filter(s=>s.status==='pending').length;
+
+  const trendBadge = (val, suffix='%') => val===null ? '' :
+    `<span style="font-size:11px;font-weight:600;color:${+val>=0?'var(--green)':'var(--red)'}">
+      <i class="ti ti-trending-${+val>=0?'up':'down'}" style="font-size:10px"></i> ${Math.abs(val)}${suffix} vs last mo.
+    </span>`;
+
+  c.innerHTML = `
+<!-- ── ROW 1: Financial KPIs ── -->
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+  <div class="kpi" style="border-left:3px solid var(--green)">
+    <div class="kpi-label"><i class="ti ti-trending-up"></i>Revenue This Month</div>
+    <div class="kpi-value pos">${fmt(revThisMonth)}</div>
+    <div class="kpi-sub">${trendBadge(revTrend)} YTD: ${fmt(revYTD)}</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid var(--red)">
+    <div class="kpi-label"><i class="ti ti-receipt"></i>Expenses This Month</div>
+    <div class="kpi-value neg">${fmt(expThisMonth)}</div>
+    <div class="kpi-sub">YTD Total: ${fmt(expYTD)}</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid var(--accent)">
+    <div class="kpi-label"><i class="ti ti-cash"></i>Collections This Month</div>
+    <div class="kpi-value" style="color:var(--accent)">${fmt(colThisMonth)}</div>
+    <div class="kpi-sub">Outstanding AR: ${fmt(totalAR)}</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid ${netYTD>=0?'var(--green)':'var(--red)'}">
+    <div class="kpi-label"><i class="ti ti-coin"></i>Net Income YTD</div>
+    <div class="kpi-value ${netYTD>=0?'pos':'neg'}">${fmtS(netYTD)}</div>
+    <div class="kpi-sub">Rev − Pur − Exp</div>
+  </div>
+</div>
+
+<!-- ── ROW 2: Operations + HR ── -->
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+  <div class="kpi" style="border-left:3px solid var(--amber)">
+    <div class="kpi-label"><i class="ti ti-clock-pause"></i>Pending Approvals</div>
+    <div class="kpi-value" style="color:var(--amber)">${pendingPO.length+pendingSO}</div>
+    <div class="kpi-sub">${pendingPO.length} PO · ${pendingSO} SO</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid var(--red)">
+    <div class="kpi-label"><i class="ti ti-alert-triangle"></i>Overdue Invoices</div>
+    <div class="kpi-value neg">${overdueInvs.length}</div>
+    <div class="kpi-sub">Value: ${fmt(overdueAR)}</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid var(--green)">
+    <div class="kpi-label"><i class="ti ti-users"></i>Attendance Today</div>
+    <div class="kpi-value pos">${presentToday}</div>
+    <div class="kpi-sub">${absentToday} absent · ${outsideOffice} outside office</div>
+  </div>
+  <div class="kpi" style="border-left:3px solid var(--purple, #8b5cf6)">
+    <div class="kpi-label"><i class="ti ti-box"></i>Inventory Alerts</div>
+    <div class="kpi-value" style="color:#8b5cf6">${lowStock.length+outOfStock.length}</div>
+    <div class="kpi-sub">${outOfStock.length} out of stock · ${lowStock.length} low</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+  <!-- ── AR Aging ── -->
+  <div class="report-section">
+    <div class="section-head"><span class="section-title"><i class="ti ti-clock-dollar" style="margin-right:6px;color:var(--amber)"></i>Accounts Receivable Aging</span></div>
+    ${totalAR===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No outstanding receivables 🎉</div>`:`
+    <table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead><tr style="white-space:nowrap">
+        <th>Bucket</th><th style="text-align:right">Amount</th><th style="text-align:right">% of AR</th><th>Bar</th>
+      </tr></thead>
+      <tbody>
+        ${[
+          ['Current (not due)', unpaidInvs.filter(i=>!i.due||i.due>=todayStr).reduce((s,i)=>s+(i.amount||0),0), 'var(--green)'],
+          ['1–30 days overdue', aging.c30, 'var(--amber)'],
+          ['31–60 days overdue', aging.c60, 'var(--orange, #f97316)'],
+          ['61–90 days overdue', aging.c90, 'var(--red)'],
+          ['90+ days overdue',   aging.c90p, '#7f1d1d']
+        ].map(([label,amt,color])=>`<tr>
+          <td style="padding:6px 0;color:var(--text-secondary)">${label}</td>
+          <td style="text-align:right;font-weight:600;color:${color}">${fmt(amt)}</td>
+          <td style="text-align:right;color:var(--text-tertiary);font-size:11px">${totalAR>0?(amt/totalAR*100).toFixed(0):0}%</td>
+          <td style="padding-left:10px;width:100px"><div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden"><div style="height:100%;width:${totalAR>0?(amt/totalAR*100).toFixed(1):0}%;background:${color};border-radius:4px"></div></div></td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr style="border-top:1px solid var(--border-light)">
+        <td style="font-weight:700;padding-top:8px">Total AR</td>
+        <td style="text-align:right;font-weight:700;padding-top:8px;color:var(--accent)">${fmt(totalAR)}</td>
+        <td colspan="2"></td>
+      </tr></tfoot>
+    </table>`}
+  </div>
+
+  <!-- ── Top Customers This Month ── -->
+  <div class="report-section">
+    <div class="section-head"><span class="section-title"><i class="ti ti-star" style="margin-right:6px;color:var(--amber)"></i>Top Customers — ${new Date().toLocaleString('en',{month:'long'})}</span></div>
+    ${top5CustMonth.length===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No sales this month yet.</div>`
+    :top5CustMonth.map(([name,rev],i)=>`
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+        <span style="font-size:12px;font-weight:500;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+        <span style="font-size:11px;color:var(--text-secondary)">${fmt(rev)}</span>
+      </div>
+      <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${(rev/maxCust*100).toFixed(1)}%;background:${['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'][i]};border-radius:4px"></div>
+      </div>
+    </div>`).join('')}
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+  <!-- ── Top Products YTD ── -->
+  <div class="report-section">
+    <div class="section-head"><span class="section-title"><i class="ti ti-package" style="margin-right:6px;color:var(--accent)"></i>Top Products YTD</span></div>
+    ${top5Prod.length===0?`<div style="text-align:center;padding:16px;color:var(--text-tertiary);font-size:13px">No product sales yet.</div>`
+    :top5Prod.map(([name,d],i)=>`
+    <div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:12px;font-weight:500;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+        <span style="font-size:11px;color:var(--text-secondary)">${d.qty} units · ${fmt(d.rev)}</span>
+      </div>
+      <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${(d.rev/maxProd*100).toFixed(1)}%;background:${['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'][i]};border-radius:4px"></div>
+      </div>
+    </div>`).join('')}
+  </div>
+
+  <!-- ── HR Today ── -->
+  <div class="report-section">
+    <div class="section-head"><span class="section-title"><i class="ti ti-users" style="margin-right:6px;color:var(--green)"></i>HR Today — ${todayStr}</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+      <div style="padding:10px 12px;background:rgba(16,185,129,0.1);border-radius:var(--radius-sm);border:1px solid rgba(16,185,129,0.2);text-align:center">
+        <div style="font-size:24px;font-weight:700;color:var(--green)">${presentToday}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Present</div>
+      </div>
+      <div style="padding:10px 12px;background:rgba(239,68,68,0.1);border-radius:var(--radius-sm);border:1px solid rgba(239,68,68,0.2);text-align:center">
+        <div style="font-size:24px;font-weight:700;color:var(--red)">${absentToday}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Absent / No Record</div>
+      </div>
+      <div style="padding:10px 12px;background:rgba(245,158,11,0.1);border-radius:var(--radius-sm);border:1px solid rgba(245,158,11,0.2);text-align:center">
+        <div style="font-size:24px;font-weight:700;color:var(--amber)">${outsideOffice}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Outside Office</div>
+      </div>
+      <div style="padding:10px 12px;background:rgba(139,92,246,0.1);border-radius:var(--radius-sm);border:1px solid rgba(139,92,246,0.2);text-align:center">
+        <div style="font-size:24px;font-weight:700;color:#8b5cf6">${pendingLeaves}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">Pending Leaves</div>
+      </div>
+    </div>
+    ${todayAtt.filter(a=>a.locTag==='outside').length?`
+    <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--amber)"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>Clocked in outside office:</div>
+    ${todayAtt.filter(a=>a.locTag==='outside').map(a=>{
+      const emp=(state.employees||[]).find(e=>e.id===a.empId)||{name:a.empName||a.empId};
+      return `<div style="font-size:12px;padding:5px 10px;background:rgba(245,158,11,0.08);border-radius:var(--radius-sm);margin-bottom:4px;display:flex;justify-content:space-between">
+        <span>${emp.name}</span><span style="color:var(--text-secondary)">${a.locLabel||a.locDist+'m away'||'Outside'}</span>
+      </div>`;
+    }).join('')}`:''}
+  </div>
+</div>
+
+<!-- ── Alerts Panel ── -->
+<div class="report-section">
+  <div class="section-head"><span class="section-title"><i class="ti ti-bell" style="margin-right:6px;color:var(--red)"></i>Action Required</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+    ${overdueInvs.slice(0,5).map(i=>`
+    <div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('invoices')">
+      <i class="ti ti-file-invoice" style="font-size:18px;color:var(--red);flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${i.id} — ${i.customer}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Due ${i.due} · ${fmt(i.amount)}</div></div>
+    </div>`).join('')}
+
+    ${pendingPO.slice(0,3).map(p=>`
+    <div style="padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('purchaseorders')">
+      <i class="ti ti-truck-delivery" style="font-size:18px;color:var(--amber);flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${p.id} — ${p.supplier}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">PO pending approval</div></div>
+    </div>`).join('')}
+
+    ${outOfStock.slice(0,3).map(it=>`
+    <div style="padding:10px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('inventory')">
+      <i class="ti ti-package-off" style="font-size:18px;color:var(--red);flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${it.name}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Out of stock</div></div>
+    </div>`).join('')}
+
+    ${lowStock.slice(0,3).map(it=>`
+    <div style="padding:10px 14px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('inventory')">
+      <i class="ti ti-package" style="font-size:18px;color:var(--amber);flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${it.name}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Low stock: ${it.qty} ${it.unit||'pcs'} remaining</div></div>
+    </div>`).join('')}
+
+    ${expDocs.slice(0,3).map(d=>{
+      const emp=(state.employees||[]).find(e=>e.id===d.empId)||{name:d.empName||'?'};
+      return `<div style="padding:10px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('documents')">
+      <i class="ti ti-file-alert" style="font-size:18px;color:#8b5cf6;flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${emp.name} — ${d.docType}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Expires ${d.expiry}</div></div>
+    </div>`;}).join('')}
+
+    ${pendingLeaves>0?`
+    <div style="padding:10px 14px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius-sm);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="navigate('leaves')">
+      <i class="ti ti-beach" style="font-size:18px;color:var(--accent);flex-shrink:0"></i>
+      <div><div style="font-size:12px;font-weight:600">${pendingLeaves} Leave Request${pendingLeaves>1?'s':''}</div>
+      <div style="font-size:11px;color:var(--text-secondary)">Awaiting approval</div></div>
+    </div>`:''}
+
+    ${(overdueInvs.length+pendingPO.length+outOfStock.length+lowStock.length+expDocs.length+pendingLeaves)===0?`
+    <div style="padding:16px;color:var(--green);font-size:13px;text-align:center;grid-column:1/-1">
+      <i class="ti ti-circle-check" style="font-size:24px;display:block;margin-bottom:6px"></i>
+      All clear — no urgent actions needed!
+    </div>`:''}
+  </div>
+</div>`;
+}
+
+function navigate(page) {
+  state.page = page;
+  render();
+}
+
 function renderDashboard(c, ta) {
   ta.innerHTML = '';
   const totalRev   = state.invoices.reduce((s,i)=>s+(i.amount||0),0);
@@ -2447,6 +2768,12 @@ function renderDashboard(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-receipt"></i>Operating Expenses</div><div class="kpi-value neg">${fmt(totalExp)}</div><div class="kpi-sub">${(state.expenses||[]).length} expense entries</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-chart-line"></i>Gross Profit</div><div class="kpi-value ${grossProfit>=0?'pos':'neg'}">${fmtS(grossProfit)}</div><div class="kpi-sub">Margin: ${totalRev>0?(grossProfit/totalRev*100).toFixed(1):0}%</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-coin"></i>Net Income</div><div class="kpi-value ${netIncome>=0?'pos':'neg'}">${fmtS(netIncome)}</div><div class="kpi-sub">After all costs</div></div>
+</div>
+
+<!-- Quick nav to management dashboard -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md)">
+  <div style="font-size:13px;color:var(--accent)"><i class="ti ti-chart-pie" style="margin-right:6px"></i>Need deeper insights? Open the Management Dashboard.</div>
+  <button class="btn primary" style="padding:5px 14px;font-size:12px" onclick="navigate('mgmt')"><i class="ti ti-arrow-right"></i>Management View</button>
 </div>
 
 <div class="two-col">
