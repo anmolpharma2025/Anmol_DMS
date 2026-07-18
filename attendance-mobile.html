@@ -457,9 +457,9 @@ const FB_CONFIG = {
 const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
 
 // Office coordinates — UPDATE THESE to your actual office location
-const OFFICE_LAT  = 10.3399;   // ← replace with your office latitude
-const OFFICE_LNG  = 123.9118;  // ← replace with your office longitude
-const OFFICE_RADIUS_M = 50;   // meters radius considered "in office"
+const OFFICE_LAT  = 10.3157;   // ← replace with your office latitude
+const OFFICE_LNG  = 123.8854;  // ← replace with your office longitude
+const OFFICE_RADIUS_M = 200;   // meters radius considered "in office"
 
 // ══════════════════════════════════════════════════════════════════════
 // STATE
@@ -522,25 +522,26 @@ function initFirebase() {
 async function loadEmployees() {
   const sel = document.getElementById('emp-select');
   try {
-    // Load from meta first (has users list)
-    const [meta, main] = await Promise.all([
-      db.doc('companies/anmol_meta').get(),
-      db.doc('companies/anmol').get()
-    ]);
-
-    employees = [];
-    if(main.exists) {
-      employees = (main.data().employees || []).filter(e => e.status !== 'inactive');
-    }
+    // ERP stores everything as JSON.stringify inside doc.data().data
+    const doc = await db.doc('companies/anmol').get();
+    if(!doc.exists) throw new Error('No ERP data found');
+    const raw = doc.data().data;
+    if(!raw) throw new Error('ERP data field is empty');
+    const erpState = JSON.parse(raw);
+    employees = (erpState.employees || []).filter(e => e.status !== 'inactive');
+    if(!employees.length) throw new Error('No active employees found in ERP');
 
     sel.innerHTML = '<option value="">— Select your name —</option>' +
-      employees.map(e => `<option value="${e.id}">${e.name}${e.department?' — '+e.department:''}</option>`).join('');
+      employees.map(e =>
+        `<option value="${e.id}">${e.name}${e.department?' — '+e.department:''}</option>`
+      ).join('');
 
-    // Start geolocation
+    // Start geolocation in background
     startGeolocation();
   } catch(e) {
-    sel.innerHTML = '<option value="">— Could not load. Check connection —</option>';
-    document.getElementById('login-err').textContent = 'Failed to load employees: ' + e.message;
+    sel.innerHTML = '<option value="">— Could not load employees —</option>';
+    document.getElementById('login-err').textContent = 'Error: ' + e.message;
+    console.error('loadEmployees:', e);
   }
 }
 
@@ -837,16 +838,25 @@ async function recordAttendance(verified, confidence) {
 
   try {
     if(clockMode === 'in') {
-      // Check no duplicate today
+      // Check no duplicate — look in mobile collection
       const existing = await db.collection('companies/anmol/attendance_mobile')
         .where('empId','==',empId).get();
-      const dupToday = existing.docs.map(d=>d.data()).find(r=>r.date===todayStr&&r.timeIn);
+      const allRecs = existing.docs.map(d=>({id:d.id,...d.data()}));
+      const dupToday = allRecs.find(r=>r.date===todayStr&&r.timeIn);
       if(dupToday) {
         toast('Already clocked in today!','warning'); return;
       }
 
+      // Generate ID matching ERP format
+      const erpDoc   = await db.doc('companies/anmol').get();
+      const erpState = JSON.parse(erpDoc.data()?.data||'{}');
+      const attLen   = (erpState.attendance||[]).length;
+      const attId    = 'ATT-' + String(attLen+1).padStart(4,'0');
+
       const rec = {
-        empId, empName,
+        id:            attId,
+        empId,
+        empName,
         date:          todayStr,
         timeIn:        now,
         timeOut:       '',
@@ -857,19 +867,22 @@ async function recordAttendance(verified, confidence) {
         faceConfidence: confidence,
         locTag,
         locLabel,
-        locLat:   loc.lat   || null,
-        locLng:   loc.lng   || null,
-        locDist:  loc.dist  || null,
-        inOffice: loc.inOffice ?? null,
-        notes:    `Mobile app clock-in | ${locLabel} | face ${confidence}%`,
-        createdAt: new Date().toISOString()
+        locLat:        loc.lat    || null,
+        locLng:        loc.lng    || null,
+        locDist:       loc.dist   || null,
+        inOffice:      loc.inOffice ?? null,
+        notes:         `Mobile app | ${locLabel} | face ${confidence}%`,
+        source:        'mobile_app',
+        createdAt:     new Date().toISOString()
       };
 
-      const docRef = await db.collection('companies/anmol/attendance_mobile').add(rec);
-      todayRecord = { firestoreId: docRef.id, ...rec };
+      // Save to mobile subcollection (for this app's queries)
+      const docRef = await db.collection('companies/anmol/attendance_mobile')
+        .doc(attId).set(rec).then(()=>({id:attId}));
+      todayRecord = { firestoreId: attId, ...rec };
 
-      // Sync to main ERP state
-      await syncToERP({ ...rec, id:'MOB-'+docRef.id.slice(-8).toUpperCase(), mobileId:docRef.id, source:'mobile_app' });
+      // Sync directly to ERP attendance array
+      await syncToERP(rec);
 
       const msg = loc.inOffice === false
         ? `⚠ Clocked in at ${now} — Outside office (${loc.dist}m away)`
@@ -877,10 +890,10 @@ async function recordAttendance(verified, confidence) {
       toast(msg, loc.inOffice===false?'warning':'success', 4000);
 
     } else {
-      // CLOCK OUT
+      // CLOCK OUT — find today's record in mobile collection
       const existing = await db.collection('companies/anmol/attendance_mobile')
         .where('empId','==',empId).get();
-      const todayIn = existing.docs.map(d=>({id:d.id,...d.data()}))
+      const todayIn = existing.docs.map(d=>({firestoreId:d.id,...d.data()}))
         .find(r=>r.date===todayStr&&r.timeIn&&!r.timeOut);
 
       if(!todayIn) {
@@ -893,14 +906,19 @@ async function recordAttendance(verified, confidence) {
       const hours=parseFloat(Math.max(0,mins/60).toFixed(2));
       const ot   =parseFloat(Math.max(0,hours-8).toFixed(2));
 
-      await db.collection('companies/anmol/attendance_mobile').doc(todayIn.id).update({
-        timeOut:now, hoursWorked:hours, overtimeHours:ot,
-        locTagOut: locTag, locLabelOut: locLabel
-      });
+      // Update mobile collection
+      await db.collection('companies/anmol/attendance_mobile')
+        .doc(todayIn.id||todayIn.firestoreId).update({
+          timeOut:now, hoursWorked:hours, overtimeHours:ot,
+          locTagOut:locTag, locLabelOut:locLabel
+        });
 
-      // Sync timeout to ERP
-      const attId = 'MOB-' + todayIn.id.slice(-8).toUpperCase();
-      await syncTimeoutToERP(todayIn.id, attId, now, hours, ot, locTag, locLabel);
+      // Sync clock-out to ERP
+      await syncTimeoutToERP(
+        todayIn.firestoreId,
+        todayIn.id,  // ATT-XXXX id
+        now, hours, ot, locTag, locLabel
+      );
 
       toast(`👋 Clocked out at ${now} · ${hours}h worked`, 'success', 4000);
       todayRecord = { ...todayIn, timeOut:now, hoursWorked:hours, overtimeHours:ot };
@@ -921,9 +939,17 @@ async function syncToERP(rec) {
   try {
     const erpDoc = await db.doc('companies/anmol').get();
     if(!erpDoc.exists) return;
-    const att = erpDoc.data().attendance || [];
-    att.push(rec);
-    await db.doc('companies/anmol').update({ attendance: att });
+    const erpState = JSON.parse(erpDoc.data().data || '{}');
+    if(!erpState.attendance) erpState.attendance = [];
+    // Avoid duplicate
+    const already = erpState.attendance.find(a=>a.id===rec.id);
+    if(!already) erpState.attendance.push(rec);
+    await db.doc('companies/anmol').set({
+      data: JSON.stringify(erpState),
+      updatedAt: Date.now(),
+      updatedBy: rec.empName + ' (Mobile)'
+    });
+    console.log('Synced clock-in to ERP:', rec.id);
   } catch(e) { console.warn('ERP sync failed:', e.message); }
 }
 
@@ -931,11 +957,19 @@ async function syncTimeoutToERP(mobileDocId, attId, timeOut, hours, ot, locTag, 
   try {
     const erpDoc = await db.doc('companies/anmol').get();
     if(!erpDoc.exists) return;
-    const att = erpDoc.data().attendance || [];
+    const erpState = JSON.parse(erpDoc.data().data || '{}');
+    const att = erpState.attendance || [];
     const idx = att.findIndex(a=>a.id===attId||a.mobileId===mobileDocId);
     if(idx>=0) {
-      att[idx] = { ...att[idx], timeOut, hoursWorked:hours, overtimeHours:ot, locTagOut:locTag, locLabelOut:locLabel };
-      await db.doc('companies/anmol').update({ attendance: att });
+      att[idx] = { ...att[idx], timeOut, hoursWorked:hours, overtimeHours:ot,
+        locTagOut:locTag, locLabelOut:locLabel };
+      erpState.attendance = att;
+      await db.doc('companies/anmol').set({
+        data: JSON.stringify(erpState),
+        updatedAt: Date.now(),
+        updatedBy: att[idx].empName + ' (Mobile Out)'
+      });
+      console.log('Synced clock-out to ERP:', attId);
     }
   } catch(e) { console.warn('ERP timeout sync failed:', e.message); }
 }
@@ -969,7 +1003,7 @@ async function loadTodayStatus() {
   try {
     const snap = await db.collection('companies/anmol/attendance_mobile')
       .where('empId','==',selectedEmp.id).get();
-    const all = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const all = snap.docs.map(d=>({ firestoreId:d.id, ...d.data() }));
     todayRecord = all.find(r=>r.date===today()) || null;
   } catch(e) { todayRecord=null; }
 

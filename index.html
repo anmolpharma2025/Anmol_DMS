@@ -14704,7 +14704,7 @@ function renderAttendance(c, ta) {
     const emps = state.employees||[];
     c.innerHTML = `
 <table id="att-history-table">
-  <thead><tr><th>Date</th><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Date</th><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Location</th><th>Verified</th><th>Actions</th></tr></thead>
   <tbody>
   ${allRecords.length===0?`<tr><td colspan="10">${emptyState('ti-clock','No Attendance Records','Attendance will appear here once logged or verified via face recognition.','Log Attendance','showLogAttendance()')}</td></tr>`:''}
   ${[...allRecords].sort((a,b)=>(b.date+b.timeIn).localeCompare(a.date+a.timeIn)).map(a=>{
@@ -14718,6 +14718,7 @@ function renderAttendance(c, ta) {
       <td style="text-align:right">${a.hoursWorked?(+a.hoursWorked).toFixed(2):'—'}</td>
       <td style="text-align:right;color:${(a.overtimeHours||0)>0?'var(--amber)':'var(--text-tertiary)'}">${(a.overtimeHours||0).toFixed(2)}</td>
       <td><span class="badge" style="background:${a.status==='present'?'rgba(16,185,129,0.15)':a.status==='absent'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'};color:${a.status==='present'?'var(--green)':a.status==='absent'?'var(--red)':'var(--amber)'}">${a.status||'present'}</span></td>
+      <td style="font-size:11px">${a.source==='mobile_app'?'<i class="ti ti-device-mobile" style="font-size:11px;color:var(--accent);margin-right:2px"></i>':''}${a.locTag==='office'?'<span style="color:var(--green)">🏢 Office</span>':a.locTag==='outside'?'<span style="color:var(--amber)">⚠ Outside</span>':'—'}</td>
       <td style="text-align:center">${a.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i></span>':'—'}</td>
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAttendance('${a.id}')"><i class="ti ti-edit"></i></button>
@@ -14746,7 +14747,7 @@ function renderAttendance(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-clock-plus"></i>Total OT Hours</div><div class="kpi-value">${totalOT.toFixed(2)}</div></div>
 </div>
 <table>
-  <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Location</th><th>Actions</th></tr></thead>
   <tbody>
   ${emps.map(emp=>{
     const rec = dayRecords.find(a=>a.empId===emp.id);
@@ -14772,6 +14773,7 @@ function renderAttendance(c, ta) {
       <td style="text-align:right;color:${(rec.overtimeHours||0)>0?'var(--amber)':'var(--text-tertiary)'}">${(rec.overtimeHours||0).toFixed(2)}</td>
       <td><span class="badge" style="background:${rec.status==='present'?'rgba(16,185,129,0.15)':rec.status==='absent'?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'};color:${rec.status==='present'?'var(--green)':rec.status==='absent'?'var(--red)':'var(--amber)'}">${rec.status||'present'}</span></td>
       <td style="text-align:center">${rec.verifiedFace?'<span style="color:var(--green);font-size:12px"><i class="ti ti-shield-check"></i></span>':'—'}</td>
+      <td style="font-size:11px;color:var(--text-secondary)">${rec.source==='mobile_app'?'<i class="ti ti-device-mobile" style="font-size:11px;margin-right:3px;color:var(--accent)"></i>':''}${rec.locTag==='office'?'<span style="color:var(--green)">🏢 Office</span>':rec.locTag==='outside'?'<span style="color:var(--amber)">⚠ Outside</span>':'—'}</td>
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 7px;font-size:11px" onclick="showEditAttendance('${rec.id}')"><i class="ti ti-edit"></i></button>
         ${!rec.timeOut?`<button class="btn primary" style="padding:2px 7px;font-size:11px" onclick="recordTimeOut('${rec.id}')"><i class="ti ti-clock-off"></i>Out</button>`:''}
