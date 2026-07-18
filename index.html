@@ -952,11 +952,11 @@ function getCompanyName() { return getCompanyProfile().name; }
 // Role → allowed pages (empty = all)
 const ROLE_ACCESS = {
   admin:       [], // all pages
-  accountant:  ['dashboard','journal','invoices','purchases','expenses','coa','reports','collections','payroll'],
-  sales:       ['dashboard','invoices','collections','customers','salesorders'],
+  accountant:  ['dashboard','mgmt','journal','invoices','purchases','expenses','coa','reports','collections','payroll'],
+  sales:       ['dashboard','mgmt','invoices','collections','customers','salesorders'],
   warehouse:   ['dashboard','inventory','purchases','purchaseorders'],
-  hr:          ['dashboard','employees','attendance','payroll'],
-  viewer:      ['dashboard','reports'],
+  hr:          ['dashboard','mgmt','employees','attendance','payroll','leaves','performance','training','discipline','documents','orgchart','announcements'],
+  viewer:      ['dashboard','mgmt','reports'],
 };
 
 // Custom roles stored in localStorage
@@ -2304,7 +2304,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
