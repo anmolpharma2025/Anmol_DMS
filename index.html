@@ -5863,18 +5863,21 @@ function renderReports(c, ta) {
   <div class="tab ${currentReport==='bir_gl'?'active':''}" onclick="switchReport('bir_gl',this)" style="color:var(--accent)"><i class="ti ti-book" style="font-size:11px;margin-right:3px"></i>General Ledger</div>
   <div class="tab ${currentReport==='bir_slsp'?'active':''}" onclick="switchReport('bir_slsp',this)" style="color:var(--accent)"><i class="ti ti-file-text" style="font-size:11px;margin-right:3px"></i>SLSP</div>
 </div>
-<div class="no-print" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 14px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+<div class="no-print" style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 14px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border-light);flex-wrap:wrap">
   <i class="ti ti-calendar" style="color:var(--accent);font-size:16px"></i>
-  <span style="font-size:12px;color:var(--text-secondary);font-weight:500">Report Period:</span>
-  <input type="date" id="rpt-from" value="${reportPeriodFrom}" onchange="reportPeriodFrom=this.value;showReport(currentReport)" style="padding:5px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+  <span style="font-size:12px;color:var(--text-secondary);font-weight:500">Period:</span>
+  <select id="rpt-preset" onchange="setReportPeriod(this.value)"
+    style="padding:6px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);cursor:pointer;outline:none">
+    <option value="all"    ${!reportPeriodFrom||reportPeriodFrom==='2000-01-01'?'selected':''}>All Time</option>
+    <option value="month"  >This Month</option>
+    <option value="lastmonth">Last Month</option>
+    <option value="quarter">This Quarter</option>
+    <option value="year"   >This Year</option>
+    <option value="custom" >Custom Range…</option>
+  </select>
+  <input type="date" id="rpt-from" value="${reportPeriodFrom}" onchange="reportPeriodFrom=this.value;document.getElementById('rpt-preset').value='custom';showReport(currentReport)" style="padding:5px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
   <span style="color:var(--text-secondary)">to</span>
-  <input type="date" id="rpt-to" value="${reportPeriodTo}" onchange="reportPeriodTo=this.value;showReport(currentReport)" style="padding:5px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-  <div style="display:flex;gap:6px;margin-left:4px">
-    <button class="btn" style="padding:4px 10px;font-size:11px" onclick="setReportPeriod('month')">This Month</button>
-    <button class="btn" style="padding:4px 10px;font-size:11px" onclick="setReportPeriod('quarter')">This Quarter</button>
-    <button class="btn" style="padding:4px 10px;font-size:11px" onclick="setReportPeriod('year')">This Year</button>
-    <button class="btn" style="padding:4px 10px;font-size:11px" onclick="setReportPeriod('all')">All Time</button>
-  </div>
+  <input type="date" id="rpt-to" value="${reportPeriodTo}" onchange="reportPeriodTo=this.value;document.getElementById('rpt-preset').value='custom';showReport(currentReport)" style="padding:5px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
 </div>
 <div id="report-body" style="width:100%;overflow-x:auto"></div>`;
   showReport(currentReport);
@@ -5882,24 +5885,37 @@ function renderReports(c, ta) {
 
 function setReportPeriod(preset) {
   const now = new Date();
+  const y   = now.getFullYear();
+  const m   = now.getMonth(); // 0-indexed
+
+  // Use local date to avoid UTC timezone shift
+  const localDate = (yr, mo, day) => {
+    const d = new Date(yr, mo, day);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
   if(preset==='month') {
-    reportPeriodFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    reportPeriodTo   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().split('T')[0];
+    reportPeriodFrom = localDate(y, m, 1);
+    reportPeriodTo   = localDate(y, m+1, 0); // day 0 of next month = last day of this month
+  } else if(preset==='lastmonth') {
+    reportPeriodFrom = localDate(y, m-1, 1);
+    reportPeriodTo   = localDate(y, m, 0);
   } else if(preset==='quarter') {
-    const q = Math.floor(now.getMonth()/3);
-    reportPeriodFrom = new Date(now.getFullYear(), q*3, 1).toISOString().split('T')[0];
-    reportPeriodTo   = new Date(now.getFullYear(), q*3+3, 0).toISOString().split('T')[0];
+    const q = Math.floor(m/3);
+    reportPeriodFrom = localDate(y, q*3, 1);
+    reportPeriodTo   = localDate(y, q*3+3, 0);
   } else if(preset==='year') {
-    reportPeriodFrom = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
-    reportPeriodTo   = new Date(now.getFullYear(), 11, 31).toISOString().split('T')[0];
-  } else {
-    reportPeriodFrom = '2000-01-01';
-    reportPeriodTo   = '2099-12-31';
+    reportPeriodFrom = localDate(y, 0, 1);
+    reportPeriodTo   = localDate(y, 11, 31);
+  } else if(preset==='all' || preset==='custom') {
+    reportPeriodFrom = '';
+    reportPeriodTo   = '';
   }
+
   const f=document.getElementById('rpt-from'), t=document.getElementById('rpt-to');
-  if(f) f.value=reportPeriodFrom;
-  if(t) t.value=reportPeriodTo;
-  showReport(currentReport);
+  if(f) f.value = reportPeriodFrom;
+  if(t) t.value = reportPeriodTo;
+  if(preset!=='custom') showReport(currentReport);
 }
 
 function inPeriod(dateStr) {
