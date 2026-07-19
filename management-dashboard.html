@@ -219,12 +219,27 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
   </div>
 </div>
 
-<!-- Period tabs -->
-<div class="period-bar" id="period-bar">
-  <div class="ptab active" onclick="setPeriod('month',this)">This Month</div>
-  <div class="ptab" onclick="setPeriod('quarter',this)">This Quarter</div>
-  <div class="ptab" onclick="setPeriod('year',this)">This Year</div>
-  <div class="ptab" onclick="setPeriod('all',this)">All Time</div>
+<!-- Period filter -->
+<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);flex-wrap:wrap">
+  <div style="position:relative;flex-shrink:0">
+    <select id="period-select" onchange="onPeriodChange(this.value)"
+      style="appearance:none;-webkit-appearance:none;padding:8px 36px 8px 14px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;background:var(--card);border:1.5px solid var(--blue);color:var(--blue);font-family:var(--font);outline:none;min-width:150px">
+      <option value="month">This Month</option>
+      <option value="lastmonth">Last Month</option>
+      <option value="quarter">This Quarter</option>
+      <option value="year">This Year</option>
+      <option value="all">All Time</option>
+      <option value="custom">Custom Range…</option>
+    </select>
+    <i class="ti ti-chevron-down" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--blue);pointer-events:none"></i>
+  </div>
+  <div id="custom-range" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+    <input type="date" id="custom-from" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+    <span style="color:var(--text2);font-size:12px">to</span>
+    <input type="date" id="custom-to" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+    <button onclick="applyCustomRange()" style="padding:7px 16px;border-radius:99px;background:var(--blue);border:none;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">Apply</button>
+  </div>
+  <span id="period-label-badge" style="font-size:11px;color:var(--text2);font-weight:500"></span>
 </div>
 
 <!-- Dashboard body -->
@@ -264,7 +279,9 @@ function initFirebase() {
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 let period = 'month';
-let S = null; // ERP state
+let customFrom = '';
+let customTo = '';
+let S = null;
 
 // ── HELPERS ─────────────────────────────────────────────────────────────────
 const today = () => new Date().toISOString().split('T')[0];
@@ -284,13 +301,30 @@ function invStatus(inv,cols){
 function inPd(date){
   if(!date) return false;
   if(period==='all') return true;
-  const now=new Date(), d=date.slice(0,10);
-  if(period==='month') return d.startsWith(now.toISOString().slice(0,7));
-  if(period==='year')  return d.startsWith(String(now.getFullYear()));
-  if(period==='quarter'){
-    const qs=new Date(now.getFullYear(),Math.floor(now.getMonth()/3)*3,1);
-    return d>=qs.toISOString().slice(0,10)&&d<=today();
+  const now=new Date(), d=date.slice(0,10), y=now.getFullYear(), m=now.getMonth();
+
+  if(period==='month'){
+    // 1st to last day of current month
+    const start=new Date(y,m,1).toISOString().slice(0,10);
+    const end=new Date(y,m+1,0).toISOString().slice(0,10); // day 0 of next month = last of this month
+    return d>=start&&d<=end;
   }
+  if(period==='lastmonth'){
+    // 1st to last day of previous month
+    const start=new Date(y,m-1,1).toISOString().slice(0,10);
+    const end=new Date(y,m,0).toISOString().slice(0,10);
+    return d>=start&&d<=end;
+  }
+  if(period==='quarter'){
+    const qStart=Math.floor(m/3)*3;
+    const start=new Date(y,qStart,1).toISOString().slice(0,10);
+    const end=new Date(y,qStart+3,0).toISOString().slice(0,10); // last day of quarter
+    return d>=start&&d<=end;
+  }
+  if(period==='year'){
+    return d>=`${y}-01-01`&&d<=`${y}-12-31`;
+  }
+  if(period==='custom') return customFrom&&customTo&&d>=customFrom&&d<=customTo;
   return true;
 }
 
@@ -309,11 +343,36 @@ async function loadData(){
 }
 
 // ── PERIOD SWITCH ────────────────────────────────────────────────────────────
-function setPeriod(p, el){
-  period=p;
-  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
+function onPeriodChange(val){
+  const cr = document.getElementById('custom-range');
+  if(val==='custom'){
+    cr.style.display='flex';
+    // default custom range to this month
+    const now=new Date();
+    document.getElementById('custom-from').value=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
+    document.getElementById('custom-to').value=now.toISOString().slice(0,10);
+    return;
+  }
+  cr.style.display='none';
+  period=val; customFrom=''; customTo='';
+  updatePeriodBadge();
   if(S) render();
+}
+
+function applyCustomRange(){
+  const f=document.getElementById('custom-from').value;
+  const t=document.getElementById('custom-to').value;
+  if(!f||!t){alert('Please select both start and end dates.');return;}
+  if(f>t){alert('Start date must be before end date.');return;}
+  period='custom'; customFrom=f; customTo=t;
+  updatePeriodBadge();
+  if(S) render();
+}
+
+function updatePeriodBadge(){
+  const labels={month:'This Month',lastmonth:'Last Month',quarter:'This Quarter',year:'This Year',all:'All Time',custom:`${customFrom} → ${customTo}`};
+  const el=document.getElementById('period-label-badge');
+  if(el) el.textContent=labels[period]||'';
 }
 
 // ── MODAL ────────────────────────────────────────────────────────────────────
@@ -601,16 +660,16 @@ function render(){
 
   // ── Alert chips ──
   const chips=[
-    [overdueInvs.length,'Overdue','red','ti-file-invoice',openOverdueInvoices],
-    [pendPO.length+pendSO.length,'Pending','amber','ti-clock-pause',openPendingPO],
-    [outStock.length+lowStock.length,'Stock Alert','red','ti-package-off',openStockAlerts],
-    [pendLeave,'Leave Req.','blue','ti-beach',openLeaves],
-    [expDocs.length,'Expiring Docs','purple','ti-file-alert',()=>{}],
+    [overdueInvs.length,'Overdue','red','ti-file-invoice','openOverdueInvoices'],
+    [pendPO.length+pendSO.length,'Pending PO/SO','amber','ti-clock-pause','openPendingPO'],
+    [outStock.length+lowStock.length,'Stock Alert','red','ti-package-off','openStockAlerts'],
+    [pendLeave,'Leave Req.','blue','ti-beach','openLeaves'],
+    [expDocs.length,'Expiring Docs','purple','ti-file-alert','openExpDocs'],
   ].filter(([n])=>n>0);
   if(chips.length){
     h+=`<div class="sec"><i class="ti ti-bell"></i>Action Required</div>
     <div class="chip-row">${chips.map(([n,lbl,clr,ico,fn])=>`
-    <div class="chip ${clr}" onclick="${fn.name}()">
+    <div class="chip ${clr}" onclick="${fn}()">
       <i class="ti ${ico}"></i><span class="chip-n">${n}</span><span>${lbl}</span>
     </div>`).join('')}</div>`;
   }
@@ -745,30 +804,160 @@ function render(){
     :top5P.map(([name,d],i)=>`<div class="bar-row"><div class="bar-meta"><span class="bar-name">${name}</span><span class="bar-val">${d.qty} pcs · ${fmtK(d.rev)}</span></div>${bbar(d.rev,maxP,barColors[i])}</div>`).join('')}
   </div>`;
 
-  // ── Alerts list ──
-  const alerts=[
-    ...overdueInvs.slice(0,5).map(i=>({icon:'ti-file-invoice',clr:'var(--red)',bg:'var(--red2)',title:`${i.id} — ${i.customer}`,desc:`Due ${i.due} · ${fmt(i.amount)}`,badge:'OVERDUE',badgeClr:'var(--red)'})),
-    ...pendPO.slice(0,4).map(p=>({icon:'ti-truck-delivery',clr:'var(--amber)',bg:'var(--amber2)',title:`${p.id} — ${p.supplier}`,desc:'PO pending approval',badge:'PENDING',badgeClr:'var(--amber)'})),
-    ...outStock.slice(0,4).map(it=>({icon:'ti-package-off',clr:'var(--red)',bg:'var(--red2)',title:it.name,desc:'Out of stock',badge:'0 PCS',badgeClr:'var(--red)'})),
-    ...lowStock.slice(0,4).map(it=>({icon:'ti-package',clr:'var(--amber)',bg:'var(--amber2)',title:it.name,desc:`Only ${it.qty} ${it.unit||'pcs'} left`,badge:'LOW',badgeClr:'var(--amber)'})),
-    ...expDocs.slice(0,3).map(d=>{const emp=employees.find(e=>e.id===d.empId)||{name:d.empName||'?'};return{icon:'ti-file-alert',clr:'var(--purple)',bg:'var(--purple2)',title:`${emp.name} — ${d.docType}`,desc:`Expires ${d.expiry}`,badge:'EXPIRING',badgeClr:'var(--purple)'};}),
-    ...leaves.filter(l=>l.status==='pending').slice(0,4).map(l=>({icon:'ti-beach',clr:'var(--blue)',bg:'var(--blue2)',title:`${l.empName} — ${l.type}`,desc:`${l.startDate} to ${l.endDate}`,badge:'LEAVE',badgeClr:'var(--blue)'})),
-  ];
+  // ── Undelivered SO Items ──
+  const activeSOs = sos.filter(s=>s.status!=='delivered'&&s.status!=='cancelled');
+  const undeliveredSOs = activeSOs.map(so=>{
+    const undelivLines = (so.lines||[]).filter(l=>!l.delivered&&!l.fullyDelivered);
+    const totalQty = undelivLines.reduce((s,l)=>s+(l.qty||0),0);
+    const totalVal = undelivLines.reduce((s,l)=>s+(l.lineTotal||0),0);
+    return {...so, undelivLines, totalQty, totalVal};
+  }).filter(so=>so.undelivLines.length>0);
 
-  h+=`<div class="sec"><i class="ti ti-alert-circle"></i>All Alerts${alerts.length?` (${alerts.length})`:''}</div>
+  h+=`<div class="sec"><i class="ti ti-clipboard-list"></i>Undelivered Sales Orders (${undeliveredSOs.length})</div>
   <div class="cc">
-    ${alerts.length===0?`<div style="text-align:center;padding:20px;color:var(--green)"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:8px"></i><div style="font-size:14px;font-weight:600">All clear!</div><div style="font-size:12px;color:var(--text2);margin-top:4px">No urgent actions needed.</div></div>`:
-    alerts.map(a=>`<div class="alert-item">
-      <div class="alert-icon" style="background:${a.bg}"><i class="ti ${a.icon}" style="color:${a.clr}"></i></div>
+    ${undeliveredSOs.length===0
+      ?`<div style="text-align:center;padding:20px;color:var(--green)"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:8px"></i><div style="font-size:14px;font-weight:600">All sales orders delivered!</div></div>`
+      :undeliveredSOs.map(so=>`
+    <div class="alert-item" style="cursor:pointer" onclick="openSOModal('${so.id}')">
+      <div class="alert-icon" style="background:var(--blue2)"><i class="ti ti-clipboard-list" style="color:var(--blue)"></i></div>
       <div class="alert-content">
-        <div class="alert-title">${a.title}</div>
-        <div class="alert-desc">${a.desc}</div>
+        <div class="alert-title">${so.id} — ${so.customer}</div>
+        <div class="alert-desc">${so.date} · ${so.undelivLines.length} item type${so.undelivLines.length>1?'s':''} · ${so.totalQty} units · ${fmtK(so.totalVal)}</div>
+        <div style="font-size:10px;margin-top:3px">
+          <span style="background:${so.status==='approved'?'var(--green2)':'var(--amber2)'};color:${so.status==='approved'?'var(--green)':'var(--amber)'};padding:2px 7px;border-radius:99px;font-weight:700;font-size:10px">${(so.status||'pending').toUpperCase()}</span>
+        </div>
       </div>
-      <div class="alert-badge" style="background:${a.bg};color:${a.badgeClr}">${a.badge}</div>
+      <i class="ti ti-chevron-right" style="color:var(--text2);font-size:16px;align-self:center;flex-shrink:0"></i>
     </div>`).join('')}
   </div>`;
 
   document.getElementById('dash').innerHTML = h;
+}
+
+function openExpDocs(){
+  const emps=S.employees||[];
+  const expDocs=(S.empDocuments||[]).filter(d=>{
+    if(!d.expiry) return false;
+    return Math.floor((new Date(d.expiry)-new Date())/864e5)<=30;
+  });
+  showModal('Expiring Documents',`<i class="ti ti-file-alert" style="color:var(--purple)"></i>`,
+    expDocs.length===0?'<div style="text-align:center;padding:24px;color:var(--green)">No documents expiring soon.</div>'
+    :expDocs.map(d=>{
+      const emp=emps.find(e=>e.id===d.empId)||{name:d.empName||'?'};
+      const days=Math.floor((new Date(d.expiry)-new Date())/864e5);
+      return `<div class="modal-row">
+        <div class="modal-row-icon" style="background:var(--purple2)"><i class="ti ti-file-alert" style="color:var(--purple)"></i></div>
+        <div class="modal-row-content">
+          <div class="modal-row-title">${emp.name} — ${d.docType}</div>
+          <div class="modal-row-sub">Expires: ${d.expiry} · ${days} day${days!==1?'s':''} left ${days<=7?'⚠ URGENT':''}</div>
+        </div>
+      </div>`;
+    }).join(''));
+}
+
+function openSOModal(soId){
+  const so=(S.salesOrders||[]).find(s=>s.id===soId);
+  if(!so) return;
+  const inv=S.inventory||[];
+  const undeliv=(so.lines||[]).filter(l=>!l.delivered&&!l.fullyDelivered);
+  const all=(so.lines||[]);
+  const total=all.reduce((s,l)=>s+(l.lineTotal||0),0);
+
+  showModal(`${so.id} — ${so.customer}`,`<i class="ti ti-clipboard-list" style="color:var(--blue)"></i>`,`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--text2)">
+      <span><i class="ti ti-calendar" style="margin-right:3px"></i>${so.date}</span>
+      <span>·</span>
+      <span style="color:${so.status==='approved'?'var(--green)':'var(--amber)'};font-weight:700">${(so.status||'pending').toUpperCase()}</span>
+      <span>·</span>
+      <span>Total: <strong style="color:var(--text)">${fmt(total)}</strong></span>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Line Items</div>
+    ${all.map(l=>{
+      const item=inv.find(it=>String(it.id)===String(l.itemId));
+      const avail=item?item.qty:null;
+      const isDeliv=l.delivered||l.fullyDelivered;
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <div style="width:34px;height:34px;border-radius:9px;background:${isDeliv?'var(--green2)':'var(--amber2)'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <i class="ti ${isDeliv?'ti-circle-check':'ti-package'}" style="color:${isDeliv?'var(--green)':'var(--amber)'};font-size:16px"></i>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.desc||l.itemId||'Item'}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">
+            Qty: ${l.qty||0} · Unit: ${fmt(l.unitPrice||0)} · Total: ${fmt(l.lineTotal||0)}
+            ${avail!==null?`· Stock: <span style="color:${avail>=(l.qty||0)?'var(--green)':'var(--red)'};font-weight:600">${avail} ${item.unit||'pcs'}</span>`:''}
+          </div>
+        </div>
+        <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;background:${isDeliv?'var(--green2)':'var(--amber2)'};color:${isDeliv?'var(--green)':'var(--amber)'};flex-shrink:0">${isDeliv?'DELIVERED':'PENDING'}</span>
+      </div>`;
+    }).join('')}
+    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:2px solid var(--border2);margin-top:4px">
+      <span style="font-size:13px;font-weight:700">Grand Total</span>
+      <span style="font-size:16px;font-weight:800;color:var(--blue)">${fmt(total)}</span>
+    </div>
+    ${so.notes?`<div style="font-size:11px;color:var(--text2);margin-top:10px;padding:8px 10px;background:var(--bg2);border-radius:var(--r-sm);font-style:italic">"${so.notes}"</div>`:''}
+  `);
+}
+
+// ── PO LIST MODAL ────────────────────────────────────────────────────────────
+function openPendingPO(){
+  const pos=(S.purchaseOrders||[]).filter(p=>p.status==='pending');
+  showModal('Pending Purchase Orders',`<i class="ti ti-truck-delivery" style="color:var(--amber)"></i>`,
+    pos.length===0
+      ?'<div style="text-align:center;padding:24px;color:var(--green)"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:6px"></i>No pending POs.</div>'
+      :pos.map(p=>{
+        const total=(p.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+        return `<div class="modal-row" style="cursor:pointer" onclick="openPOModal('${p.id}')">
+          <div class="modal-row-icon" style="background:var(--amber2)"><i class="ti ti-truck-delivery" style="color:var(--amber)"></i></div>
+          <div class="modal-row-content">
+            <div class="modal-row-title">${p.id} — ${p.supplier}</div>
+            <div class="modal-row-sub">${p.date} · ${(p.lines||[]).length} item(s) · ${fmt(total)}</div>
+          </div>
+          <i class="ti ti-chevron-right" style="color:var(--text2);font-size:16px;align-self:center"></i>
+        </div>`;
+      }).join(''));
+}
+
+// ── PO DETAIL MODAL ──────────────────────────────────────────────────────────
+function openPOModal(poId){
+  const po=(S.purchaseOrders||[]).find(p=>p.id===poId);
+  if(!po) return;
+  const total=(po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+  const vatAmt=(po.lines||[]).filter(l=>!l.vatExempt).reduce((s,l)=>s+(l.lineTotal||0)/1.12*0.12,0);
+  showModal(`${po.id}`,`<i class="ti ti-file-text" style="color:var(--amber)"></i>`,`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text2)">
+      <span><i class="ti ti-building-store" style="margin-right:3px"></i><strong style="color:var(--text)">${po.supplier}</strong></span>
+      <span>·</span>
+      <span><i class="ti ti-calendar" style="margin-right:3px"></i>${po.date}</span>
+      ${po.deliveryDate?`<span>·</span><span>Del: ${po.deliveryDate}</span>`:''}
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Items Ordered</div>
+    ${(po.lines||[]).map(l=>`
+    <div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+      <div style="width:34px;height:34px;border-radius:9px;background:var(--amber2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <i class="ti ti-package" style="color:var(--amber);font-size:16px"></i>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.desc||l.itemId||'Item'}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">Qty: ${l.qty} · Cost: ${fmt(l.unitPrice||0)} · Total: ${fmt(l.lineTotal||0)}</div>
+        ${l.vatExempt?`<span style="font-size:9px;color:var(--amber);font-weight:700;background:var(--amber2);padding:2px 6px;border-radius:4px">VAT EXEMPT</span>`:''}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:13px;font-weight:700">${fmt(l.lineTotal||0)}</div>
+      </div>
+    </div>`).join('')}
+    <div style="padding-top:10px;border-top:2px solid var(--border2);margin-top:4px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
+        <span>VAT Amount</span><span>${fmt(vatAmt)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800">
+        <span>Total</span><span style="color:var(--amber)">${fmt(total)}</span>
+      </div>
+    </div>
+    ${po.notes?`<div style="font-size:11px;color:var(--text2);margin-top:10px;padding:8px 10px;background:var(--bg2);border-radius:var(--r-sm);font-style:italic">"${po.notes}"</div>`:''}
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="m-btn approve" style="flex:1" onclick="approvePONow('${po.id}')"><i class="ti ti-check"></i> Approve PO</button>
+    </div>
+  `);
 }
 
 function kc(icon,label,value,color,bg,sub='',clickable=false,onclick=''){

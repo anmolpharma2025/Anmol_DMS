@@ -2336,11 +2336,14 @@ function renderMgmtDashboard(c, ta) {
   function inPd(date) {
     if(!date) return false;
     if(period==='all') return true;
-    if(period==='month') return date.startsWith(thisMonth);
-    if(period==='year')  return date.startsWith(thisYear);
+    const y=now.getFullYear(), m=now.getMonth(), d=date.slice(0,10);
+    if(period==='month') {
+      return d>=new Date(y,m,1).toISOString().slice(0,10) && d<=new Date(y,m+1,0).toISOString().slice(0,10);
+    }
+    if(period==='year') return d>=`${y}-01-01`&&d<=`${y}-12-31`;
     if(period==='quarter') {
-      const qStart = new Date(now.getFullYear(), Math.floor(now.getMonth()/3)*3, 1);
-      return date >= qStart.toISOString().slice(0,10) && date <= todayStr;
+      const qs=Math.floor(m/3)*3;
+      return d>=new Date(y,qs,1).toISOString().slice(0,10) && d<=new Date(y,qs+3,0).toISOString().slice(0,10);
     }
     return true;
   }
