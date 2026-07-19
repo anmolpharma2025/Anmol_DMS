@@ -2674,7 +2674,6 @@ function renderDashboard(c, ta) {
   const grossProfit= totalRev - totalPur;
   const netIncome  = totalRev - totalCost;
   const ar = state.invoices.filter(i=>i.status!=='paid').reduce((s,i)=>s+(i.amount||0),0);
-  // AP from journal: credits to AP account minus debits (payments)
   const apAcc = (state.accounts||[]).find(a=>{
     const n = String(a.name||'').toLowerCase();
     return n.includes('accounts payable')||n.includes('trade payable')||
@@ -2684,11 +2683,10 @@ function renderDashboard(c, ta) {
   const apCredits = apAcc ? jrnl.filter(j=>j.credit&&String(j.credit)===String(apAcc.id)).reduce((s,j)=>s+(j.amount||0),0) : 0;
   const apDebits  = apAcc ? jrnl.filter(j=>j.debit&&String(j.debit)===String(apAcc.id)).reduce((s,j)=>s+(j.amount||0),0) : 0;
   const ap = Math.max(0, apCredits - apDebits);
-  // ── Real monthly data from actual records ──
+
   const now = new Date();
   const currentYear = now.getFullYear();
   const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  // Only show months up to current month
   const monthCount = now.getMonth() + 1;
   const months = monthLabels.slice(0, monthCount);
 
@@ -2703,22 +2701,19 @@ function renderDashboard(c, ta) {
     return totals;
   }
 
-  // Purchase orders — sum line totals by month
   function sumPOByMonth() {
     const totals = Array(monthCount).fill(0);
     (state.purchaseOrders||[]).forEach(po => {
       const d = po.date||''; if(!d) return;
       const yr = parseInt(d.slice(0,4)), mo = parseInt(d.slice(5,7))-1;
-      if(yr===currentYear && mo>=0 && mo<monthCount) {
+      if(yr===currentYear && mo>=0 && mo<monthCount)
         totals[mo] += (po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
-      }
     });
     return totals;
   }
 
   const revData = sumByMonth(state.invoices.filter(i=>i.status!=='draft'));
   const purData = sumPOByMonth();
-  // Monthly expense: combine state.expenses + DV journal expense lines
   const dvExpByMonth = Array(monthCount).fill(0);
   (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))).forEach(j=>{
     const d = j.date||''; if(!d) return;
@@ -2729,7 +2724,6 @@ function renderDashboard(c, ta) {
   const colData = sumByMonth(state.collections||[]);
   const maxVal = Math.max(...revData, ...purData.map((p,i)=>p+(expData[i]||0)), 1);
 
-  // ── Top 5 selling items — from invoice lines ──
   const itemSales = {};
   state.invoices.filter(i=>i.status!=='draft').forEach(inv => {
     (inv.lines||[]).forEach(l => {
@@ -2740,24 +2734,18 @@ function renderDashboard(c, ta) {
       itemSales[key].revenue += (l.lineTotal||0);
     });
   });
-  const top5Items = Object.values(itemSales)
-    .sort((a,b)=>b.revenue-a.revenue)
-    .slice(0,5);
+  const top5Items = Object.values(itemSales).sort((a,b)=>b.revenue-a.revenue).slice(0,5);
   const maxItemRev = top5Items.length ? Math.max(...top5Items.map(x=>x.revenue)) : 1;
 
-  // ── Top 5 customers — from invoices ──
   const custSales = {};
   state.invoices.filter(i=>i.status!=='draft').forEach(inv => {
     if(!custSales[inv.customer]) custSales[inv.customer] = { label:inv.customer, revenue:0, count:0 };
     custSales[inv.customer].revenue += (inv.amount||0);
     custSales[inv.customer].count++;
   });
-  const top5Custs = Object.values(custSales)
-    .sort((a,b)=>b.revenue-a.revenue)
-    .slice(0,5);
+  const top5Custs = Object.values(custSales).sort((a,b)=>b.revenue-a.revenue).slice(0,5);
   const maxCustRev = top5Custs.length ? Math.max(...top5Custs.map(x=>x.revenue)) : 1;
 
-  // Chart colors
   const barColors = ['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e'];
 
   const itemChart = top5Items.length === 0
@@ -2799,7 +2787,6 @@ function renderDashboard(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-coin"></i>Net Income</div><div class="kpi-value ${netIncome>=0?'pos':'neg'}">${fmtS(netIncome)}</div><div class="kpi-sub">After all costs</div></div>
 </div>
 
-<!-- Quick nav to management dashboard -->
 <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md)">
   <div style="font-size:13px;color:var(--accent)"><i class="ti ti-chart-pie" style="margin-right:6px"></i>Need deeper insights? Open the Management Dashboard.</div>
   <button class="btn primary" style="padding:5px 14px;font-size:12px" onclick="navigate('mgmt')"><i class="ti ti-arrow-right"></i>Management View</button>
@@ -2871,10 +2858,7 @@ function renderDashboard(c, ta) {
   </div>
 </div>
 
-<!-- ── TOP 5 CHARTS ROW ── -->
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:4px">
-
-  <!-- Top 5 Selling Items -->
   <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <div>
@@ -2893,8 +2877,6 @@ function renderDashboard(c, ta) {
       </div>
     </div>`:''}
   </div>
-
-  <!-- Top 5 Customers -->
   <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <div>
@@ -2913,18 +2895,13 @@ function renderDashboard(c, ta) {
       </div>
     </div>`:''}
   </div>
-
 </div>
 
-<!-- ── ADVANCED ANALYTICS ── -->
 <div style="margin-top:20px">
   <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:14px;display:flex;align-items:center;gap:8px">
     <i class="ti ti-chart-dots-3" style="color:var(--accent)"></i> Advanced Analytics
   </div>
-
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px">
-
-    <!-- AR Aging -->
     <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
       <div style="font-size:13px;font-weight:600;margin-bottom:4px">AR Aging</div>
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Accounts receivable by age</div>
@@ -2955,132 +2932,47 @@ function renderDashboard(c, ta) {
         ${state.invoices.filter(i=>getInvoiceStatus(i)!=='paid').length} unpaid invoices
       </div>
     </div>
-
-    <!-- Inventory Turnover -->
     <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
       <div style="font-size:13px;font-weight:600;margin-bottom:4px">Inventory Status</div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Stock levels at a glance</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Stock overview</div>
       ${(()=>{
-        const inv2 = state.inventory||[];
-        const total = inv2.length;
-        const lowStock = inv2.filter(it=>it.qty<=(it.reorderLevel||5)&&it.qty>0).length;
-        const outOfStock = inv2.filter(it=>it.qty<=0).length;
-        const healthy = total - lowStock - outOfStock;
-        const expiring = inv2.filter(it=>{ if(!it.expiryDate) return false; const d=new Date(it.expiryDate); const days=Math.floor((d-new Date())/(1000*60*60*24)); return days>=0&&days<=90; }).length;
-        const totalValue = inv2.reduce((s,it)=>s+((it.qty||0)*(it.costPrice||0)),0);
-        return `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-          <div style="background:rgba(52,201,138,0.1);border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:22px;font-weight:700;color:#34c98a">${healthy}</div>
-            <div style="font-size:10px;color:var(--text-secondary)">Healthy</div>
-          </div>
-          <div style="background:rgba(245,166,35,0.1);border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:22px;font-weight:700;color:#f5a623">${lowStock}</div>
-            <div style="font-size:10px;color:var(--text-secondary)">Low Stock</div>
-          </div>
-          <div style="background:rgba(240,92,110,0.1);border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:22px;font-weight:700;color:#f05c6e">${outOfStock}</div>
-            <div style="font-size:10px;color:var(--text-secondary)">Out of Stock</div>
-          </div>
-          <div style="background:rgba(167,139,250,0.1);border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:22px;font-weight:700;color:#a78bfa">${expiring}</div>
-            <div style="font-size:10px;color:var(--text-secondary)">Exp. in 90d</div>
-          </div>
-        </div>
-        <div style="border-top:1px solid var(--border-light);padding-top:8px;font-size:11px">
-          <div style="display:flex;justify-content:space-between"><span style="color:var(--text-tertiary)">Total SKUs</span><strong>${total}</strong></div>
-          <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="color:var(--text-tertiary)">Inventory Value</span><strong>${fmt(totalValue)}</strong></div>
-        </div>`;
-      })()}
-    </div>
-
-    <!-- Collections this month -->
-    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Collection Trend</div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Last 6 months</div>
-      ${(()=>{
-        const n = new Date();
-        const last6 = Array.from({length:6},(_,i)=>{
-          const d = new Date(n.getFullYear(), n.getMonth()-5+i, 1);
-          return { label:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()], year:d.getFullYear(), month:d.getMonth()+1 };
-        });
-        const colAmts = last6.map(m=>(state.collections||[]).filter(c=>{const d=c.date||'';return d.startsWith(`${m.year}-${String(m.month).padStart(2,'0')}`)}).reduce((s,c)=>s+(c.netCash||c.amount||0),0));
-        const maxCol = Math.max(...colAmts, 1);
-        return last6.map((m,i)=>`
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div style="width:28px;font-size:10px;color:var(--text-tertiary);flex-shrink:0">${m.label}</div>
-          <div style="flex:1;height:20px;background:var(--bg-secondary);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${(colAmts[i]/maxCol*100).toFixed(1)}%;background:linear-gradient(90deg,#4f8ef7,#6366f1);border-radius:3px;display:flex;align-items:center;padding-left:5px;min-width:${colAmts[i]>0?'4px':'0'}">
-            </div>
-          </div>
-          <div style="width:70px;font-size:11px;font-weight:500;text-align:right;flex-shrink:0;color:var(--text-secondary)">${colAmts[i]>=1000?(colAmts[i]/1000).toFixed(1)+'k':colAmts[i]>0?fmt(colAmts[i]):'—'}</div>
-        </div>`).join('');
-      })()}
-    </div>
-  </div>
-
-  <!-- Expense Breakdown + Monthly Net Income -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-
-    <!-- Expense by Category -->
-    <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Expense Breakdown</div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">By category (all time)</div>
-      ${(()=>{
-        const expCats = {};
-        (state.expenses||[]).forEach(e=>{ const cat=e.category||'Other'; expCats[cat]=(expCats[cat]||0)+(e.amount||0); });
-        // Also include DV journal debit lines hitting expense accounts
-        (state.journal||[]).filter(j=>j.type==='disbursement'&&!j.cancelled&&j.debit&&expAccIds.has(String(j.debit))).forEach(j=>{
-          const acc = (state.accounts||[]).find(a=>String(a.id)===String(j.debit));
-          const cat = acc?.name||'Other';
-          expCats[cat]=(expCats[cat]||0)+(j.amount||0);
-        });
-        const sorted = Object.entries(expCats).sort((a,b)=>b[1]-a[1]).slice(0,6);
-        const maxExp = sorted.length ? Math.max(...sorted.map(x=>x[1])) : 1;
-        const colors = ['#4f8ef7','#34c98a','#f5a623','#a78bfa','#f05c6e','#06b6d4'];
-        if(!sorted.length) return `<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:12px">No expense data yet.</div>`;
-        const total = sorted.reduce((s,x)=>s+x[1],0);
-        return sorted.map(([cat,amt],i)=>`
+        const inv = state.inventory||[];
+        const inStock=inv.filter(i=>(i.qty||0)>(i.reorderLevel||5)).length;
+        const low=inv.filter(i=>(i.qty||0)>0&&(i.qty||0)<=(i.reorderLevel||5)).length;
+        const out=inv.filter(i=>(i.qty||0)===0).length;
+        return [
+          {label:'In Stock',val:inStock,color:'#34c98a'},
+          {label:'Low Stock',val:low,color:'#f5a623'},
+          {label:'Out of Stock',val:out,color:'#f05c6e'},
+        ].map(s=>`
         <div style="margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-            <span style="color:var(--text-secondary)">${cat}</span>
-            <span style="font-weight:500">${fmt(amt)} <span style="color:var(--text-tertiary)">(${(amt/total*100).toFixed(1)}%)</span></span>
+            <span style="color:var(--text-secondary)">${s.label}</span>
+            <span style="font-weight:600;color:${s.color}">${s.val} items</span>
           </div>
           <div style="height:8px;background:var(--bg-secondary);border-radius:4px;overflow:hidden">
-            <div style="height:100%;width:${(amt/maxExp*100).toFixed(1)}%;background:${colors[i%6]};border-radius:4px"></div>
+            <div style="height:100%;width:${inv.length>0?(s.val/inv.length*100).toFixed(1):0}%;background:${s.color};border-radius:4px"></div>
           </div>
         </div>`).join('');
       })()}
     </div>
-
-    <!-- Monthly Net Income Trend -->
     <div style="background:var(--bg-card);border-radius:var(--radius-md);padding:18px;border:1px solid var(--border-light)">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Monthly Net Income</div>
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Revenue minus costs per month (${currentYear})</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">Collections This Month</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:14px">Cash received from customers</div>
       ${(()=>{
-        const netData = months.map((_,i)=>{
-          const rev=revData[i]||0, pur=purData[i]||0, exp=expData[i]||0;
-          return rev - pur - exp;
-        });
-        const maxNet = Math.max(...netData.map(Math.abs), 1);
-        return months.map((m,i)=>{
-          const net = netData[i];
-          const pct = Math.abs(net)/maxNet*100;
-          const isPos = net >= 0;
-          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
-            <div style="width:28px;font-size:10px;color:var(--text-tertiary);flex-shrink:0">${m}</div>
-            <div style="flex:1;height:18px;background:var(--bg-secondary);border-radius:3px;overflow:hidden;position:relative">
-              <div style="position:absolute;${isPos?'left:50%':'right:50%'};top:0;height:100%;width:${(pct/2).toFixed(1)}%;background:${isPos?'#34c98a':'#f05c6e'};${isPos?'border-radius:0 3px 3px 0':'border-radius:3px 0 0 3px'}"></div>
-              <div style="position:absolute;left:50%;top:0;width:1px;height:100%;background:var(--border-mid)"></div>
-            </div>
-            <div style="width:75px;font-size:11px;font-weight:500;text-align:right;flex-shrink:0;color:${isPos?'#34c98a':'#f05c6e'}">${net>=1000?(net/1000).toFixed(1)+'k':net<=-1000?(net/1000).toFixed(1)+'k':fmt(Math.abs(net))} ${isPos?'▲':'▼'}</div>
-          </div>`;
-        }).join('');
+        const thisMonth = new Date().toISOString().slice(0,7);
+        const monthly = (state.collections||[]).filter(c=>c.date?.startsWith(thisMonth));
+        const total = monthly.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+        return `<div style="font-size:28px;font-weight:700;color:var(--green);margin-bottom:8px">${fmt(total)}</div>
+        <div style="font-size:12px;color:var(--text-secondary)">${monthly.length} collection${monthly.length!==1?'s':''} this month</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:8px">All-time: ${fmt((state.collections||[]).reduce((s,c)=>s+(c.netCash||c.amount||0),0))}</div>`;
       })()}
     </div>
   </div>
 </div>`;
 }
+
+
 
 // ── JOURNAL ──────────────────────────────────────────────────────────────────
 function buildGeneralJournalRows(entries) {
@@ -15392,7 +15284,8 @@ function saveEditAttendance(id) {
 function renderPayroll(c, ta) {
   ta.innerHTML = `
     <button class="btn" onclick="emailAllPayslips()"><i class="ti ti-mail"></i>Email Payslips</button>
-    <button class="btn primary" onclick="showGeneratePayroll()"><i class="ti ti-plus"></i>Generate Payroll</button>`;
+    <button class="btn primary" onclick="showAutoGeneratePayroll()"><i class="ti ti-robot"></i>Auto from Attendance</button>
+    <button class="btn" onclick="showGeneratePayroll()"><i class="ti ti-plus"></i>Manual Entry</button>`;
   const payrolls = state.payrolls||[];
   const emps = state.employees||[];
   const totalGross = payrolls.reduce((s,p)=>s+(p.grossPay||0),0);
@@ -15407,7 +15300,7 @@ function renderPayroll(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Released</div><div class="kpi-value">${released} / ${payrolls.length}</div></div>
 </div>
 <table>
-  <thead><tr><th>ID</th><th>Period</th><th>Employee</th><th style="text-align:right">Basic</th><th style="text-align:right">OT</th><th style="text-align:right">Allow.</th><th style="text-align:right">Gross</th><th style="text-align:right">SSS</th><th style="text-align:right">PhilHealth</th><th style="text-align:right">Pag-IBIG</th><th style="text-align:right">W/Tax</th><th style="text-align:right">Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Period</th><th>Employee</th><th style="text-align:right">Days</th><th style="text-align:right">Hours</th><th style="text-align:right">Basic</th><th style="text-align:right">OT</th><th style="text-align:right">Allow.</th><th style="text-align:right">Gross</th><th style="text-align:right">SSS</th><th style="text-align:right">PhilHealth</th><th style="text-align:right">Pag-IBIG</th><th style="text-align:right">W/Tax</th><th style="text-align:right">Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${payrolls.map(p=>{
     const emp = emps.find(e=>e.id===p.empId);
@@ -15415,6 +15308,8 @@ function renderPayroll(c, ta) {
       <td class="mono">${p.id}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${p.period}</td>
       <td style="font-weight:500">${emp?emp.name:p.empId}</td>
+      <td style="text-align:right;font-size:12px">${p.daysWorked||'—'}</td>
+      <td style="text-align:right;font-size:12px">${p.totalHours?parseFloat(p.totalHours).toFixed(1):'—'}</td>
       <td style="text-align:right">${fmt(p.basicPay||0)}</td>
       <td style="text-align:right;color:var(--amber)">${fmt(p.overtime||0)}</td>
       <td style="text-align:right">${fmt(p.allowance||0)}</td>
@@ -15424,7 +15319,7 @@ function renderPayroll(c, ta) {
       <td style="text-align:right;font-size:12px">${fmt(p.pagibig||0)}</td>
       <td style="text-align:right;font-size:12px">${fmt(p.withholdingTax||0)}</td>
       <td style="text-align:right;font-weight:600;color:var(--green)">${fmt(p.netPay||0)}</td>
-      <td><span class="badge ${p.status==='released'?'paid':'pending'}">${p.status}</span></td>
+      <td><span class="badge ${p.status==='released'?'paid':'pending'}">${p.status}${p.source==='auto_attendance'?' <i class="ti ti-robot" title="Auto-generated from attendance" style="font-size:10px"></i>':''}</span></td>
       <td><div class="action-btns">
         ${p.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="releasePayroll('${p.id}')">Release</button>`:''}
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printPayslip('${p.id}')"><i class="ti ti-printer"></i></button>
@@ -15432,6 +15327,7 @@ function renderPayroll(c, ta) {
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePayroll('${p.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
+  }).join('')}
   }).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-card);font-weight:600">
@@ -15451,6 +15347,206 @@ function deletePayroll(id) { if(!requireAdmin("delete payroll records")) return;
 // Custom earnings/deductions line state
 let prEarnings = [];
 let prDeductions = [];
+
+// ── AUTO-GENERATE PAYROLL FROM ATTENDANCE ────────────────────────────────────
+function showAutoGeneratePayroll() {
+  if(!requireAdmin('generate payroll')) return;
+  const emps = (state.employees||[]).filter(e=>e.status==='active');
+  if(!emps.length) { alert('No active employees found.'); return; }
+
+  // Get available cutoffs from attendance dates
+  const attDates = [...new Set((state.attendance||[]).map(a=>a.date))].sort();
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  // Default: current semi-monthly period
+  const day = now.getDate();
+  const defaultFrom = day<=15
+    ? `${y}-${String(m+1).padStart(2,'0')}-01`
+    : `${y}-${String(m+1).padStart(2,'0')}-16`;
+  const defaultTo   = day<=15
+    ? `${y}-${String(m+1).padStart(2,'0')}-15`
+    : new Date(y,m+1,0).toISOString().slice(0,10);
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-robot" style="margin-right:6px;color:var(--accent)"></i>Auto-Generate Payroll from Attendance</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:12px 14px;border:1px solid var(--border-light);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
+  <i class="ti ti-info-circle" style="margin-right:5px;color:var(--accent)"></i>
+  Calculates pay based on actual hours worked from attendance records. Overtime hours are paid at 1.25× the hourly rate.
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Period From</label><input type="date" id="ag-from" value="${defaultFrom}"></div>
+  <div class="form-group"><label>Period To</label><input type="date" id="ag-to" value="${defaultTo}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Pay Date</label><input type="date" id="ag-paydate" value="${today()}"></div>
+  <div class="form-group"><label>OT Rate Multiplier</label>
+    <select id="ag-ot-rate" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="1.25">1.25× (Standard)</option>
+      <option value="1.30">1.30×</option>
+      <option value="1.50">1.50× (Holiday)</option>
+      <option value="2.00">2.00× (Rest Day OT)</option>
+    </select>
+  </div>
+</div>
+<div style="margin-bottom:14px">
+  <label style="display:block;font-size:12px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Employees to Include</label>
+  <div style="max-height:200px;overflow-y:auto;padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary)">
+    <label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;font-weight:600;cursor:pointer;border-bottom:1px solid var(--border-light);margin-bottom:4px">
+      <input type="checkbox" id="ag-all" checked onchange="document.querySelectorAll('.ag-emp-chk').forEach(c=>c.checked=this.checked)"> Select All
+    </label>
+    ${emps.map(e=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;cursor:pointer">
+      <input type="checkbox" class="ag-emp-chk" value="${e.id}" checked>
+      <span style="flex:1">${e.name}</span>
+      <span style="font-size:11px;color:var(--text-secondary)">${e.department||''} · ₱${Number(e.basicSalary||0).toLocaleString()}/mo</span>
+    </label>`).join('')}
+  </div>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="runAutoGeneratePayroll()"><i class="ti ti-robot"></i>Preview & Generate</button>
+</div>`);
+}
+
+function runAutoGeneratePayroll() {
+  const from    = document.getElementById('ag-from')?.value;
+  const to      = document.getElementById('ag-to')?.value;
+  const payDate = document.getElementById('ag-paydate')?.value;
+  const otMult  = parseFloat(document.getElementById('ag-ot-rate')?.value)||1.25;
+  if(!from||!to||!payDate) { alert('Please fill all date fields.'); return; }
+  if(from>to) { alert('From date must be before To date.'); return; }
+
+  const selectedEmpIds = [...document.querySelectorAll('.ag-emp-chk:checked')].map(c=>c.value);
+  if(!selectedEmpIds.length) { alert('Please select at least one employee.'); return; }
+
+  const period = `${from} to ${to}`;
+  const emps   = (state.employees||[]).filter(e=>selectedEmpIds.includes(e.id));
+  const att    = (state.attendance||[]).filter(a=>a.date>=from&&a.date<=to&&a.status==='present');
+
+  // Build preview data per employee
+  const rows = emps.map(emp => {
+    const empAtt = att.filter(a=>a.empId===emp.id);
+    const daysWorked   = empAtt.length;
+    const totalHours   = empAtt.reduce((s,a)=>s+(parseFloat(a.hoursWorked)||0),0);
+    const totalOT      = empAtt.reduce((s,a)=>s+(parseFloat(a.overtimeHours)||0),0);
+
+    // Daily rate from monthly salary (÷22 working days)
+    const dailyRate   = (emp.basicSalary||0) / 22;
+    // For semi-monthly: basic = days worked × daily rate
+    const basicPay    = parseFloat((daysWorked * dailyRate).toFixed(2));
+    // Hourly rate for OT
+    const hourlyRate  = dailyRate / 8;
+    const otPay       = parseFloat((totalOT * hourlyRate * otMult).toFixed(2));
+    const grossPay    = basicPay + otPay;
+
+    // Gov't deductions (semi-monthly basis)
+    const monthly      = emp.basicSalary||0;
+    const sss          = parseFloat((Math.min(Math.max(monthly*0.045,135),900)/2).toFixed(2));
+    const philhealth   = parseFloat((monthly*0.025/2).toFixed(2));
+    const pagibig      = 50;
+    // Withholding tax (annual gross ÷ 24 periods)
+    const annualGross  = grossPay * 24;
+    let wtaxAnnual = 0;
+    if(annualGross>800000)      wtaxAnnual=130000+(annualGross-800000)*0.32;
+    else if(annualGross>400000) wtaxAnnual=22500+(annualGross-400000)*0.25;
+    else if(annualGross>250000) wtaxAnnual=(annualGross-250000)*0.15;
+    const withholdingTax = parseFloat(Math.max(0,wtaxAnnual/24).toFixed(2));
+    const totalDeductions = sss+philhealth+pagibig+withholdingTax;
+    const netPay = parseFloat(Math.max(0,grossPay-totalDeductions).toFixed(2));
+
+    return { emp, daysWorked, totalHours, totalOT, basicPay, otPay, grossPay, sss, philhealth, pagibig, withholdingTax, totalDeductions, netPay, dailyRate, hourlyRate };
+  });
+
+  // Tag rows with period and paydate for confirm function
+  rows.forEach(r=>{ r.period=period; r.payDate=payDate; });
+
+  // Show preview modal
+  const totalNet   = rows.reduce((s,r)=>s+r.netPay,0);
+  const totalGross = rows.reduce((s,r)=>s+r.grossPay,0);
+
+  const rowsJson = JSON.stringify(rows).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
+
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-check" style="margin-right:6px;color:var(--green)"></i>Payroll Preview — ${period}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="overflow-x:auto;margin-bottom:14px">
+<table style="width:100%;border-collapse:collapse;font-size:12px">
+  <thead><tr style="background:var(--bg-secondary)">
+    <th style="padding:7px 10px;text-align:left;font-size:11px;white-space:nowrap">Employee</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Days</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Hours</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">OT Hrs</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Basic Pay</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">OT Pay</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Gross</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">SSS</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">PhilHealth</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Pag-IBIG</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap">W/Tax</th>
+    <th style="padding:7px 6px;text-align:right;white-space:nowrap;color:var(--green)">Net Pay</th>
+  </tr></thead>
+  <tbody>
+  ${rows.map(r=>`<tr style="border-bottom:1px solid var(--border-light)">
+    <td style="padding:7px 10px;font-weight:500">${r.emp.name}<div style="font-size:10px;color:var(--text-tertiary)">${r.emp.department||''}</div></td>
+    <td style="padding:7px 6px;text-align:right">${r.daysWorked}</td>
+    <td style="padding:7px 6px;text-align:right">${r.totalHours.toFixed(1)}</td>
+    <td style="padding:7px 6px;text-align:right;color:var(--amber)">${r.totalOT.toFixed(1)}</td>
+    <td style="padding:7px 6px;text-align:right">${fmt(r.basicPay)}</td>
+    <td style="padding:7px 6px;text-align:right;color:var(--amber)">${fmt(r.otPay)}</td>
+    <td style="padding:7px 6px;text-align:right;font-weight:600">${fmt(r.grossPay)}</td>
+    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.sss)}</td>
+    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.philhealth)}</td>
+    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.pagibig)}</td>
+    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.withholdingTax)}</td>
+    <td style="padding:7px 6px;text-align:right;font-weight:700;color:var(--green)">${fmt(r.netPay)}</td>
+  </tr>`).join('')}
+  </tbody>
+  <tfoot><tr style="background:var(--bg-secondary);font-weight:700">
+    <td colspan="6" style="padding:8px 10px">TOTAL (${rows.length} employees)</td>
+    <td style="padding:8px 6px;text-align:right">${fmt(totalGross)}</td>
+    <td colspan="4" style="padding:8px 6px"></td>
+    <td style="padding:8px 6px;text-align:right;color:var(--green)">${fmt(totalNet)}</td>
+  </tr></tfoot>
+</table>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="showAutoGeneratePayroll()">← Back</button>
+  <button class="btn primary" onclick="confirmAutoGeneratePayroll(JSON.parse(decodeURIComponent(this.dataset.rows)));" data-rows="${encodeURIComponent(JSON.stringify(rows))}"><i class="ti ti-check"></i>Confirm & Save ${rows.length} Payroll Records</button>
+</div>`);
+}
+
+function confirmAutoGeneratePayroll(rows) {
+  if(!state.payrolls) state.payrolls=[];
+  let created=0;
+  rows.forEach(r=>{
+    const alreadyExists = state.payrolls.some(p=>p.empId===r.emp.id&&p.period===r.period);
+    if(alreadyExists) return;
+    const id = 'PR-'+String(state.payrolls.length+1).padStart(4,'0');
+    state.payrolls.push({
+      id, empId:r.emp.id, period:r.period, payDate:r.payDate,
+      daysWorked:     r.daysWorked,
+      totalHours:     parseFloat((r.totalHours||0).toFixed(2)),
+      totalOTHours:   parseFloat((r.totalOT||0).toFixed(2)),
+      basicPay:       r.basicPay,
+      overtime:       r.otPay,
+      allowance:      0,
+      grossPay:       r.grossPay,
+      sss:            r.sss,
+      philhealth:     r.philhealth,
+      pagibig:        r.pagibig,
+      withholdingTax: r.withholdingTax,
+      totalDeductions:r.totalDeductions,
+      netPay:         r.netPay,
+      status:         'pending',
+      source:         'auto_attendance',
+      createdAt:      new Date().toISOString(),
+      createdBy:      currentUser?.name||''
+    });
+    created++;
+  });
+  if(!created){ alert('All selected employees already have payroll records for this period.'); return; }
+  auditLog('CREATE','Payroll',rows[0]?.period||'',{description:`Auto-generated ${created} payroll records`});
+  save(); closeModal(); render();
+  alert(`✅ Generated ${created} payroll record${created!==1?'s':''}.\n\nReview and click "Release" when ready to finalize.`);
+}
 
 function showGeneratePayroll() {
   const empOpts=(state.employees||[]).filter(e=>e.status==='active').map(e=>`<option value="${e.id}">${e.name} (${fmt(e.basicSalary)}/mo)</option>`).join('');
