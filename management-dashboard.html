@@ -48,23 +48,17 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 .hdr-btn:active{opacity:0.7;transform:scale(0.97)}
 .refresh-time{font-size:10px;color:var(--text3)}
 
-/* ── PERIOD TABS ── */
-.period-bar{
-  display:flex;gap:6px;padding:10px 16px;
-  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
-  background:var(--bg);
-  border-bottom:1px solid var(--border)
+/* ── PERIOD PILLS ── */
+.ppill{
+  padding:7px 16px;border-radius:99px;font-size:13px;font-weight:600;
+  cursor:pointer;font-family:var(--font);
+  background:var(--card);border:1.5px solid var(--border2);
+  color:var(--text2);transition:all 0.15s;
+  outline:none;-webkit-appearance:none;user-select:none
 }
-.period-bar::-webkit-scrollbar{display:none}
-.ptab{
-  flex-shrink:0;padding:7px 18px;border-radius:99px;
-  font-size:13px;font-weight:600;cursor:pointer;
-  background:var(--card);border:1.5px solid var(--border2);color:var(--text2);
-  transition:all 0.15s;user-select:none;
-  -webkit-user-select:none;touch-action:manipulation
-}
-.ptab.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 12px rgba(79,142,247,0.3)}
-.ptab:hover:not(.active){border-color:var(--blue);color:var(--blue)}
+.ppill:hover{border-color:var(--blue);color:var(--blue)}
+.ppill.active{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 2px 12px rgba(79,142,247,0.35)}
+.ppill:active{transform:scale(0.95);opacity:0.85}
 
 /* ── BODY ── */
 .dash{padding:0 0 calc(env(safe-area-inset-bottom)+32px)}
@@ -220,26 +214,21 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 </div>
 
 <!-- Period filter -->
-<div style="display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--border);flex-wrap:wrap">
-  <div style="position:relative;flex-shrink:0">
-    <select id="period-select" onchange="onPeriodChange(this.value)"
-      style="appearance:none;-webkit-appearance:none;padding:8px 36px 8px 14px;border-radius:99px;font-size:13px;font-weight:600;cursor:pointer;background:var(--card);border:1.5px solid var(--blue);color:var(--blue);font-family:var(--font);outline:none;min-width:150px">
-      <option value="month">This Month</option>
-      <option value="lastmonth">Last Month</option>
-      <option value="quarter">This Quarter</option>
-      <option value="year">This Year</option>
-      <option value="all">All Time</option>
-      <option value="custom">Custom Range…</option>
-    </select>
-    <i class="ti ti-chevron-down" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--blue);pointer-events:none"></i>
+<div style="background:var(--bg);border-bottom:1px solid var(--border);padding:10px 16px">
+  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:0" id="period-pills">
+    <button class="ppill active" onclick="selectPeriod('month',this)">This Month</button>
+    <button class="ppill" onclick="selectPeriod('lastmonth',this)">Last Month</button>
+    <button class="ppill" onclick="selectPeriod('quarter',this)">This Quarter</button>
+    <button class="ppill" onclick="selectPeriod('year',this)">This Year</button>
+    <button class="ppill" onclick="selectPeriod('all',this)">All Time</button>
+    <button class="ppill" onclick="selectPeriod('custom',this)">Custom…</button>
   </div>
-  <div id="custom-range" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
-    <input type="date" id="custom-from" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+  <div id="custom-range" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <input type="date" id="custom-from" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
     <span style="color:var(--text2);font-size:12px">to</span>
-    <input type="date" id="custom-to" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
-    <button onclick="applyCustomRange()" style="padding:7px 16px;border-radius:99px;background:var(--blue);border:none;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">Apply</button>
+    <input type="date" id="custom-to" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+    <button onclick="applyCustomRange()" style="padding:7px 18px;border-radius:99px;background:var(--blue);border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">Apply</button>
   </div>
-  <span id="period-label-badge" style="font-size:11px;color:var(--text2);font-weight:500"></span>
 </div>
 
 <!-- Dashboard body -->
@@ -343,19 +332,21 @@ async function loadData(){
 }
 
 // ── PERIOD SWITCH ────────────────────────────────────────────────────────────
-function onPeriodChange(val){
+function selectPeriod(val, el){
   const cr = document.getElementById('custom-range');
+  // Update active pill
+  document.querySelectorAll('.ppill').forEach(p=>p.classList.remove('active'));
+  if(el) el.classList.add('active');
+
   if(val==='custom'){
     cr.style.display='flex';
-    // default custom range to this month
     const now=new Date();
     document.getElementById('custom-from').value=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-    document.getElementById('custom-to').value=now.toISOString().slice(0,10);
+    document.getElementById('custom-to').value=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
     return;
   }
   cr.style.display='none';
   period=val; customFrom=''; customTo='';
-  updatePeriodBadge();
   if(S) render();
 }
 
@@ -365,14 +356,7 @@ function applyCustomRange(){
   if(!f||!t){alert('Please select both start and end dates.');return;}
   if(f>t){alert('Start date must be before end date.');return;}
   period='custom'; customFrom=f; customTo=t;
-  updatePeriodBadge();
   if(S) render();
-}
-
-function updatePeriodBadge(){
-  const labels={month:'This Month',lastmonth:'Last Month',quarter:'This Quarter',year:'This Year',all:'All Time',custom:`${customFrom} → ${customTo}`};
-  const el=document.getElementById('period-label-badge');
-  if(el) el.textContent=labels[period]||'';
 }
 
 // ── MODAL ────────────────────────────────────────────────────────────────────
