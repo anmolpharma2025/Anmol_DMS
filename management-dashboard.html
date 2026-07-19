@@ -214,20 +214,30 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 </div>
 
 <!-- Period filter -->
-<div style="background:var(--bg);border-bottom:1px solid var(--border);padding:10px 16px">
-  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:0" id="period-pills">
-    <button class="ppill active" onclick="selectPeriod('month',this)">This Month</button>
-    <button class="ppill" onclick="selectPeriod('lastmonth',this)">Last Month</button>
-    <button class="ppill" onclick="selectPeriod('quarter',this)">This Quarter</button>
-    <button class="ppill" onclick="selectPeriod('year',this)">This Year</button>
-    <button class="ppill" onclick="selectPeriod('all',this)">All Time</button>
-    <button class="ppill" onclick="selectPeriod('custom',this)">Custom…</button>
-  </div>
-  <div id="custom-range" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
-    <input type="date" id="custom-from" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+<div style="background:var(--bg);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <label style="font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap">Period:</label>
+  <select id="period-select"
+    style="padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+           background:var(--card2);border:1.5px solid var(--blue);color:var(--blue);
+           font-family:var(--font);outline:none;min-width:160px">
+    <option value="month">This Month</option>
+    <option value="lastmonth">Last Month</option>
+    <option value="quarter">This Quarter</option>
+    <option value="year">This Year</option>
+    <option value="all">All Time</option>
+    <option value="custom">Custom Range…</option>
+  </select>
+  <div id="custom-range" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
+    <input type="date" id="custom-from"
+      style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);
+             background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
     <span style="color:var(--text2);font-size:12px">to</span>
-    <input type="date" id="custom-to" style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
-    <button onclick="applyCustomRange()" style="padding:7px 18px;border-radius:99px;background:var(--blue);border:none;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">Apply</button>
+    <input type="date" id="custom-to"
+      style="padding:7px 10px;border-radius:8px;border:1.5px solid var(--border2);
+             background:var(--card2);color:var(--text);font-size:13px;font-family:var(--font);outline:none">
+    <button id="apply-range-btn"
+      style="padding:7px 18px;border-radius:8px;background:var(--blue);border:none;
+             color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">Apply</button>
   </div>
 </div>
 
@@ -984,7 +994,34 @@ function kc(icon,label,value,color,bg,sub='',clickable=false,onclick=''){
   </div>`;
 }
 
-window.addEventListener('load', initFirebase);
+window.addEventListener('load', () => {
+  initFirebase();
+  // Wire period select
+  const sel = document.getElementById('period-select');
+  const cr  = document.getElementById('custom-range');
+  const now = new Date();
+  sel.addEventListener('change', function() {
+    const val = this.value;
+    if(val === 'custom') {
+      cr.style.display = 'flex';
+      document.getElementById('custom-from').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+      document.getElementById('custom-to').value   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+    } else {
+      cr.style.display = 'none';
+      period = val; customFrom = ''; customTo = '';
+      if(S) render(); else loadData();
+    }
+  });
+  // Wire apply button
+  document.getElementById('apply-range-btn').addEventListener('click', function() {
+    const f = document.getElementById('custom-from').value;
+    const t = document.getElementById('custom-to').value;
+    if(!f || !t) { alert('Please select both start and end dates.'); return; }
+    if(f > t)    { alert('Start date must be before end date.');     return; }
+    period = 'custom'; customFrom = f; customTo = t;
+    if(S) render(); else loadData();
+  });
+});
 </script>
 </body>
 </html>
