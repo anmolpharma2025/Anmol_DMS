@@ -423,6 +423,28 @@ async function approveLeave(id, status){
   catch(e){toast('Error: '+e.message,'err');}
 }
 
+function openPresent(){
+  const todayStr=today();
+  const emps=S.employees||[];
+  const todayAtt=(S.attendance||[]).filter(a=>a.date===todayStr&&a.status==='present');
+  showModal('Present Today',`<i class="ti ti-check" style="color:var(--green)"></i>`,
+    todayAtt.length===0
+      ?'<div style="text-align:center;padding:24px;color:var(--text2)">No employees clocked in yet today.</div>'
+      :todayAtt.map(a=>{
+        const emp=emps.find(e=>e.id===a.empId)||{name:a.empName||'?',department:'—'};
+        return `<div class="modal-row">
+          <div class="modal-row-icon" style="background:var(--green2)"><i class="ti ti-user-check" style="color:var(--green)"></i></div>
+          <div class="modal-row-content">
+            <div class="modal-row-title">${emp.name}</div>
+            <div class="modal-row-sub">${emp.department||'—'} · In: ${a.timeIn||'—'}${a.timeOut?' · Out: '+a.timeOut:''}${a.hoursWorked?' · '+parseFloat(a.hoursWorked).toFixed(2)+'h':''}</div>
+            ${a.locTag==='office'?'<div class="modal-row-sub" style="color:var(--green)"><i class="ti ti-building-skyscraper" style="font-size:11px"></i> In office</div>':a.locTag==='outside'?'<div class="modal-row-sub" style="color:var(--amber)"><i class="ti ti-map-pin-off" style="font-size:11px"></i> Outside office</div>':''}
+            ${a.verifiedFace?'<div class="modal-row-sub" style="color:var(--green)"><i class="ti ti-shield-check" style="font-size:11px"></i> Face verified</div>':''}
+          </div>
+          <span class="m-badge" style="background:var(--green2);color:var(--green)">PRESENT</span>
+        </div>`;
+      }).join(''));
+}
+
 function openAbsent(){
   const todayStr=today();
   const emps=S.employees||[];
@@ -688,7 +710,7 @@ function _render(){
   h+=`<div class="sec"><i class="ti ti-users"></i>HR Today — ${todayStr} <span style="font-size:9px;color:var(--text3);margin-left:4px">(tap to view)</span></div>
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px;margin-bottom:4px">
     ${[
-      [present,'Present','var(--green)','var(--green2)','openAbsent()'],
+      [present,'Present','var(--green)','var(--green2)','openPresent()'],
       [absent,'Absent','var(--red)','var(--red2)','openAbsent()'],
       [outside.length,'Outside','var(--amber)','var(--amber2)','openOutside()'],
       [pendLeave,'Leave Req.','var(--purple)','var(--purple2)','openLeaves()'],
