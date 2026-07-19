@@ -333,21 +333,22 @@ async function loadData(){
 
 // ── PERIOD SWITCH ────────────────────────────────────────────────────────────
 function selectPeriod(val, el){
-  const cr = document.getElementById('custom-range');
-  // Update active pill
-  document.querySelectorAll('.ppill').forEach(p=>p.classList.remove('active'));
-  if(el) el.classList.add('active');
-
-  if(val==='custom'){
-    cr.style.display='flex';
-    const now=new Date();
-    document.getElementById('custom-from').value=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-    document.getElementById('custom-to').value=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
-    return;
-  }
-  cr.style.display='none';
-  period=val; customFrom=''; customTo='';
-  if(S) render();
+  try {
+    const cr = document.getElementById('custom-range');
+    document.querySelectorAll('.ppill').forEach(p=>p.classList.remove('active'));
+    if(el) el.classList.add('active');
+    if(val==='custom'){
+      cr.style.display='flex';
+      const now=new Date();
+      document.getElementById('custom-from').value=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
+      document.getElementById('custom-to').value=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
+      return;
+    }
+    cr.style.display='none';
+    period=val; customFrom=''; customTo='';
+    if(S) render();
+    else loadData();
+  } catch(e) { console.error('selectPeriod error:', e); alert('Error: '+e.message); }
 }
 
 function applyCustomRange(){
@@ -538,6 +539,13 @@ function openStockAlerts(){
 
 // ── RENDER ───────────────────────────────────────────────────────────────────
 function render(){
+  try { _render(); }
+  catch(e) {
+    console.error('Render error:', e);
+    document.getElementById('dash').innerHTML = `<div class="loading"><i class="ti ti-bug" style="font-size:32px;color:var(--red)"></i><span style="color:var(--red)">${e.message}</span><button onclick="loadData()" style="padding:8px 20px;background:var(--blue);color:#fff;border:none;border-radius:99px;font-size:13px;cursor:pointer;font-family:var(--font)">Reload</button></div>`;
+  }
+}
+function _render(){
   const now = new Date();
   const todayStr = today();
   const invoices    = S.invoices||[];
