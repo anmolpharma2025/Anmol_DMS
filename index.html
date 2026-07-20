@@ -13939,16 +13939,63 @@ function clearAuditLogs() {
 }
 
 // ── EMPLOYEE PHOTO HELPERS ────────────────────────────────────────────────────
+// Compress a base64 photo to max 200px and 0.7 quality
+function compressPhoto(dataUrl) {
+  return new Promise(resolve => {
+    if(!dataUrl || dataUrl.length < 20000) { resolve(dataUrl); return; } // already small
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 200;
+      let w=img.width, h=img.height;
+      if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}
+      else   {if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}
+      const c=document.createElement('canvas');
+      c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      resolve(c.toDataURL('image/jpeg',0.7));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+// Compress all employee photos before saving to Firebase
+async function compressAllPhotos() {
+  const emps = state.employees || [];
+  let changed = false;
+  for(const emp of emps) {
+    if(emp.photo && emp.photo.length > 20000) {
+      emp.photo = await compressPhoto(emp.photo);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function previewEmpPhoto(input, previewId, dataId) {
   const file = input.files[0];
   if(!file) return;
-  if(file.size > 2*1024*1024) { alert('Photo too large. Please use an image under 2MB.'); return; }
+  if(file.size > 10*1024*1024) { alert('Photo too large. Please use an image under 10MB.'); return; }
+
   const reader = new FileReader();
   reader.onload = e => {
-    const preview = document.getElementById(previewId);
-    if(preview) preview.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover">`;
-    const dataEl = document.getElementById(dataId);
-    if(dataEl) dataEl.value = e.target.result;
+    // Resize + compress via canvas before storing
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 200; // max dimension in pixels - keeps it small for Firebase
+      let w = img.width, h = img.height;
+      if(w > h) { if(w>MAX){h=Math.round(h*MAX/w);w=MAX;} }
+      else       { if(h>MAX){w=Math.round(w*MAX/h);h=MAX;} }
+      const canvas = document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const compressed = canvas.toDataURL('image/jpeg', 0.7); // ~5-15KB
+      const preview = document.getElementById(previewId);
+      if(preview) preview.innerHTML = `<img src="${compressed}" style="width:100%;height:100%;object-fit:cover">`;
+      const dataEl = document.getElementById(dataId);
+      if(dataEl) dataEl.value = compressed;
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -13966,7 +14013,7 @@ function captureEmpPhoto(previewId, dataId) {
       <button id="emp-capture-btn" style="background:var(--accent);border:none;border-radius:99px;padding:12px 28px;color:#fff;font-size:14px;font-weight:600;cursor:pointer"><i class="ti ti-camera"></i> Capture</button>
       <button onclick="stopEmpCamera(this)" style="background:rgba(255,255,255,0.2);border:none;border-radius:99px;padding:12px 24px;color:#fff;font-size:14px;cursor:pointer">Cancel</button>
     </div>
-    <canvas id="emp-capture-canvas" style="display:none" width="280" height="280"></canvas>`;
+    <canvas id="emp-capture-canvas" style="display:none" width="200" height="200"></canvas>`;
   document.body.appendChild(overlay);
 
   navigator.mediaDevices.getUserMedia({ video: { facingMode:'user', width:280, height:280 } })
@@ -13977,8 +14024,9 @@ function captureEmpPhoto(previewId, dataId) {
       document.getElementById('emp-capture-btn').onclick = () => {
         const canvas = document.getElementById('emp-capture-canvas');
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, 280, 280);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        // Draw at 200×200 max for Firebase size limit
+        ctx.drawImage(video, 0, 0, 200, 200);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         const preview = document.getElementById(previewId);
         if(preview) preview.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
         const dataEl = document.getElementById(dataId);
@@ -14863,13 +14911,15 @@ function showAddEmployee() {
 </div>`);
 }
 
-function saveEmployee() {
+async function saveEmployee() {
   const id = document.getElementById('emp-id').value.trim() || 'EMP-'+String((state.employees||[]).length+1).padStart(3,'0');
   const name = document.getElementById('emp-name').value.trim();
   if(!name){alert('Name is required.');return;}
+  let photo = document.getElementById('emp-photo-data')?.value || '';
+  if(photo && photo.length > 20000) photo = await compressPhoto(photo);
   const emp = {
     id, name,
-    photo:         document.getElementById('emp-photo-data')?.value || '',
+    photo,
     email:         document.getElementById('emp-email').value.trim(),
     position: document.getElementById('emp-pos').value.trim()||'Staff',
     department: document.getElementById('emp-dept').value,
@@ -14938,7 +14988,7 @@ function showEditEmployee(id) {
 </div>`);
 }
 
-function saveEditEmployee(id) { if(!requireAdmin("edit employee records")) return;
+async function saveEditEmployee(id) { if(!requireAdmin("edit employee records")) return;
   const e = (state.employees||[]).find(e=>e.id===id);
   if(!e) return;
   e.name        = document.getElementById('ee-name').value.trim()||e.name;
@@ -14951,8 +15001,9 @@ function saveEditEmployee(id) { if(!requireAdmin("edit employee records")) retur
   e.pagibigNo   = document.getElementById('ee-pig').value.trim();
   e.tinNo       = document.getElementById('ee-tin').value.trim();
   e.status      = document.getElementById('ee-status').value;
-  // Save photo — empty string means removed
-  const photoData = document.getElementById('ee-photo-data')?.value;
+  // Save photo — compress if large, empty string means removed
+  let photoData = document.getElementById('ee-photo-data')?.value;
+  if(photoData && photoData.length > 20000) photoData = await compressPhoto(photoData);
   if(photoData !== undefined) e.photo = photoData;
   stampUpdate(e);
   save(); closeModal(); render();
