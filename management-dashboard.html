@@ -828,6 +828,56 @@ function _render(){
     :top5P.map(([name,d],i)=>`<div class="bar-row"><div class="bar-meta"><span class="bar-name">${name}</span><span class="bar-val">${d.qty} pcs · ${fmtK(d.rev)}</span></div>${bbar(d.rev,maxP,barColors[i])}</div>`).join('')}
   </div>`;
 
+  // ── Daily Report ──────────────────────────────────────────────────────────
+  const rptDate = window._mgmtRptDate || todayStr;
+  const prevDate = new Date(new Date(rptDate).getTime() - 864e5).toISOString().slice(0,10);
+  const nextDate = new Date(new Date(rptDate).getTime() + 864e5).toISOString().slice(0,10);
+
+  // Collections for selected date
+  const dailyCols = collections.filter(c=>c.date===rptDate);
+  const dailyColTotal = dailyCols.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+
+  // Deposits for selected date
+  const dailyDeps = (S.deposits||[]).filter(d=>d.date===rptDate);
+  const dailyDepTotal = dailyDeps.reduce((s,d)=>s+(+d.amount||0),0);
+
+  // Issued Sales Invoices for selected date
+  const dailyInv = invoices.filter(i=>i.date===rptDate&&i.status!=='cancelled');
+  const dailyInvTotal = dailyInv.reduce((s,i)=>s+(i.amount||0),0);
+
+  // Issued Sales Orders (DR) for selected date — use deliveryDate or date
+  const dailySO = sos.filter(s=>(s.deliveryDate||s.date)===rptDate);
+  const dailySOTotal = dailySO.reduce((s,so)=>{
+    return s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0);
+  },0);
+
+  h += `<div class="sec"><i class="ti ti-report"></i>Daily Report
+    <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+      <button onclick="window._mgmtRptDate='${prevDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;color:var(--text2);cursor:pointer;font-size:13px">‹</button>
+      <input type="date" value="${rptDate}" onchange="window._mgmtRptDate=this.value;render()" style="padding:4px 8px;border-radius:7px;border:1.5px solid var(--blue);background:var(--card2);color:var(--text);font-size:12px;font-family:var(--font);outline:none">
+      <button onclick="window._mgmtRptDate='${nextDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;color:var(--text2);cursor:pointer;font-size:13px">›</button>
+      <button onclick="window._mgmtRptDate='${todayStr}';render()" style="background:var(--blue2);border:1px solid var(--blue);border-radius:6px;padding:3px 9px;color:var(--blue);cursor:pointer;font-size:11px;font-weight:700">Today</button>
+    </div>
+  </div>
+
+  <!-- 4 Summary KPIs for the day -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 16px;margin-bottom:10px">
+    ${[
+      [dailyColTotal, 'Collections',      dailyCols.length,  'ti-cash',           'var(--green)',  'var(--green2)',  'openDailyCollections'],
+      [dailyDepTotal, 'Deposits',         dailyDeps.length,  'ti-building-bank',  'var(--blue)',   'var(--blue2)',   'openDailyDeposits'],
+      [dailyInvTotal, 'Sales Invoices',   dailyInv.length,   'ti-file-invoice',   'var(--amber)',  'var(--amber2)',  'openDailyInvoices'],
+      [dailySOTotal,  'Delivery Receipts',dailySO.length,    'ti-truck-delivery', 'var(--purple)', 'var(--purple2)', 'openDailySO'],
+    ].map(([amt,lbl,cnt,ico,clr,bg,fn])=>`
+    <div onclick="${fn}()" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px 12px;cursor:pointer;transition:border-color 0.15s;border-top:3px solid ${clr}" onmouseover="this.style.borderColor='${clr}'" onmouseout="this.style.borderTop='3px solid ${clr}';this.style.borderLeft=this.style.borderRight=this.style.borderBottom='1px solid var(--border)'">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+        <div style="width:28px;height:28px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center"><i class="ti ${ico}" style="font-size:15px;color:${clr}"></i></div>
+        <span style="font-size:11px;color:var(--text2);font-weight:600">${lbl}</span>
+      </div>
+      <div style="font-size:20px;font-weight:800;color:${clr};line-height:1">${fmtK(amt)}</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:4px">${cnt} record${cnt!==1?'s':''} · tap to view</div>
+    </div>`).join('')}
+  </div>`;
+
   // ── Undelivered SO Items ──
   const activeSOs = sos.filter(s=>s.status!=='delivered'&&s.status!=='cancelled');
   const undeliveredSOs = activeSOs.map(so=>{
@@ -877,6 +927,116 @@ function openExpDocs(){
         </div>
       </div>`;
     }).join(''));
+}
+
+// ── DAILY REPORT MODALS ───────────────────────────────────────────────────────
+function openDailyCollections(){
+  const d=window._mgmtRptDate||today();
+  const cols=(S.collections||[]).filter(c=>c.date===d);
+  const total=cols.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  showModal(`Collections — ${d}`,`<i class="ti ti-cash" style="color:var(--green)"></i>`,
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
+      <span style="font-size:13px;font-weight:700">Total Collections</span>
+      <span style="font-size:20px;font-weight:800;color:var(--green)">${fmt(total)}</span>
+    </div>`+(cols.length===0?'<div style="text-align:center;padding:24px;color:var(--text2)">No collections for this date.</div>'
+    :cols.map(c=>`<div class="modal-row">
+      <div class="modal-row-icon" style="background:var(--green2)"><i class="ti ti-cash" style="color:var(--green)"></i></div>
+      <div class="modal-row-content">
+        <div class="modal-row-title">${c.customer||c.id}</div>
+        <div class="modal-row-sub">${c.id}${c.mode?' · '+c.mode:''}${c.checkNo?' · Chk#'+c.checkNo:''}${c.ref?' · Ref:'+c.ref:''}</div>
+        ${(c.invoices||[]).length?`<div class="modal-row-sub">Invoices: ${c.invoices.join(', ')}</div>`:''}
+        ${c.notes?`<div class="modal-row-sub" style="font-style:italic">"${c.notes}"</div>`:''}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:15px;font-weight:700;color:var(--green)">${fmt(c.netCash||c.amount||0)}</div>
+        <div style="font-size:10px;color:var(--text2)">${c.collectedBy||''}</div>
+      </div>
+    </div>`).join('')));
+}
+
+function openDailyDeposits(){
+  const d=window._mgmtRptDate||today();
+  const deps=(S.deposits||[]).filter(dp=>dp.date===d);
+  const total=deps.reduce((s,dp)=>s+(+dp.amount||0),0);
+  showModal(`Deposits — ${d}`,`<i class="ti ti-building-bank" style="color:var(--blue)"></i>`,
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
+      <span style="font-size:13px;font-weight:700">Total Deposits</span>
+      <span style="font-size:20px;font-weight:800;color:var(--blue)">${fmt(total)}</span>
+    </div>`+(deps.length===0?'<div style="text-align:center;padding:24px;color:var(--text2)">No deposits for this date.</div>'
+    :deps.map(dp=>`<div class="modal-row">
+      <div class="modal-row-icon" style="background:var(--blue2)"><i class="ti ti-building-bank" style="color:var(--blue)"></i></div>
+      <div class="modal-row-content">
+        <div class="modal-row-title">${dp.bankAccount||dp.bank||dp.id}</div>
+        <div class="modal-row-sub">${dp.id}${dp.source?' · '+dp.source:''}${dp.ref?' · Ref:'+dp.ref:''}</div>
+        ${dp.colRef?`<div class="modal-row-sub">Collection Ref: ${dp.colRef}</div>`:''}
+        ${dp.description?`<div class="modal-row-sub">${dp.description}</div>`:''}
+        <div style="margin-top:5px"><span class="m-badge" style="background:${dp.status==='cleared'?'var(--green2)':'var(--amber2)'};color:${dp.status==='cleared'?'var(--green)':'var(--amber)'}">${(dp.status||'pending').toUpperCase()}</span></div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:15px;font-weight:700;color:var(--blue)">${fmt(dp.amount||0)}</div>
+        <div style="font-size:10px;color:var(--text2)">${dp.depositedBy||''}</div>
+      </div>
+    </div>`).join('')));
+}
+
+function openDailyInvoices(){
+  const d=window._mgmtRptDate||today();
+  const invs=(S.invoices||[]).filter(i=>i.date===d&&i.status!=='cancelled');
+  const total=invs.reduce((s,i)=>s+(i.amount||0),0);
+  showModal(`Sales Invoices Issued — ${d}`,`<i class="ti ti-file-invoice" style="color:var(--amber)"></i>`,
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
+      <span style="font-size:13px;font-weight:700">Total Invoiced</span>
+      <span style="font-size:20px;font-weight:800;color:var(--amber)">${fmt(total)}</span>
+    </div>`+(invs.length===0?'<div style="text-align:center;padding:24px;color:var(--text2)">No invoices issued on this date.</div>'
+    :invs.map(i=>{
+      const sc=i.status==='paid'?'var(--green)':i.status==='overdue'?'var(--red)':'var(--amber)';
+      const qty=(i.lines||[]).reduce((s,l)=>s+(l.qty||0),0);
+      return `<div class="modal-row">
+        <div class="modal-row-icon" style="background:var(--amber2)"><i class="ti ti-file-invoice" style="color:var(--amber)"></i></div>
+        <div class="modal-row-content">
+          <div class="modal-row-title">${i.id} — ${i.customer}</div>
+          <div class="modal-row-sub">Due: ${i.due||'—'} · ${(i.lines||[]).length} line(s) · ${qty} units</div>
+          ${i.siNo?`<div class="modal-row-sub">SI#: <strong>${i.siNo}</strong></div>`:''}
+          <div style="margin-top:5px"><span class="m-badge" style="background:${sc}22;color:${sc}">${(i.status||'pending').toUpperCase()}</span></div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:15px;font-weight:700;color:var(--amber)">${fmt(i.amount||0)}</div>
+          <div style="font-size:10px;color:var(--text2)">${i.vatBase?'VAT incl':''}</div>
+        </div>
+      </div>`;
+    }).join('')));
+}
+
+function openDailySO(){
+  const d=window._mgmtRptDate||today();
+  const sos=(S.salesOrders||[]).filter(s=>(s.deliveryDate||s.date)===d);
+  const total=sos.reduce((s,so)=>s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
+  showModal(`Delivery Receipts — ${d}`,`<i class="ti ti-truck-delivery" style="color:var(--purple)"></i>`,
+    `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
+      <span style="font-size:13px;font-weight:700">Total DR Value</span>
+      <span style="font-size:20px;font-weight:800;color:var(--purple)">${fmt(total)}</span>
+    </div>`+(sos.length===0?'<div style="text-align:center;padding:24px;color:var(--text2)">No delivery receipts for this date.</div>'
+    :sos.map(so=>{
+      const soTotal=(so.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
+      const qty=(so.lines||[]).reduce((s,l)=>s+(l.qty||0),0);
+      const sc=so.status==='delivered'?'var(--green)':so.status==='approved'?'var(--blue)':so.status==='cancelled'?'var(--red)':'var(--amber)';
+      return `<div class="modal-row" style="cursor:pointer" onclick="openSOModal('${so.id}')">
+        <div class="modal-row-icon" style="background:var(--purple2)"><i class="ti ti-truck-delivery" style="color:var(--purple)"></i></div>
+        <div class="modal-row-content">
+          <div class="modal-row-title">${so.id} — ${so.customer}</div>
+          <div class="modal-row-sub">${so.deliveryDate?'Delivered: '+so.deliveryDate:'Date: '+so.date} · ${(so.lines||[]).length} item(s) · ${qty} units</div>
+          ${so.drNo?`<div class="modal-row-sub">DR#: <strong>${so.drNo}</strong></div>`:''}
+          ${so.branch?`<div class="modal-row-sub"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}
+          <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+            <span class="m-badge" style="background:${sc}22;color:${sc}">${(so.status||'pending').toUpperCase()}</span>
+            <span style="font-size:10px;color:var(--text2)">tap for details</span>
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:15px;font-weight:700;color:var(--purple)">${fmt(soTotal)}</div>
+        </div>
+      </div>`;
+    }).join('')));
 }
 
 function openSOModal(soId){
