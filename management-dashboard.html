@@ -839,7 +839,7 @@ function _render(){
   const dailyDepTotal= dailyDeps.reduce((s,d)=>s+(+d.amount||0),0);
   const dailyInv     = invoices.filter(i=>i.date===rptDate&&i.status!=='cancelled');
   const dailyInvTotal= dailyInv.reduce((s,i)=>s+(i.amount||0),0);
-  const dailySO      = sos.filter(s=>(s.deliveryDate||s.date)===rptDate);
+  const dailySO      = sos.filter(s=>s.date===rptDate||s.deliveryDate===rptDate||s.deliveredDate===rptDate);
   const dailySOTotal = dailySO.reduce((s,so)=>s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
 
   h+=`<div class="sec" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
@@ -916,7 +916,7 @@ function openExpDocs(){
 // ── DAILY REPORT MODALS ───────────────────────────────────────────────────────
 function openDailyCollections(){
   const d=window._mgmtRptDate||today();
-  const cols=(S.collections||[]).filter(c=>c.date===d);
+  const cols=(S.collections||[]).filter(c=>c.date===d).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
   const total=cols.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
   showModal(`Collections — ${d}`,`<i class="ti ti-cash" style="color:var(--green)"></i>`,
     `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
@@ -940,7 +940,7 @@ function openDailyCollections(){
 
 function openDailyDeposits(){
   const d=window._mgmtRptDate||today();
-  const deps=(S.deposits||[]).filter(dp=>dp.date===d);
+  const deps=(S.deposits||[]).filter(dp=>dp.date===d).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
   const total=deps.reduce((s,dp)=>s+(+dp.amount||0),0);
   showModal(`Deposits — ${d}`,`<i class="ti ti-building-bank" style="color:var(--blue)"></i>`,
     `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
@@ -965,7 +965,7 @@ function openDailyDeposits(){
 
 function openDailyInvoices(){
   const d=window._mgmtRptDate||today();
-  const invs=(S.invoices||[]).filter(i=>i.date===d&&i.status!=='cancelled');
+  const invs=(S.invoices||[]).filter(i=>i.date===d&&i.status!=='cancelled').sort((a,b)=>(b.id||'').localeCompare(a.id||''));
   const total=invs.reduce((s,i)=>s+(i.amount||0),0);
   showModal(`Sales Invoices Issued — ${d}`,`<i class="ti ti-file-invoice" style="color:var(--amber)"></i>`,
     `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">
@@ -993,7 +993,7 @@ function openDailyInvoices(){
 
 function openDailySO(){
   const d=window._mgmtRptDate||today();
-  const sos=(S.salesOrders||[]).filter(s=>(s.deliveryDate||s.date)===d);
+  const sos=(S.salesOrders||[]).filter(s=>s.date===d||s.deliveryDate===d||s.deliveredDate===d).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
   const total=sos.reduce((s,so)=>s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
   showModal(`Delivery Receipts — ${d}`,`<i class="ti ti-truck-delivery" style="color:var(--purple)"></i>`,
     `<div style="display:flex;justify-content:space-between;padding:10px 0 12px;border-bottom:2px solid var(--border2);margin-bottom:10px">

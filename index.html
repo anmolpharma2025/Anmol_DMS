@@ -4216,7 +4216,7 @@ function renderInvoices(c, ta) {
     if(!q) return true;
     return inv.id.toLowerCase().includes(q) || (inv.customer||'').toLowerCase().includes(q) ||
       (inv.status||'').toLowerCase().includes(q) || (inv.due||'').includes(q) || (inv.date||'').includes(q);
-  });
+  }).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
 
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
@@ -10474,7 +10474,8 @@ function renderSalesOrders(c, ta) {
       so.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
   });
   const filterStatus = window._soStatusFilter || '';
-  const displayed = filterStatus ? filtered.filter(so=>so.status===filterStatus) : filtered;
+  const displayed = (filterStatus ? filtered.filter(so=>so.status===filterStatus) : filtered)
+    .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
 
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
@@ -11473,7 +11474,8 @@ function renderPurchaseOrders(c, ta) {
       po.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
   });
   const filterStatus = window._poStatusFilter || '';
-  const displayed = filterStatus ? filtered.filter(po=>po.status===filterStatus) : filtered;
+  const displayed = (filterStatus ? filtered.filter(po=>po.status===filterStatus) : filtered)
+    .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
 
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
