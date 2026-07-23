@@ -833,49 +833,33 @@ function _render(){
   const prevDate = new Date(new Date(rptDate).getTime() - 864e5).toISOString().slice(0,10);
   const nextDate = new Date(new Date(rptDate).getTime() + 864e5).toISOString().slice(0,10);
 
-  // Collections for selected date
-  const dailyCols = collections.filter(c=>c.date===rptDate);
-  const dailyColTotal = dailyCols.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  const dailyCols    = collections.filter(c=>c.date===rptDate);
+  const dailyColTotal= dailyCols.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  const dailyDeps    = (S.deposits||[]).filter(d=>d.date===rptDate);
+  const dailyDepTotal= dailyDeps.reduce((s,d)=>s+(+d.amount||0),0);
+  const dailyInv     = invoices.filter(i=>i.date===rptDate&&i.status!=='cancelled');
+  const dailyInvTotal= dailyInv.reduce((s,i)=>s+(i.amount||0),0);
+  const dailySO      = sos.filter(s=>(s.deliveryDate||s.date)===rptDate);
+  const dailySOTotal = dailySO.reduce((s,so)=>s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0),0);
 
-  // Deposits for selected date
-  const dailyDeps = (S.deposits||[]).filter(d=>d.date===rptDate);
-  const dailyDepTotal = dailyDeps.reduce((s,d)=>s+(+d.amount||0),0);
-
-  // Issued Sales Invoices for selected date
-  const dailyInv = invoices.filter(i=>i.date===rptDate&&i.status!=='cancelled');
-  const dailyInvTotal = dailyInv.reduce((s,i)=>s+(i.amount||0),0);
-
-  // Issued Sales Orders (DR) for selected date — use deliveryDate or date
-  const dailySO = sos.filter(s=>(s.deliveryDate||s.date)===rptDate);
-  const dailySOTotal = dailySO.reduce((s,so)=>{
-    return s+(so.lines||[]).reduce((ls,l)=>ls+(l.lineTotal||0),0);
-  },0);
-
-  h += `<div class="sec"><i class="ti ti-report"></i>Daily Report
-    <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-      <button onclick="window._mgmtRptDate='${prevDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;color:var(--text2);cursor:pointer;font-size:13px">‹</button>
-      <input type="date" value="${rptDate}" onchange="window._mgmtRptDate=this.value;render()" style="padding:4px 8px;border-radius:7px;border:1.5px solid var(--blue);background:var(--card2);color:var(--text);font-size:12px;font-family:var(--font);outline:none">
-      <button onclick="window._mgmtRptDate='${nextDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 9px;color:var(--text2);cursor:pointer;font-size:13px">›</button>
-      <button onclick="window._mgmtRptDate='${todayStr}';render()" style="background:var(--blue2);border:1px solid var(--blue);border-radius:6px;padding:3px 9px;color:var(--blue);cursor:pointer;font-size:11px;font-weight:700">Today</button>
+  h+=`<div class="sec" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+    <span style="display:flex;align-items:center;gap:6px"><i class="ti ti-report"></i>Daily Report</span>
+    <div style="display:flex;align-items:center;gap:6px">
+      <button onclick="window._mgmtRptDate='${prevDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;color:var(--text2);cursor:pointer;font-size:14px;font-family:var(--font)">‹</button>
+      <input type="date" value="${rptDate}" onchange="window._mgmtRptDate=this.value;render()" style="padding:5px 8px;border-radius:7px;border:1.5px solid var(--blue);background:var(--card2);color:var(--text);font-size:12px;font-family:var(--font);outline:none">
+      <button onclick="window._mgmtRptDate='${nextDate}';render()" style="background:var(--card);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;color:var(--text2);cursor:pointer;font-size:14px;font-family:var(--font)">›</button>
+      <button onclick="window._mgmtRptDate='${todayStr}';render()" style="background:var(--blue2);border:1px solid var(--blue);border-radius:6px;padding:4px 10px;color:var(--blue);cursor:pointer;font-size:11px;font-weight:700;font-family:var(--font)">Today</button>
     </div>
   </div>
-
-  <!-- 4 Summary KPIs for the day -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 16px;margin-bottom:10px">
-    ${[
-      [dailyColTotal, 'Collections',      dailyCols.length,  'ti-cash',           'var(--green)',  'var(--green2)',  'openDailyCollections'],
-      [dailyDepTotal, 'Deposits',         dailyDeps.length,  'ti-building-bank',  'var(--blue)',   'var(--blue2)',   'openDailyDeposits'],
-      [dailyInvTotal, 'Sales Invoices',   dailyInv.length,   'ti-file-invoice',   'var(--amber)',  'var(--amber2)',  'openDailyInvoices'],
-      [dailySOTotal,  'Delivery Receipts',dailySO.length,    'ti-truck-delivery', 'var(--purple)', 'var(--purple2)', 'openDailySO'],
-    ].map(([amt,lbl,cnt,ico,clr,bg,fn])=>`
-    <div onclick="${fn}()" style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:14px 12px;cursor:pointer;transition:border-color 0.15s;border-top:3px solid ${clr}" onmouseover="this.style.borderColor='${clr}'" onmouseout="this.style.borderTop='3px solid ${clr}';this.style.borderLeft=this.style.borderRight=this.style.borderBottom='1px solid var(--border)'">
-      <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
-        <div style="width:28px;height:28px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center"><i class="ti ${ico}" style="font-size:15px;color:${clr}"></i></div>
-        <span style="font-size:11px;color:var(--text2);font-weight:600">${lbl}</span>
-      </div>
-      <div style="font-size:20px;font-weight:800;color:${clr};line-height:1">${fmtK(amt)}</div>
-      <div style="font-size:10px;color:var(--text2);margin-top:4px">${cnt} record${cnt!==1?'s':''} · tap to view</div>
-    </div>`).join('')}
+  <div class="kpi-row">
+    ${kc('ti-cash','Collections',fmtK(dailyColTotal),'var(--green)','var(--green2)',
+      `<span>${dailyCols.length} record${dailyCols.length!==1?'s':''} · tap to view</span>`,true,'openDailyCollections()')}
+    ${kc('ti-building-bank','Deposits',fmtK(dailyDepTotal),'var(--blue)','var(--blue2)',
+      `<span>${dailyDeps.length} record${dailyDeps.length!==1?'s':''} · tap to view</span>`,true,'openDailyDeposits()')}
+    ${kc('ti-file-invoice','Sales Invoices',fmtK(dailyInvTotal),'var(--amber)','var(--amber2)',
+      `<span>${dailyInv.length} issued · tap to view</span>`,true,'openDailyInvoices()')}
+    ${kc('ti-truck-delivery','Delivery Receipts',fmtK(dailySOTotal),'var(--purple)','var(--purple2)',
+      `<span>${dailySO.length} DR${dailySO.length!==1?'s':''} · tap to view</span>`,true,'openDailySO()')}
   </div>`;
 
   // ── Undelivered SO Items ──
