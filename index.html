@@ -4232,13 +4232,19 @@ function renderInvoices(c, ta) {
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th>DR / SO Ref</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
-  ${invFiltered.length===0?`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
+  ${invFiltered.length===0?`<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
   ${invFiltered.map(inv => {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
     const vat  = inv.vat    != null ? inv.vat    : 0;
     const gross= inv.amount || 0;
+    // Find linked SO and its DR number
+    const linkedSO = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
+    const drNums = [];
+    if(inv.drNo) drNums.push(inv.drNo);
+    if(linkedSO?.drNo && !drNums.includes(linkedSO.drNo)) drNums.push(linkedSO.drNo);
+    const drDisplay = drNums.length ? drNums.join(', ') : (inv.soRef?`<span style="font-size:10px;color:var(--text-tertiary)">${inv.soRef}</span>`:'—');
     return `<tr>
       <td class="mono">${inv.id}</td><td>${inv.date}</td>
       <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
@@ -4246,6 +4252,12 @@ function renderInvoices(c, ta) {
         ${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}
       </td>
       <td>${inv.customer}</td>
+      <td style="font-size:12px">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="color:var(--green);font-weight:500">${drDisplay}</span>
+          <button class="btn" style="padding:1px 6px;font-size:10px" onclick="editInvDR('${inv.id}')" title="Edit DR number"><i class="ti ti-edit" style="font-size:10px"></i></button>
+        </div>
+      </td>
       <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
       <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
       <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
@@ -4262,11 +4274,11 @@ function renderInvoices(c, ta) {
   }).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-secondary);font-weight:500">
-    <td colspan="5" style="padding:8px 10px">Totals</td>
+    <td colspan="6" style="padding:8px 10px">Totals</td>
     <td style="text-align:right;padding:8px 10px;color:var(--text-secondary)">${fmt(totalBase)}</td>
     <td style="text-align:right;padding:8px 10px;color:var(--accent)">${fmt(totalVAT)}</td>
     <td style="text-align:right;padding:8px 10px;font-weight:700">${fmt(totalGross)}</td>
-    <td colspan="2"></td>
+    <td colspan="3"></td>
   </tr></tfoot>
 </table>`;
 }
@@ -4280,6 +4292,57 @@ function markPaid(id) { if(!requireAdmin("mark invoices as paid")) return;
   recomputeBalances();
   save(); render();
 }
+function editInvDR(invId) {
+  const inv = (state.invoices||[]).find(i=>i.id===invId);
+  if(!inv) return;
+  const linkedSO = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
+  const currentDR = inv.drNo || linkedSO?.drNo || '';
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-truck-delivery" style="margin-right:6px;color:var(--green)"></i>Edit Delivery Receipt — ${invId}</h3>
+  <button class="close-btn" onclick="closeModal()">×</button>
+</div>
+<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:10px 14px;border:1px solid var(--border-light);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
+  <strong>Invoice:</strong> ${invId} &nbsp;·&nbsp; <strong>Customer:</strong> ${inv.customer}
+  ${inv.soRef?`&nbsp;·&nbsp; <strong>SO Ref:</strong> ${inv.soRef}`:''}
+  ${linkedSO?.drNo?`&nbsp;·&nbsp; <strong>SO DR#:</strong> ${linkedSO.drNo}`:''}
+</div>
+<div class="form-group">
+  <label>DR Number(s)</label>
+  <input type="text" id="inv-dr-input" value="${currentDR}" placeholder="e.g. DR-0001 or DR-0001, DR-0002"
+    style="width:100%;padding:10px 12px;border:1.5px solid var(--accent);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;font-family:var(--font);outline:none">
+  <div style="font-size:11px;color:var(--text-secondary);margin-top:5px">Separate multiple DR numbers with commas. This is stored directly on the invoice.</div>
+</div>
+${linkedSO?`
+<div class="form-group" style="margin-top:10px">
+  <label style="display:flex;align-items:center;gap:6px">
+    <input type="checkbox" id="inv-dr-sync-so" checked>
+    Also update DR# on linked Sales Order ${inv.soRef}
+  </label>
+</div>`:''}
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveInvDR('${invId}')"><i class="ti ti-check"></i>Save DR Number</button>
+</div>`);
+  setTimeout(()=>document.getElementById('inv-dr-input')?.focus(),50);
+}
+
+function saveInvDR(invId) {
+  const inv = (state.invoices||[]).find(i=>i.id===invId);
+  if(!inv) return;
+  const drNo = document.getElementById('inv-dr-input')?.value.trim()||'';
+  inv.drNo = drNo;
+  stampUpdate(inv);
+  // Optionally sync to linked SO
+  const syncSO = document.getElementById('inv-dr-sync-so')?.checked;
+  if(syncSO && inv.soRef) {
+    const so = (state.salesOrders||[]).find(s=>s.id===inv.soRef);
+    if(so) { so.drNo = drNo; stampUpdate(so); }
+  }
+  auditLog('UPDATE','Invoice',invId,{description:`DR number updated to "${drNo}" on invoice ${invId}`});
+  save(); closeModal(); render();
+}
+
 function cancelInvoice(id) {
   if(!requireAdmin('cancel invoices')) return;
   const inv = state.invoices.find(i=>i.id===id);
