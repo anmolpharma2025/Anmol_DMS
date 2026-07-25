@@ -4241,6 +4241,7 @@ function renderInvoices(c, ta) {
     const gross= inv.amount || 0;
     // DR display: inv.drNo is the source of truth (set when DR is issued from SO)
     // Only fall back to so.drNo if inv.drNo is empty
+    const linkedSO = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
     const drDisplay = inv.drNo
       ? `<span style="color:var(--green);font-weight:500">${inv.drNo}</span>`
       : linkedSO?.drNo
