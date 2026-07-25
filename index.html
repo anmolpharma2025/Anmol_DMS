@@ -987,6 +987,29 @@ function getRolePages(role) {
   return all[role] || [];
 }
 
+// ── CUSTOMER RESTRICTION HELPER ─────────────────────────────────────────────
+// Returns null if user sees all customers, or array of allowed customer IDs/names
+function getAssignedCustomers() {
+  if(!currentUser || currentUser.role==='admin') return null;
+  // Use cached value on currentUser (set at login)
+  if(currentUser.assignedCustomers && currentUser.assignedCustomers.length > 0) return currentUser.assignedCustomers;
+  // Fall back to checking user record (handles session restore)
+  const u = getUsers().find(u=>u.id===currentUser.id);
+  if(!u || !u.assignedCustomers || u.assignedCustomers.length===0) return null;
+  currentUser.assignedCustomers = u.assignedCustomers; // cache it
+  return u.assignedCustomers;
+}
+
+// Filter records by customer restriction
+function filterByCustomer(records, customerField='customer') {
+  const allowed = getAssignedCustomers();
+  if(!allowed) return records; // no restriction
+  return records.filter(r=>{
+    const custVal = r[customerField]||'';
+    return allowed.some(a=>String(a)===String(custVal)||String(a)===String(r.customerId||''));
+  });
+}
+
 function getUsers() {
   try {
     const d = localStorage.getItem(USERS_KEY);
@@ -1144,7 +1167,7 @@ function login(username, password) {
   }
 
   setSession(u);
-  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
+  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId, assignedCustomers:u.assignedCustomers||null };
   return true;
 }
 
@@ -1213,7 +1236,7 @@ function verifyAdminPin(userId) {
   window._pendingAdminUser = null;
   cancelAdminPin(); // restore form
   setSession(u);
-  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId };
+  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId, assignedCustomers:u.assignedCustomers||null };
   showAppScreen();
 }
 
@@ -1548,6 +1571,8 @@ ${users.filter(u=>u&&u.id).map(u => {
         <span class="badge" style="background:${roleColor}22;color:${roleColor};font-size:10px">${u.role}</span>
         <span class="badge ${u.active?'paid':'overdue'}" style="font-size:10px">${u.active?'Active':'Inactive'}</span>
         ${userBranch?`<span style="font-size:11px;color:var(--accent)"><i class="ti ti-building-store" style="font-size:10px"></i> ${userBranch.name}</span>`:''}
+        ${u.assignedCustomers?.length?`<span style="font-size:11px;color:var(--green);background:rgba(16,185,129,0.1);padding:2px 7px;border-radius:99px"><i class="ti ti-users" style="font-size:10px"></i> ${u.assignedCustomers.length} customer${u.assignedCustomers.length>1?'s':''}</span>`:''}
+        ${u.assignedCustomers && !u.assignedCustomers.length?`<span style="font-size:11px;color:var(--red);background:rgba(239,68,68,0.1);padding:2px 7px;border-radius:99px"><i class="ti ti-lock" style="font-size:10px"></i> No customers</span>`:''}
       </div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-top:2px;font-family:monospace">@${u.username}</div>
     </div>
@@ -1908,6 +1933,8 @@ function showEditUser(id) {
   if(!u) return;
   const branches = getBranches();
   const branchOpts = `<option value="">— All branches (no restriction) —</option>` + branches.map(b=>`<option value="${b.id}" ${u.branchId===b.id?'selected':''}>${b.name}${b.type==='main'||b.type==='warehouse'?' (Main)':''}</option>`).join('');
+  const assignedCusts = u.assignedCustomers || [];
+  const allCustomers = state.customers || [];
   showModal(`
 <div class="modal-head"><h3>Edit User: ${u.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div class="form-group"><label>Full Name</label><input type="text" id="eu-name" value="${u.name}"></div>
@@ -1935,7 +1962,38 @@ function showEditUser(id) {
       style="width:100%;padding:8px 12px;border:1px solid var(--amber);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;letter-spacing:4px;font-family:var(--font);outline:none">
   </div>
 </div>
-<div style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+
+<!-- Customer Assignment -->
+<div style="margin-top:4px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em">
+      <i class="ti ti-users" style="margin-right:4px;color:var(--accent)"></i>Assigned Customers
+    </label>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="eu-all-customers" ${!assignedCusts.length?'checked':''} onchange="toggleAllCustomers(this.checked)">
+      <span>All customers (no restriction)</span>
+    </label>
+  </div>
+  <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;padding:7px 10px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+    <i class="ti ti-info-circle" style="margin-right:4px"></i>
+    If customers are assigned, this user will <strong>only see invoices, SOs, and collections for those customers</strong>. Admins always see everything.
+  </div>
+  ${allCustomers.length===0?`<div style="color:var(--text-tertiary);font-size:12px;padding:8px">No customers found. Add customers first.</div>`:`
+  <div id="eu-cust-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);padding:8px;${!assignedCusts.length?'opacity:0.4;pointer-events:none':''}">
+    <div style="margin-bottom:6px;display:flex;gap:8px">
+      <input type="text" placeholder="🔍 Search customers…" oninput="filterCustAssign(this.value)"
+        style="flex:1;padding:5px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-secondary);color:var(--text-primary);font-size:12px;font-family:var(--font);outline:none">
+    </div>
+    ${allCustomers.map(c=>`
+    <label class="cust-assign-row" style="display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;border-radius:4px" data-name="${(c.name||'').toLowerCase()}">
+      <input type="checkbox" class="eu-cust-chk" value="${c.id||c.name}" ${assignedCusts.includes(c.id||c.name)?'checked':''}>
+      <span style="font-size:13px;flex:1">${c.name}</span>
+      <span style="font-size:10px;color:var(--text-tertiary)">${c.email||c.phone||''}</span>
+    </label>`).join('')}
+  </div>`}
+</div>
+
+<div style="font-size:12px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light);margin-top:8px">
   <i class="ti ti-info-circle" style="font-size:13px;vertical-align:-2px;margin-right:4px"></i>
   To customize which pages this user can access, use the <strong>Access</strong> button on the users list.
 </div>
@@ -2012,6 +2070,18 @@ function togglePinField(role) {
   if(wrap) wrap.style.display = role === 'admin' ? '' : 'none';
 }
 
+function toggleAllCustomers(allChecked) {
+  const list = document.getElementById('eu-cust-list');
+  if(list) { list.style.opacity = allChecked?'0.4':'1'; list.style.pointerEvents = allChecked?'none':''; }
+  if(allChecked) document.querySelectorAll('.eu-cust-chk').forEach(c=>c.checked=false);
+}
+
+function filterCustAssign(q) {
+  document.querySelectorAll('.cust-assign-row').forEach(row=>{
+    row.style.display = !q || row.dataset.name.includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+
 function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const users = getUsers();
   const u = users.find(u=>u.id===id);
@@ -2020,20 +2090,25 @@ function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
   const newPass = document.getElementById('eu-pass').value;
   if(newPass) { if(newPass.length<6){alert('Password must be at least 6 characters.');return;} u.password=newPass; }
   u.role = document.getElementById('eu-role').value;
-  // Save login PIN for admin accounts
   const pin = document.getElementById('eu-pin')?.value.trim();
   if(u.role === 'admin') {
     if(pin) {
       if(!/^\d{4,6}$/.test(pin)) { alert('PIN must be 4-6 digits (numbers only).'); return; }
       u.loginPin = pin;
-    } else {
-      delete u.loginPin; // blank = disable PIN
-    }
-  } else {
-    delete u.loginPin; // non-admin never needs PIN
-  }
+    } else { delete u.loginPin; }
+  } else { delete u.loginPin; }
   const branchId = document.getElementById('eu-branch')?.value || '';
   if(branchId) u.branchId = branchId; else delete u.branchId;
+
+  // Save assigned customers
+  const allCusts = document.getElementById('eu-all-customers')?.checked;
+  if(allCusts) {
+    delete u.assignedCustomers; // no restriction
+  } else {
+    const selected = [...document.querySelectorAll('.eu-cust-chk:checked')].map(c=>c.value);
+    u.assignedCustomers = selected; // empty array = no access to any customer
+  }
+
   saveUsers(users); closeModal(); render();
 }
 
@@ -4211,7 +4286,7 @@ function renderInvoices(c, ta) {
   const outstanding= state.invoices.filter(i => i.status !== 'paid' && i.status !== 'draft').reduce((s, i) => s + (i.amount||0), 0);
 
   window._invFilter = window._invFilter || '';
-  const invFiltered = state.invoices.filter(inv => {
+  const invFiltered = filterByCustomer(state.invoices, 'customer').filter(inv => {
     const q = window._invFilter.toLowerCase();
     if(!q) return true;
     return inv.id.toLowerCase().includes(q) || (inv.customer||'').toLowerCase().includes(q) ||
@@ -6955,14 +7030,15 @@ function renderCollections(c, ta) {
   ta.innerHTML = `
     <button class="btn no-print" onclick="window.print()"><i class="ti ti-printer"></i>Print</button>
     <button class="btn primary" onclick="showAddCollection()"><i class="ti ti-plus"></i>Record Collection</button>`;
-  const total    = state.collections.reduce((s,r) => s + (r.netCash||r.amount||0), 0);
-  const totalCWT = state.collections.reduce((s,r) => s + (r.cwtAmount||0), 0);
-  const totalGross = state.collections.reduce((s,r) => s + (r.amount||0), 0);
+  const cols = filterByCustomer([...(state.collections||[])].sort((a,b)=>(b.id||'').localeCompare(a.id||'')), 'customer');
+  const total    = cols.reduce((s,r) => s + (r.netCash||r.amount||0), 0);
+  const totalCWT = cols.reduce((s,r) => s + (r.cwtAmount||0), 0);
+  const totalGross = cols.reduce((s,r) => s + (r.amount||0), 0);
   const byMode = {};
-  state.collections.forEach(r => { byMode[r.mode] = (byMode[r.mode]||0) + (r.netCash||r.amount||0); });
+  cols.forEach(r => { byMode[r.mode] = (byMode[r.mode]||0) + (r.netCash||r.amount||0); });
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash"></i>Total Net Cash</div><div class="kpi-value pos">${fmt(total)}</div><div class="kpi-sub">${state.collections.length} receipt${state.collections.length!==1?'s':''}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-cash"></i>Total Net Cash</div><div class="kpi-value pos">${fmt(total)}</div><div class="kpi-sub">${cols.length} receipt${cols.length!==1?'s':''}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-receipt"></i>Total Gross</div><div class="kpi-value">${fmt(totalGross)}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-file-invoice"></i>Total CWT (2307)</div><div class="kpi-value" style="color:var(--amber)">${fmt(totalCWT)}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-building-bank"></i>Bank Transfer</div><div class="kpi-value">${fmt(byMode['Bank Transfer']||0)}</div></div>
@@ -10529,7 +10605,7 @@ const SO_STATUS_COLORS = { pending:'var(--amber)', approved:'var(--accent)', dis
 
 function renderSalesOrders(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddSO()"><i class="ti ti-plus"></i>New Sales Order</button>`;
-  const sos = state.salesOrders||[];
+  const sos = filterByCustomer(state.salesOrders||[], 'customer');
   const total = sos.reduce((s,so)=>s+so.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
   const byStatus = s => sos.filter(so=>so.status===s).length;
   window._soFilter = window._soFilter || '';
