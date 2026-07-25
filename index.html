@@ -10666,10 +10666,10 @@ ${(so.drIssued||[]).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print SO</button>
-  ${so.lines.some(l=>l.approved)
+  <span id="so-dr-btn-wrap">${so.lines.some(l=>l.approved)
     ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="closeModal();setTimeout(()=>showIssueDR('${so.id}'),50)"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
-    : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
-  ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
+    : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}</span>
+  <span id="so-approve-btn-wrap">${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}</span>
   ${allApproved&&isAdmin()?(()=>{
     const hasInvoice = (state.invoices||[]).some(i=>i.soRef===so.id);
     return hasInvoice
@@ -11032,21 +11032,33 @@ function toggleSOLineApproval(soId, lineIdx, approved) {
   }
 
   save();
+  // Re-render the lines section in-place without closing the modal
   const container = document.getElementById('so-view-lines');
   const canApproveItems = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
   if(container) container.innerHTML = renderSOViewLines(so, canApproveItems);
-  // Update Issue DR button state dynamically
-  const drBtn = document.querySelector('[onclick*="showIssueDR"]');
-  if(drBtn) {
+
+  // Update the Issue DR button immediately without full re-render
+  const drBtnWrap = document.getElementById('so-dr-btn-wrap');
+  if(drBtnWrap) {
     if(anyApproved) {
-      drBtn.disabled = false; drBtn.style.opacity='1'; drBtn.style.cursor='pointer';
-      drBtn.title = '';
+      drBtnWrap.innerHTML = `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="closeModal();setTimeout(()=>showIssueDR('${so.id}'),50)"><i class="ti ti-truck-delivery"></i>Issue DR</button>`;
     } else {
-      drBtn.disabled = true; drBtn.style.opacity='0.4'; drBtn.style.cursor='not-allowed';
-      drBtn.title = 'Approve at least one item first';
+      drBtnWrap.innerHTML = `<button class="btn" style="opacity:0.4;cursor:not-allowed" disabled title="Approve at least one item first"><i class="ti ti-truck-delivery"></i>Issue DR</button>`;
     }
   }
+
+  // Update approve SO button
+  const approveSoWrap = document.getElementById('so-approve-btn-wrap');
+  if(approveSoWrap) {
+    approveSoWrap.innerHTML = so.status==='pending'&&isAdmin()
+      ? `<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`
+      : '';
+  }
+
+  // Also update background list without closing modal
   render();
+  // Re-open modal after render (render() closes it)
+  viewSO(so.id);
 }
 
 function approveAllSOItems(soId) {
@@ -11055,14 +11067,16 @@ function approveAllSOItems(soId) {
   const inv = state.inventory||[];
   so.lines.forEach(line => {
     const item = inv.find(it=>it.id===line.itemId);
-    // Only approve if stock is sufficient or no inventory link
-    if(!item || item.qty >= (line.qty||0)) line.approved = true;
+    if(!item || item.qty >= (line.qty||0)) {
+      line.approved = true;
+      line.approvedBy = currentUser?.name||'';
+      line.approvedAt = today();
+    }
   });
-  save();
-  const container = document.getElementById('so-view-lines');
-  const canApproveItems = currentUser && (currentUser.role==='admin'||currentUser.role==='warehouse');
-  if(container) container.innerHTML = renderSOViewLines(so, canApproveItems);
-  render();
+  if(so.lines.some(l=>l.approved) && so.status==='pending') {
+    so.status='approved'; so.approvedBy=currentUser?.name||'';
+  }
+  save(); render(); viewSO(soId);
 }
 
 function approveSO(id) { if(!requireAdmin('approve sales orders')) return; const so=(state.salesOrders||[]).find(s=>s.id===id); if(so){ so.status='approved'; so.approvedBy=currentUser?.name; so.approvedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(so); auditLog('APPROVE','Sales Order',id,{description:`Approved SO ${id} for ${so.customer}`}); } save(); render(); }
