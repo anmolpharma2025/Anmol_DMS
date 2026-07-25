@@ -4239,12 +4239,15 @@ function renderInvoices(c, ta) {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
     const vat  = inv.vat    != null ? inv.vat    : 0;
     const gross= inv.amount || 0;
-    // Find linked SO and its DR number
-    const linkedSO = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
-    const drNums = [];
-    if(inv.drNo) drNums.push(inv.drNo);
-    if(linkedSO?.drNo && !drNums.includes(linkedSO.drNo)) drNums.push(linkedSO.drNo);
-    const drDisplay = drNums.length ? drNums.join(', ') : (inv.soRef?`<span style="font-size:10px;color:var(--text-tertiary)">${inv.soRef}</span>`:'—');
+    // DR display: inv.drNo is the source of truth (set when DR is issued from SO)
+    // Only fall back to so.drNo if inv.drNo is empty
+    const drDisplay = inv.drNo
+      ? `<span style="color:var(--green);font-weight:500">${inv.drNo}</span>`
+      : linkedSO?.drNo
+        ? `<span style="color:var(--green);font-weight:500">${linkedSO.drNo}</span>`
+        : inv.soRef
+          ? `<span style="font-size:10px;color:var(--text-tertiary)">${inv.soRef}</span>`
+          : '—';
     return `<tr>
       <td class="mono">${inv.id}</td><td>${inv.date}</td>
       <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
@@ -10663,7 +10666,7 @@ ${(so.drIssued||[]).length>0?`
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="closeModal();printSO('${so.id}')"><i class="ti ti-printer"></i>Print SO</button>
   ${so.lines.some(l=>l.approved)
-    ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="showIssueDR('${so.id}')"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
+    ? `<button class="btn" style="color:var(--accent);border-color:var(--accent)" onclick="closeModal();setTimeout(()=>showIssueDR('${so.id}'),50)"><i class="ti ti-truck-delivery"></i>Issue DR</button>`
     : `<button class="btn" style="opacity:0.4;cursor:not-allowed" title="Approve at least one item first" disabled><i class="ti ti-truck-delivery"></i>Issue DR</button>`}
   ${so.status==='pending'&&isAdmin()?`<button class="btn primary" onclick="closeModal();approveSO('${so.id}')">Approve SO</button>`:''}
   ${allApproved&&isAdmin()?(()=>{
@@ -10780,16 +10783,15 @@ function saveIssueDR(soId, drNumDefault, count) {
   so.drNo = drNum;
   stampUpdate(so);
 
-  // Sync DR number to the linked invoice (if any)
+  // Sync DR number to the linked invoice (if any) — append without duplicates
   const linkedInv = (state.invoices||[]).find(i=>i.soRef===soId);
   if(linkedInv) {
-    // Append if multiple DRs
     const existing = (linkedInv.drNo||'').split(',').map(d=>d.trim()).filter(Boolean);
     if(!existing.includes(drNum)) {
       existing.push(drNum);
       linkedInv.drNo = existing.join(', ');
+      stampUpdate(linkedInv);
     }
-    stampUpdate(linkedInv);
   }
 
   auditLog('CREATE','DR',drNum,{description:`DR ${drNum} issued for SO ${soId} — ${items.length} item(s)`});
