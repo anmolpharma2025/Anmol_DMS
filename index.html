@@ -391,6 +391,7 @@
     <div class="nav-item" title="Sales Orders" data-page="salesorders"><i class="ti ti-clipboard-list"></i><span>Sales Orders</span></div>
     <div class="nav-item" title="Invoices" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Invoices</span></div>
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
+    <div class="nav-item" title="Purchase Requests" data-page="purchaserequests"><i class="ti ti-clipboard-list"></i><span>Purchase Requests</span></div>
     <div class="nav-item" title="Purchase Orders" data-page="purchaseorders"><i class="ti ti-truck-delivery"></i><span>Purchase Orders</span></div>
     <div class="nav-item" title="Expenses" data-page="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></div>
     <div class="nav-item" title="Deposit Transactions" data-page="deposits"><i class="ti ti-building-bank"></i><span>Deposits</span></div>
@@ -1409,7 +1410,8 @@ const ALL_PAGES = [
   { id:'salesorders', label:'Sales Orders',           section:'Transactions' },
   { id:'invoices',    label:'Invoices',              section:'Transactions' },
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
-  { id:'purchaseorders',label:'Purchase Orders',     section:'Transactions' },
+  { id:'purchaserequests',label:'Purchase Requests', section:'Transactions' },
+  { id:'purchaseorders',  label:'Purchase Orders',   section:'Transactions' },
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
   { id:'deposits',    label:'Deposit Transactions',  section:'Transactions' },
   { id:'lapsing',     label:'Lapsing Schedule',      section:'Transactions' },
@@ -2140,7 +2142,8 @@ let state = {
   vouchers: [],
   collections: [],
   salesOrders: [],
-  purchaseOrders: [],
+  purchaseRequests: [],
+  purchaseOrders:   [],
   inventory: [],
   inventoryMovements: [],
   salesReturns: [],
@@ -2303,6 +2306,7 @@ function filterTable() {
               <td class="mono">${po.id}</td><td>${po.date}</td><td>${po.deliveryDate||'—'}</td>
               <td style="font-weight:500">${po.supplier}
                 ${po.supplierInvoiceNo?`<div style="font-size:10px;color:var(--green);margin-top:1px"><i class="ti ti-receipt" style="font-size:10px"></i> SI: ${po.supplierInvoiceNo}${po.drNo?' · DR: '+po.drNo:''}</div>`:''}
+        ${po.prRef?`<div style="font-size:10px;color:var(--accent);margin-top:1px"><i class="ti ti-clipboard-list" style="font-size:10px"></i> PR: ${po.prRef}</div>`:''}
               </td>
               <td style="text-align:right;font-weight:500">${fmt(poTotal)}</td>
               <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${po.preparedBy||'—'}</td>
@@ -2358,7 +2362,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2391,7 +2395,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -11716,8 +11720,580 @@ ${so.notes?`<div class="notes-box"><strong>Notes:</strong> ${so.notes}</div>`:''
 }
 
 // ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// PURCHASE REQUEST MODULE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderPurchaseRequests(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddPR()"><i class="ti ti-plus"></i>New Purchase Request</button>`;
+  if(!state.purchaseRequests) state.purchaseRequests=[];
+  const prs = [...state.purchaseRequests].sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+  const pending  = prs.filter(p=>p.status==='pending').length;
+  const approved = prs.filter(p=>p.status==='approved').length;
+  const converted= prs.filter(p=>p.status==='converted').length;
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label">Total PRs</div><div class="kpi-value">${prs.length}</div></div>
+  <div class="kpi"><div class="kpi-label">Pending Approval</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
+  <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--green)">${approved}</div></div>
+  <div class="kpi"><div class="kpi-label">Converted to PO</div><div class="kpi-value" style="color:var(--accent)">${converted}</div></div>
+</div>
+<table>
+  <thead><tr><th>PR No.</th><th>Date</th><th>Requested By</th><th>Department</th><th>Purpose</th><th>Items</th><th>Est. Total</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${prs.length===0?`<tr><td colspan="10">${emptyState('ti-clipboard-list','No Purchase Requests','Create a purchase request to start the procurement process.','New Purchase Request','showAddPR()')}</td></tr>`:''}
+  ${prs.map(pr=>{
+    const total=pr.items?.reduce((s,i)=>s+(i.estTotal||0),0)||0;
+    const sc=pr.status==='approved'?'var(--green)':pr.status==='rejected'?'var(--red)':pr.status==='converted'?'var(--accent)':'var(--amber)';
+    return `<tr>
+      <td class="mono" style="font-weight:600">${pr.id}</td>
+      <td>${pr.date}</td>
+      <td>${pr.requestedBy||'—'}</td>
+      <td style="font-size:12px">${pr.department||'—'}</td>
+      <td style="font-size:12px;max-width:160px;color:var(--text-secondary)">${pr.purpose||'—'}</td>
+      <td style="text-align:center">${(pr.items||[]).length}</td>
+      <td style="text-align:right">${fmt(total)}</td>
+      <td><span class="badge" style="background:${pr.priority==='urgent'?'var(--red-bg)':pr.priority==='high'?'rgba(245,158,11,0.12)':'rgba(100,120,160,0.1)'};color:${pr.priority==='urgent'?'var(--red)':pr.priority==='high'?'var(--amber)':'var(--text-secondary)'}">${pr.priority||'normal'}</span></td>
+      <td><span class="badge" style="background:${sc}22;color:${sc}">${(pr.status||'pending').toUpperCase()}</span></td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="viewPR('${pr.id}')"><i class="ti ti-eye"></i></button>
+        ${pr.status==='pending'&&isAdmin()?`
+          <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
+          <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
+        `:''}
+        ${pr.status==='approved'?`<button class="btn primary" style="padding:2px 8px;font-size:11px" onclick="convertPRtoPO('${pr.id}')"><i class="ti ti-truck-delivery"></i>Create PO</button>`:''}
+        ${pr.status==='converted'?`<span style="font-size:11px;color:var(--accent)"><i class="ti ti-link"></i> ${pr.poRef||'PO created'}</span>`:''}
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deletePR('${pr.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+function showAddPR() {
+  const empOpts = (state.employees||[]).map(e=>`<option value="${e.name}">${e.name} — ${e.department||'—'}</option>`).join('');
+  const deptOpts = [...new Set((state.employees||[]).map(e=>e.department).filter(Boolean))].map(d=>`<option>${d}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-clipboard-list" style="margin-right:6px;color:var(--accent)"></i>New Purchase Request</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Requested By</label>
+    <select id="pr-requestedby" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="${currentUser?.name||''}">${currentUser?.name||'— Select —'}</option>${empOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Department</label>
+    <select id="pr-dept" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="">— Select Department —</option>${deptOpts}
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Needed</label><input type="date" id="pr-needed" value="${today()}"></div>
+  <div class="form-group"><label>Priority</label>
+    <select id="pr-priority" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="normal">Normal</option>
+      <option value="high">High</option>
+      <option value="urgent">Urgent</option>
+    </select>
+  </div>
+</div>
+<div class="form-group"><label>Purpose / Justification</label>
+  <textarea id="pr-purpose" rows="2" placeholder="Why is this purchase needed?" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical"></textarea>
+</div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em">Items Requested</label>
+    <button class="btn" style="padding:2px 10px;font-size:11px" type="button" onclick="addPRItemRow()"><i class="ti ti-plus"></i>Add Item</button>
+  </div>
+  <div id="pr-items">
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;color:var(--text-secondary);font-weight:600;padding:0 4px">
+      <span>Description</span><span>Unit</span><span style="text-align:right">Qty</span><span style="text-align:right">Est. Unit Price</span><span></span>
+    </div>
+    <div id="pr-item-rows"></div>
+  </div>
+</div>
+<div class="form-group"><label>Additional Notes</label>
+  <input type="text" id="pr-notes" placeholder="Supplier preference, specifications, etc.">
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="savePR()"><i class="ti ti-send"></i>Submit Request</button>
+</div>`);
+  addPRItemRow(); // start with one empty row
+}
+
+function addPRItemRow() {
+  const container = document.getElementById('pr-item-rows');
+  if(!container) return;
+  const idx = container.children.length;
+  const inv = state.inventory||[];
+  const itemOpts = inv.map(it=>`<option value="${it.id}" data-unit="${it.unit||''}" data-price="${it.costPrice||0}">${it.name}</option>`).join('');
+  const row = document.createElement('div');
+  row.className = 'pr-item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <select onchange="prItemSelect(this,${idx})" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <option value="">— Select item or type below —</option>${itemOpts}
+    </select>
+    <input type="text" id="pr-unit-${idx}" placeholder="pcs/box…" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <input type="number" id="pr-qty-${idx}" value="1" min="1" oninput="calcPRTotal(${idx})" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+    <input type="number" id="pr-price-${idx}" value="0" min="0" oninput="calcPRTotal(${idx})" placeholder="Est. price" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+    <button type="button" onclick="this.closest('.pr-item-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 5px">×</button>`;
+  // Also store description
+  const descEl = document.createElement('input');
+  descEl.type='hidden'; descEl.id=`pr-desc-${idx}`;
+  row.appendChild(descEl);
+  container.appendChild(row);
+}
+
+function prItemSelect(sel, idx) {
+  const opt = sel.options[sel.selectedIndex];
+  if(!opt.value) return;
+  const inv = (state.inventory||[]).find(i=>i.id===opt.value);
+  if(inv) {
+    const unitEl=document.getElementById(`pr-unit-${idx}`); if(unitEl) unitEl.value=inv.unit||'';
+    const priceEl=document.getElementById(`pr-price-${idx}`); if(priceEl) priceEl.value=inv.costPrice||0;
+    const descEl=document.getElementById(`pr-desc-${idx}`); if(descEl) descEl.value=inv.name||opt.text;
+    calcPRTotal(idx);
+  }
+}
+
+function calcPRTotal(idx) {
+  const qty=parseFloat(document.getElementById(`pr-qty-${idx}`)?.value)||0;
+  const price=parseFloat(document.getElementById(`pr-price-${idx}`)?.value)||0;
+  // total shown in PR summary (optional — can add a total row later)
+}
+
+function savePR() {
+  const rows = [...document.querySelectorAll('.pr-item-row')];
+  const items = rows.map((row,idx)=>{
+    const qty=parseFloat(row.querySelector(`#pr-qty-${idx}`)?.value)||0;
+    const price=parseFloat(row.querySelector(`#pr-price-${idx}`)?.value)||0;
+    const unit=row.querySelector(`#pr-unit-${idx}`)?.value||'';
+    const descHidden=row.querySelector(`#pr-desc-${idx}`)?.value||'';
+    const selVal=row.querySelector('select')?.value||'';
+    const selText=row.querySelector('select')?.options[row.querySelector('select').selectedIndex]?.text||'';
+    const desc=descHidden||selText||'';
+    if(!desc||qty<=0) return null;
+    return { itemId:selVal, desc, unit, qty, unitPrice:price, estTotal:qty*price };
+  }).filter(Boolean);
+  if(!items.length){ alert('Please add at least one item.'); return; }
+  if(!state.purchaseRequests) state.purchaseRequests=[];
+  const id='PR-'+String(state.purchaseRequests.length+1).padStart(4,'0');
+  const pr = {
+    id, date:today(),
+    requestedBy: document.getElementById('pr-requestedby')?.value||currentUser?.name||'',
+    department:  document.getElementById('pr-dept')?.value||'',
+    dateNeeded:  document.getElementById('pr-needed')?.value||'',
+    priority:    document.getElementById('pr-priority')?.value||'normal',
+    purpose:     document.getElementById('pr-purpose')?.value.trim()||'',
+    notes:       document.getElementById('pr-notes')?.value.trim()||'',
+    items, status:'pending',
+    createdAt:new Date().toISOString(), createdBy:currentUser?.name||''
+  };
+  state.purchaseRequests.push(pr);
+  auditLog('CREATE','Purchase Request',id,{description:`PR ${id} submitted by ${pr.requestedBy} — ${items.length} item(s)`});
+  save(); closeModal(); render();
+}
+
+function viewPR(id) {
+  const pr=(state.purchaseRequests||[]).find(p=>p.id===id);
+  if(!pr) return;
+  const total=pr.items?.reduce((s,i)=>s+(i.estTotal||0),0)||0;
+  const sc=pr.status==='approved'?'var(--green)':pr.status==='rejected'?'var(--red)':pr.status==='converted'?'var(--accent)':'var(--amber)';
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-clipboard-list" style="margin-right:6px;color:var(--accent)"></i>${pr.id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
+  <span><i class="ti ti-user"></i> ${pr.requestedBy}</span><span>·</span>
+  <span><i class="ti ti-building"></i> ${pr.department||'—'}</span><span>·</span>
+  <span><i class="ti ti-calendar"></i> ${pr.date}</span><span>·</span>
+  <span style="color:${sc};font-weight:700">${(pr.status||'pending').toUpperCase()}</span>
+  ${pr.priority!=='normal'?`<span>·</span><span style="color:${pr.priority==='urgent'?'var(--red)':'var(--amber)'}">⚡ ${pr.priority.toUpperCase()}</span>`:''}
+  ${pr.poRef?`<span>·</span><span style="color:var(--accent)"><i class="ti ti-link"></i> ${pr.poRef}</span>`:''}
+</div>
+${pr.purpose?`<div style="padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:12px;font-size:12px;color:var(--text-secondary)"><strong>Purpose:</strong> ${pr.purpose}</div>`:''}
+<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
+  <thead><tr style="background:var(--bg-secondary)">
+    <th style="padding:6px 8px;text-align:left">Item</th>
+    <th style="padding:6px 8px;text-align:center">Unit</th>
+    <th style="padding:6px 8px;text-align:right">Qty</th>
+    <th style="padding:6px 8px;text-align:right">Est. Price</th>
+    <th style="padding:6px 8px;text-align:right">Est. Total</th>
+  </tr></thead>
+  <tbody>
+  ${pr.items?.map(it=>`<tr style="border-bottom:1px solid var(--border-light)">
+    <td style="padding:7px 8px">${it.desc}</td>
+    <td style="padding:7px 8px;text-align:center">${it.unit||'—'}</td>
+    <td style="padding:7px 8px;text-align:right">${it.qty}</td>
+    <td style="padding:7px 8px;text-align:right">${fmt(it.unitPrice||0)}</td>
+    <td style="padding:7px 8px;text-align:right;font-weight:600">${fmt(it.estTotal||0)}</td>
+  </tr>`).join('')}
+  </tbody>
+  <tfoot><tr style="background:var(--bg-secondary);font-weight:700">
+    <td colspan="4" style="padding:8px">Estimated Total</td>
+    <td style="padding:8px;text-align:right;color:var(--accent)">${fmt(total)}</td>
+  </tr></tfoot>
+</table>
+${pr.notes?`<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px"><i class="ti ti-note" style="margin-right:4px"></i>${pr.notes}</div>`:''}
+${pr.approvedBy?`<div style="font-size:12px;color:var(--green)"><i class="ti ti-check" style="margin-right:4px"></i>Approved by <strong>${pr.approvedBy}</strong> on ${pr.approvedOn}</div>`:''}
+${pr.rejectedBy?`<div style="font-size:12px;color:var(--red)"><i class="ti ti-x" style="margin-right:4px"></i>Rejected by <strong>${pr.rejectedBy}</strong>: ${pr.rejectReason||''}</div>`:''}
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Close</button>
+  ${pr.status==='pending'&&isAdmin()?`
+    <button class="btn" style="color:var(--red);border-color:var(--red)" onclick="closeModal();rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
+    <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
+  `:''}
+  ${pr.status==='approved'?`<button class="btn primary" onclick="closeModal();convertPRtoPO('${pr.id}')"><i class="ti ti-truck-delivery"></i>Create PO from this PR</button>`:''}
+</div>`);
+}
+
+function approvePR(id) {
+  if(!requireAdmin('approve purchase requests')) return;
+  const pr=(state.purchaseRequests||[]).find(p=>p.id===id);
+  if(!pr||pr.status!=='pending') return;
+  pr.status='approved'; pr.approvedBy=currentUser?.name||''; pr.approvedOn=today();
+  auditLog('APPROVE','Purchase Request',id,{description:`PR ${id} approved by ${pr.approvedBy}`});
+  save(); render();
+  toast(`✅ PR ${id} approved. You can now convert it to a PO.`,'info',4000);
+}
+
+function rejectPR(id) {
+  const reason = prompt('Reason for rejection (optional):');
+  if(reason===null) return; // cancelled
+  const pr=(state.purchaseRequests||[]).find(p=>p.id===id);
+  if(!pr) return;
+  pr.status='rejected'; pr.rejectedBy=currentUser?.name||''; pr.rejectedOn=today(); pr.rejectReason=reason;
+  auditLog('UPDATE','Purchase Request',id,{description:`PR ${id} rejected: ${reason}`});
+  save(); render();
+}
+
+function deletePR(id) {
+  const pr=(state.purchaseRequests||[]).find(p=>p.id===id);
+  if(pr?.status==='converted'&&!confirm(`This PR has been converted to ${pr.poRef}. Delete anyway?`)) return;
+  if(!pr?.status||pr.status!=='converted') if(!confirm(`Delete PR ${id}?`)) return;
+  state.purchaseRequests=(state.purchaseRequests||[]).filter(p=>p.id!==id);
+  save(); render();
+}
+
+function convertPRtoPO(prId) {
+  const pr=(state.purchaseRequests||[]).find(p=>p.id===prId);
+  if(!pr||pr.status!=='approved'){ alert('Only approved PRs can be converted to a PO.'); return; }
+  // Pre-fill PO form with PR data
+  window._prToPO = pr;
+  navigate('purchaseorders');
+  setTimeout(()=>showAddPO(pr),200);
+}
+
+function toast(msg,type='info',ms=3000){
+  document.querySelectorAll('.erp-toast').forEach(t=>t.remove());
+  const el=document.createElement('div');
+  el.className='erp-toast';
+  el.style.cssText=`position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:99px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3);background:${type==='info'?'var(--accent)':type==='ok'?'var(--green)':'var(--red)'};color:#fff;animation:slideUp 0.3s ease`;
+  el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),ms);
+}
+
+// ── SCAN CUSTOMER PO ─────────────────────────────────────────────────────────
+function showScanPO() {
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-scan" style="margin-right:6px;color:var(--accent)"></i>Scan Customer Purchase Order</h3>
+  <button class="close-btn" onclick="closeModal()">×</button>
+</div>
+<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--accent)">
+  <i class="ti ti-info-circle" style="margin-right:4px"></i>
+  Upload a photo or PDF of your customer's PO. Claude AI will extract all items, quantities, prices, and supplier info automatically.
+</div>
+
+<div id="scan-drop-zone" onclick="document.getElementById('scan-file-input').click()"
+  style="border:2px dashed var(--border-mid);border-radius:var(--radius-md);padding:32px;text-align:center;cursor:pointer;transition:border-color 0.2s;background:var(--bg-primary)"
+  ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+  ondragleave="this.style.borderColor='var(--border-mid)'"
+  ondrop="event.preventDefault();this.style.borderColor='var(--border-mid)';handleScanDrop(event)">
+  <i class="ti ti-upload" style="font-size:36px;color:var(--text-tertiary);display:block;margin-bottom:10px"></i>
+  <div style="font-size:14px;font-weight:600;margin-bottom:4px">Drop file here or click to upload</div>
+  <div style="font-size:12px;color:var(--text-secondary)">Supports: JPG, PNG, PDF • Max 10MB</div>
+  <input type="file" id="scan-file-input" accept="image/*,.pdf" style="display:none" onchange="handleScanFile(this)">
+</div>
+
+<div id="scan-preview" style="display:none;margin-top:12px">
+  <img id="scan-img-preview" style="max-width:100%;max-height:200px;border-radius:var(--radius-sm);border:1px solid var(--border-light)">
+  <div id="scan-pdf-preview" style="padding:12px;background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:13px;color:var(--text-secondary)"></div>
+</div>
+
+<div id="scan-status" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius-md);font-size:13px"></div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" id="scan-btn" onclick="runScanPO()" disabled>
+    <i class="ti ti-scan"></i>Extract & Create PO
+  </button>
+</div>`);
+}
+
+function handleScanDrop(e) {
+  const file = e.dataTransfer.files[0];
+  if(file) processScanFile(file);
+}
+function handleScanFile(input) {
+  const file = input.files[0];
+  if(file) processScanFile(file);
+}
+
+function processScanFile(file) {
+  if(file.size > 10*1024*1024) { alert('File too large. Please use a file under 10MB.'); return; }
+  window._scanFile = file;
+  const preview = document.getElementById('scan-preview');
+  const imgPrev = document.getElementById('scan-img-preview');
+  const pdfPrev = document.getElementById('scan-pdf-preview');
+  preview.style.display='block';
+  if(file.type.startsWith('image/')) {
+    const url=URL.createObjectURL(file);
+    imgPrev.src=url; imgPrev.style.display='block';
+    pdfPrev.style.display='none';
+  } else {
+    imgPrev.style.display='none';
+    pdfPrev.style.display='block';
+    pdfPrev.innerHTML=`<i class="ti ti-file-type-pdf" style="font-size:20px;color:var(--red);margin-right:8px;vertical-align:-3px"></i><strong>${file.name}</strong> (${(file.size/1024).toFixed(0)} KB)`;
+  }
+  document.getElementById('scan-btn').disabled=false;
+  document.getElementById('scan-drop-zone').style.borderColor='var(--green)';
+}
+
+async function runScanPO() {
+  const file = window._scanFile;
+  if(!file) { alert('Please select a file first.'); return; }
+
+  const statusEl=document.getElementById('scan-status');
+  const btn=document.getElementById('scan-btn');
+  btn.disabled=true; btn.innerHTML='<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Extracting…';
+  statusEl.style.display='block';
+  statusEl.style.background='var(--accent-bg)';
+  statusEl.style.color='var(--accent)';
+  statusEl.innerHTML='<i class="ti ti-brain" style="margin-right:6px"></i>Claude AI is reading your PO…';
+
+  try {
+    // Read file as base64
+    const base64 = await new Promise((res,rej)=>{
+      const reader=new FileReader();
+      reader.onload=e=>res(e.target.result.split(',')[1]);
+      reader.onerror=()=>rej(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
+    const isPDF = file.type==='application/pdf';
+    const mediaType = isPDF?'application/pdf':file.type;
+
+    const response = await fetch(WORKER_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:2000,
+        messages:[{
+          role:'user',
+          content:[
+            { type: isPDF?'document':'image',
+              source:{ type:'base64', media_type:mediaType, data:base64 }
+            },
+            { type:'text', text:`You are a data extraction assistant for a pharmaceutical distribution ERP system.
+
+Extract ALL information from this Purchase Order document and return ONLY valid JSON (no markdown, no explanation):
+
+{
+  "supplier": "company or person name who issued this PO",
+  "poNumber": "their PO reference number if visible",
+  "date": "YYYY-MM-DD format or empty string",
+  "deliveryDate": "YYYY-MM-DD format or empty string",
+  "notes": "any special instructions or notes",
+  "items": [
+    {
+      "desc": "full item description/name",
+      "qty": 1,
+      "unit": "pcs/box/tablet/vial/etc",
+      "unitPrice": 0.00,
+      "lineTotal": 0.00
+    }
+  ]
+}
+
+Rules:
+- Extract ALL line items, do not skip any
+- Convert dates to YYYY-MM-DD format
+- If price not visible, use 0
+- If unit not visible, use "pcs"
+- desc must be the full product name as written
+- Return ONLY the JSON object, nothing else`
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+    const raw = (data.content||[]).map(b=>b.text||'').join('').trim();
+
+    // Parse JSON — strip any markdown fences
+    let extracted;
+    try {
+      const clean = raw.replace(/```json|```/g,'').trim();
+      extracted = JSON.parse(clean);
+    } catch(e) {
+      throw new Error('Could not parse AI response. Please try a clearer image.');
+    }
+
+    if(!extracted.items?.length) throw new Error('No items found in the document. Please try a clearer image.');
+
+    // Check if supplier exists, prompt to add if not
+    const supplierName = extracted.supplier || '';
+    const existingSupplier = (state.suppliers||[]).find(s=>s.name.toLowerCase()===supplierName.toLowerCase());
+
+    closeModal();
+
+    if(supplierName && !existingSupplier) {
+      // Prompt to add supplier
+      const addIt = confirm(`Supplier "${supplierName}" is not in your supplier list.\n\nWould you like to add them now before creating the PO?`);
+      if(addIt) {
+        window._scanExtracted = extracted;
+        showAddSupplierFromScan(supplierName, extracted);
+        return;
+      }
+    }
+
+    // Open PO form with extracted data
+    openScannedPO(extracted);
+
+  } catch(err) {
+    btn.disabled=false;
+    btn.innerHTML='<i class="ti ti-scan"></i>Extract & Create PO';
+    statusEl.style.background='var(--red-bg)';
+    statusEl.style.color='var(--red)';
+    statusEl.innerHTML=`<i class="ti ti-alert-triangle" style="margin-right:6px"></i>${err.message}`;
+  }
+}
+
+function showAddSupplierFromScan(name, extracted) {
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-truck-delivery" style="margin-right:6px;color:var(--accent)"></i>Add New Supplier</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:14px;font-size:12px;color:var(--accent)">
+  Supplier "<strong>${name}</strong>" was found in the scanned PO but doesn't exist in your list. Fill in the details below.
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier Name <span style="color:var(--red)">*</span></label>
+    <input type="text" id="scan-sup-name" value="${name}" style="font-weight:600">
+  </div>
+  <div class="form-group"><label>Contact Person</label>
+    <input type="text" id="scan-sup-contact" placeholder="e.g. Juan dela Cruz">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Email</label>
+    <input type="email" id="scan-sup-email" placeholder="supplier@email.com">
+  </div>
+  <div class="form-group"><label>Phone</label>
+    <input type="text" id="scan-sup-phone" placeholder="+63 xxx xxx xxxx">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Address</label>
+    <input type="text" id="scan-sup-address" placeholder="Street, City, Province">
+  </div>
+  <div class="form-group"><label>TIN</label>
+    <input type="text" id="scan-sup-tin" placeholder="000-000-000-000">
+  </div>
+</div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal();openScannedPO(window._scanExtracted)">Skip — Use without saving</button>
+  <button class="btn primary" onclick="saveSupplierFromScan()"><i class="ti ti-check"></i>Save Supplier & Continue</button>
+</div>`);
+}
+
+function saveSupplierFromScan() {
+  const name = document.getElementById('scan-sup-name')?.value.trim();
+  if(!name){ alert('Supplier name is required.'); return; }
+  if(!state.suppliers) state.suppliers=[];
+  const id='SUP-'+String(state.suppliers.length+1).padStart(3,'0');
+  state.suppliers.push({
+    id, name,
+    contact: document.getElementById('scan-sup-contact')?.value.trim()||'',
+    email:   document.getElementById('scan-sup-email')?.value.trim()||'',
+    phone:   document.getElementById('scan-sup-phone')?.value.trim()||'',
+    address: document.getElementById('scan-sup-address')?.value.trim()||'',
+    tin:     document.getElementById('scan-sup-tin')?.value.trim()||'',
+    status:  'active'
+  });
+  save();
+  closeModal();
+  openScannedPO(window._scanExtracted);
+}
+
+function openScannedPO(extracted) {
+  // Map extracted items to poLines format
+  window._poLines = (extracted.items||[]).map(it=>({
+    itemId: '', desc: it.desc||'',
+    qty: parseFloat(it.qty)||1,
+    unitPrice: parseFloat(it.unitPrice)||0,
+    lineTotal: parseFloat(it.lineTotal)||(parseFloat(it.qty)||1)*(parseFloat(it.unitPrice)||0),
+    unit: it.unit||'pcs',
+    vatExempt: false
+  }));
+  window._poPRRef = '';
+  window._poScannedRef = extracted.poNumber || '';
+
+  // Find supplier
+  const supName = extracted.supplier||'';
+  const matchedSup = (state.suppliers||[]).find(s=>s.name.toLowerCase()===supName.toLowerCase());
+  window._poPreFillSupplier = matchedSup?.name || supName;
+
+  navigate('purchaseorders');
+  setTimeout(()=>{
+    showAddPO();
+    // Pre-fill supplier after modal opens
+    setTimeout(()=>{
+      const supSel=document.getElementById('po-sup');
+      if(supSel&&window._poPreFillSupplier) {
+        // Try to find by name
+        const opt=[...supSel.options].find(o=>o.text===window._poPreFillSupplier||o.value===window._poPreFillSupplier);
+        if(opt) supSel.value=opt.value;
+      }
+      // Pre-fill date and notes
+      const dateEl=document.getElementById('po-date');
+      if(dateEl&&extracted.date) dateEl.value=extracted.date;
+      const delEl=document.getElementById('po-del');
+      if(delEl&&extracted.deliveryDate) delEl.value=extracted.deliveryDate;
+      const notesEl=document.getElementById('po-notes');
+      if(notesEl) notesEl.value=[extracted.notes,window._poScannedRef?'Customer PO Ref: '+window._poScannedRef:''].filter(Boolean).join(' | ');
+    }, 400);
+  }, 300);
+}
+
 function renderPurchaseOrders(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddPO()"><i class="ti ti-plus"></i>New Purchase Order</button>`;
+  const approvedPRs = (state.purchaseRequests||[]).filter(p=>p.status==='approved');
+  ta.innerHTML = `
+    <button class="btn" onclick="showScanPO()"><i class="ti ti-scan"></i>Scan Customer PO</button>
+    ${approvedPRs.length?`
+    <div style="position:relative;display:inline-block">
+      <button class="btn primary" onclick="document.getElementById('pr-po-menu').style.display=document.getElementById('pr-po-menu').style.display==='block'?'none':'block'">
+        <i class="ti ti-truck-delivery"></i>New PO <span style="font-size:10px;background:var(--green);border-radius:99px;padding:1px 6px;margin-left:4px">${approvedPRs.length} PR ready</span> <i class="ti ti-chevron-down" style="font-size:12px"></i>
+      </button>
+      <div id="pr-po-menu" style="display:none;position:absolute;top:110%;left:0;z-index:100;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);padding:8px;min-width:240px;box-shadow:0 4px 20px rgba(0,0,0,0.3)">
+        <div style="font-size:11px;color:var(--text-secondary);font-weight:600;padding:4px 8px;margin-bottom:4px">SELECT APPROVED PR:</div>
+        ${approvedPRs.map(pr=>`<div onclick="document.getElementById('pr-po-menu').style.display='none';showAddPO(null,'${pr.id}')" style="padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:12px;border-bottom:1px solid var(--border-light)" onmouseover="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
+          <div style="font-weight:600">${pr.id} — ${pr.requestedBy}</div>
+          <div style="color:var(--text-secondary);font-size:11px">${pr.items?.length||0} item(s) · ${pr.department||'—'} · ${pr.priority==='urgent'?'⚡ URGENT':pr.priority}</div>
+        </div>`).join('')}
+        ${isAdmin()?`<div onclick="document.getElementById('pr-po-menu').style.display='none';showAddPO()" style="padding:8px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:12px;color:var(--text-secondary);margin-top:4px" onmouseover="this.style.background='var(--bg-hover)'" onmouseleave="this.style.background=''">
+          <i class="ti ti-lock-open" style="margin-right:4px"></i>Admin: Create without PR
+        </div>`:''}
+      </div>
+    </div>`:`
+    <button class="btn primary" onclick="${isAdmin()?"showAddPO()":`alert('A Purchase Request must be submitted and approved before creating a PO. Go to Purchase Requests tab.')`}">
+      <i class="ti ti-truck-delivery"></i>New Purchase Order
+    </button>
+    <button class="btn" onclick="navigate('purchaserequests')"><i class="ti ti-clipboard-list"></i>Go to Purchase Requests</button>`}
+  `;
   const pos = state.purchaseOrders||[];
   const total = pos.reduce((s,po)=>s+po.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
   const byStatus = s => pos.filter(po=>po.status===s).length;
@@ -11802,8 +12378,15 @@ function savePO() {
   if(!lines.length) { alert('Add at least one line item.'); return; }
   const id = nextRefNum('PO', state.purchaseOrders||[]);
   if(!state.purchaseOrders) state.purchaseOrders=[];
-  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, status:'pending' });
-  auditLog('CREATE','Purchase Order',id,{description:`Created PO ${id} for ${supplier} — ${lines.length} item(s)`});
+  const prRef = window._poPRRef || '';
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, prRef, status:'pending' });
+  auditLog('CREATE','Purchase Order',id,{description:`Created PO ${id} for ${supplier} — ${lines.length} item(s)${prRef?' from '+prRef:''}`});
+  // Mark PR as converted
+  if(prRef) {
+    const pr=(state.purchaseRequests||[]).find(p=>p.id===prRef);
+    if(pr){ pr.status='converted'; pr.poRef=id; pr.convertedAt=today(); }
+  }
+  window._poPRRef='';
   save(); closeModal(); render();
 }
 
@@ -11949,14 +12532,25 @@ function saveEditPO() {
 
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
-function showAddPO() {
+function showAddPO(prObj, prId) {
+  // Look up PR object
+  const pr = prObj || (prId ? (state.purchaseRequests||[]).find(p=>p.id===prId) : null);
   const supOpts = '<option value="">— Select supplier —</option>' +
     (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
     '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
-  window._poLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false }];
+  // Pre-fill lines from PR if available
+  window._poLines = pr?.items?.length
+    ? pr.items.map(i=>({ itemId:i.itemId||'', desc:i.desc||'', qty:i.qty||1, unitPrice:i.unitPrice||0, lineTotal:(i.qty||1)*(i.unitPrice||0), vatExempt:false }))
+    : [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0, vatExempt:false }];
+  window._poPRRef = pr?.id || '';
   const due = new Date(); due.setDate(due.getDate()+7);
   showModal(`
-<div class="modal-head"><h3>New Purchase Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="modal-head"><h3>New Purchase Order${pr?` <span style="font-size:12px;color:var(--accent);font-weight:400">from ${pr.id}</span>`:''}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+${pr?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--accent)">
+  <i class="ti ti-clipboard-list" style="margin-right:4px"></i>
+  Creating PO from <strong>${pr.id}</strong> · Requested by ${pr.requestedBy} · ${pr.department||'—'}
+  ${pr.purpose?`<div style="color:var(--text-secondary);margin-top:3px">Purpose: ${pr.purpose}</div>`:''}
+</div>`:''}
 <div class="form-row">
   <div class="form-group"><label>Supplier</label>
     <select id="po-sup" onchange="handlePOSupSel(this)">
