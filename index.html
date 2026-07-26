@@ -7295,7 +7295,7 @@ function filterCollectionInvoices() {
     if(hint) hint.textContent = '(select customer first)';
     return;
   }
-  const custInvoices = (state.invoices||[]).filter(i=>i.customer===custName && getInvoiceStatus(i)!=='paid');
+  const custInvoices = (state.invoices||[]).filter(i=>i.customer===custName && getInvoiceStatus(i)!=='paid' && getInvoiceStatus(i)!=='cancelled');
   if(!custInvoices.length) {
     list.innerHTML = '<div style="padding:10px 14px;color:var(--text-tertiary);font-size:12px">No outstanding invoices for this customer.</div>';
     if(hint) hint.textContent = '(no outstanding invoices)';
@@ -17327,7 +17327,7 @@ function loadReturnLinesFromInvoice() {
 
 function showAddReturn() {
   const custOpts = state.customers.map(cu=>`<option value="${cu.name}">${cu.name}</option>`).join('');
-  const invOpts = state.invoices.filter(i=>i.status==='paid'||i.status==='pending').map(i=>`<option value="${i.id}">${i.id} — ${i.customer}</option>`).join('');
+  const invOpts = state.invoices.filter(i=>i.status!=='cancelled'&&(i.status==='paid'||i.status==='pending')).map(i=>`<option value="${i.id}">${i.id} — ${i.customer}</option>`).join('');
   window._retLines = [{ itemId:'', desc:'', qty:1, unitPrice:0, lineTotal:0 }];
   showModal(`
 <div class="modal-head"><h3>New Sales Return</h3><button class="close-btn" onclick="closeModal()">×</button></div>
