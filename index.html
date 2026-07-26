@@ -12550,6 +12550,7 @@ function saveEditPO() {
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO(prObj, prId) {
+  const pr = prObj || (prId ? (state.purchaseRequests||[]).find(p=>p.id===prId) : null);
   const supNames = (state.suppliers||[]).map(s=>s.name);
   // Pre-fill lines from PR if available
   window._poLines = pr?.items?.length
