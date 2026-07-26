@@ -9377,13 +9377,30 @@ function saveSupplier(redirectAfter) {
 
   if(redirectAfter === 'po') {
     closeModal();
+    // Restore any previously entered PO data
+    const saved = window._poPendingData;
+    if(saved && saved.lines?.length) window._poLines = saved.lines;
+    if(saved?.prRef) window._poPRRef = saved.prRef;
     showAddPO();
     setTimeout(()=>{
-      const inp = document.getElementById('po-sup-inp');
-      const hid = document.getElementById('po-sup');
-      if(inp) inp.value = name;
-      if(hid) hid.value = name;
-    }, 150);
+      const sel = document.getElementById('po-sup');
+      if(sel) {
+        const supOpts = '<option value="">— Select supplier —</option>' +
+          (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
+          '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
+        sel.innerHTML = supOpts;
+        sel.value = name;
+      }
+      // Restore other fields
+      if(saved) {
+        const f = (id,val) => { const el=document.getElementById(id); if(el&&val) el.value=val; };
+        f('po-date',saved.date); f('po-del',saved.deliveryDate);
+        f('po-notes',saved.notes); f('po-by',saved.preparedBy);
+        f('po-payment-terms',saved.paymentTermms); f('po-due',saved.dueDate);
+        f('po-purchase-type',saved.purchaseType); f('po-category',saved.category);
+      }
+      window._poPendingData = null;
+    }, 200);
   } else if(redirectAfter === 'dv') {
     closeModal();
     showAddJournal(true); // reopen disbursement form
@@ -12359,7 +12376,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
 }
 
 function savePO() {
-  const supplier     = document.getElementById('po-sup').value;
+  const supplier     = (document.getElementById('po-sup')?.value||'').trim();
   const date         = document.getElementById('po-date').value;
   const deliveryDate = document.getElementById('po-del').value;
   const notes        = document.getElementById('po-notes')?.value||'';
@@ -12533,11 +12550,7 @@ function saveEditPO() {
 function deletePO(id) { if(!requireAdmin('delete purchase orders')) return; if(!confirm('Delete this purchase order?')) return; state.purchaseOrders=(state.purchaseOrders||[]).filter(p=>p.id!==id); save(); render(); }
 
 function showAddPO(prObj, prId) {
-  // Look up PR object
-  const pr = prObj || (prId ? (state.purchaseRequests||[]).find(p=>p.id===prId) : null);
-  const supOpts = '<option value="">— Select supplier —</option>' +
-    (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
-    '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
+  const supNames = (state.suppliers||[]).map(s=>s.name);
   // Pre-fill lines from PR if available
   window._poLines = pr?.items?.length
     ? pr.items.map(i=>({ itemId:i.itemId||'', desc:i.desc||'', qty:i.qty||1, unitPrice:i.unitPrice||0, lineTotal:(i.qty||1)*(i.unitPrice||0), vatExempt:false }))
@@ -12553,9 +12566,16 @@ ${pr?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid 
 </div>`:''}
 <div class="form-row">
   <div class="form-group"><label>Supplier</label>
-    <select id="po-sup" onchange="handlePOSupSel(this)">
-      ${supOpts}
-    </select>
+    <div style="position:relative">
+      <input type="text" id="po-sup" list="po-sup-list" placeholder="Type supplier name…"
+        autocomplete="off"
+        onblur="checkPOSupplier(this)"
+        style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+      <datalist id="po-sup-list">
+        ${supNames.map(n=>`<option value="${n}">`).join('')}
+      </datalist>
+    </div>
+    <div id="po-sup-hint" style="font-size:11px;color:var(--text-tertiary);margin-top:3px"></div>
   </div>
   <div class="form-group">
     <label>Prepared By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
@@ -12635,12 +12655,51 @@ ${pr?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid 
   }, 100);
 }
 
+function checkPOSupplier(input) {
+  const typed = input.value.trim();
+  if(!typed) return;
+  const exists = (state.suppliers||[]).find(s=>s.name.toLowerCase()===typed.toLowerCase());
+  const hint = document.getElementById('po-sup-hint');
+  if(exists) {
+    input.value = exists.name; // normalize casing
+    if(hint) { hint.textContent='✅ '+exists.name; hint.style.color='var(--green)'; }
+    return;
+  }
+  // Not found — prompt immediately
+  if(hint) { hint.textContent='⚠ Not in supplier list.'; hint.style.color='var(--amber)'; }
+  const add = confirm(`"${typed}" is not in your supplier list.\n\nAdd "${typed}" as a new supplier?`);
+  if(add) {
+    if(!state.suppliers) state.suppliers=[];
+    const id='SUP-'+String(state.suppliers.length+1).padStart(3,'0');
+    state.suppliers.push({ id, name:typed, status:'active' });
+    save();
+    // Refresh datalist
+    const dl = document.getElementById('po-sup-list');
+    if(dl) dl.innerHTML = (state.suppliers||[]).map(s=>`<option value="${s.name}">`).join('');
+    if(hint) { hint.textContent='✅ Added as new supplier.'; hint.style.color='var(--green)'; }
+  } else {
+    if(hint) { hint.textContent='⚠ Supplier not saved — will be used as-is.'; hint.style.color='var(--amber)'; }
+  }
+}
+
 function handlePOSupSel(sel) {
   if(sel.value === '__add_new__') {
     sel.value = '';
-    if(confirm('Supplier not in list.\n\nAdd new supplier now? The PO form will re-open after saving.')) {
-      closeModal(); showAddSupplier('po', '');
+    const name = prompt('Enter new supplier name:');
+    if(!name?.trim()) return;
+    const trimmed = name.trim();
+    if((state.suppliers||[]).find(s=>s.name.toLowerCase()===trimmed.toLowerCase())) {
+      sel.value = trimmed; return;
     }
+    if(!state.suppliers) state.suppliers=[];
+    const id='SUP-'+String(state.suppliers.length+1).padStart(3,'0');
+    state.suppliers.push({ id, name:trimmed, status:'active' });
+    save();
+    const supOpts = '<option value="">— Select supplier —</option>' +
+      (state.suppliers||[]).map(s=>`<option value="${s.name}">${s.name}</option>`).join('') +
+      '<option value="__add_new__">➕ Supplier not in list — Add new supplier…</option>';
+    sel.innerHTML = supOpts;
+    sel.value = trimmed;
   }
 }
 
