@@ -866,7 +866,7 @@ async function fbForceRefresh() {
 
 const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtS = n => (n < 0 ? '-' : '') + fmt(n);
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 
 
 // ── SEARCHABLE DROPDOWN HELPER ────────────────────────────────────────────────
@@ -2417,11 +2417,11 @@ function renderMgmtDashboard(c, ta) {
     <button class="btn" onclick="renderCurrentPage()"><i class="ti ti-refresh"></i>Refresh</button>`;
 
   const now      = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  const todayStr = today();
   const thisMonth= todayStr.slice(0,7);
   const thisQ    = `${now.getFullYear()}-Q${Math.ceil((now.getMonth()+1)/3)}`;
   const thisYear = String(now.getFullYear());
-  const lastMonth= new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,7);
+  const lastMonth= now.getFullYear()+'-'+String(now.getMonth()).padStart(2,'0'); // prev month YYYY-MM
 
   // Period filter function
   function inPd(date) {
@@ -2429,12 +2429,12 @@ function renderMgmtDashboard(c, ta) {
     if(period==='all') return true;
     const y=now.getFullYear(), m=now.getMonth(), d=date.slice(0,10);
     if(period==='month') {
-      return d>=new Date(y,m,1).toISOString().slice(0,10) && d<=new Date(y,m+1,0).toISOString().slice(0,10);
+      const ld=(yr,mo,dy)=>{const dt=new Date(yr,mo,dy);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}; return d>=ld(y,m,1)&&d<=ld(y,m+1,0);
     }
     if(period==='year') return d>=`${y}-01-01`&&d<=`${y}-12-31`;
     if(period==='quarter') {
       const qs=Math.floor(m/3)*3;
-      return d>=new Date(y,qs,1).toISOString().slice(0,10) && d<=new Date(y,qs+3,0).toISOString().slice(0,10);
+      const ld2=(yr,mo,dy)=>{const dt=new Date(yr,mo,dy);return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');}; return d>=ld2(y,qs,1)&&d<=ld2(y,qs+3,0);
     }
     return true;
   }
@@ -8799,8 +8799,8 @@ function deductFEFO(itemId, qtyNeeded) {
 function buildLotsTab() {
   const lots = getAllLots();
   const now = new Date();
-  const today30 = new Date(now.getTime()+30*864e5).toISOString().slice(0,10);
-  const today60 = new Date(now.getTime()+60*864e5).toISOString().slice(0,10);
+  const today30 = (()=>{const d=new Date(now.getTime()+30*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const today60 = (()=>{const d=new Date(now.getTime()+60*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
   const today90 = new Date(now.getTime()+90*864e5).toISOString().slice(0,10);
   const expired  = lots.filter(l=>l.expiryDate&&l.expiryDate<today());
   const exp30    = lots.filter(l=>l.expiryDate&&l.expiryDate>=today()&&l.expiryDate<=today30);

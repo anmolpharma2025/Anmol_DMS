@@ -463,9 +463,9 @@ const FB_CONFIG = {
 const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
 
 // Office coordinates — UPDATE THESE to your actual office location
-const OFFICE_LAT  = 10.3395;   // ← replace with your office latitude
-const OFFICE_LNG  = 123.9117;  // ← replace with your office longitude
-const OFFICE_RADIUS_M = 50;   // meters radius considered "in office"
+const OFFICE_LAT  = 10.3157;   // ← replace with your office latitude
+const OFFICE_LNG  = 123.8854;  // ← replace with your office longitude
+const OFFICE_RADIUS_M = 200;   // meters radius considered "in office"
 
 // ══════════════════════════════════════════════════════════════════════
 // STATE
@@ -480,7 +480,7 @@ let todayRecord  = null;
 // ══════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════
-const today    = () => new Date().toISOString().split('T')[0];
+const today    = () => { const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 const timeNow  = () => new Date().toTimeString().slice(0,5);
 const greeting = () => { const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening'; };
 const fmt      = n => n ? (+n).toFixed(2) : '—';
