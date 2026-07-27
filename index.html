@@ -7469,6 +7469,7 @@ function renderInventory(c, ta) {
 </div>
 <div class="tabs" id="inv-tabs" style="margin-bottom:16px">
   <div class="tab active" onclick="invTab('items',this)">Items</div>
+  <div class="tab" onclick="invTab('lots',this)"><i class="ti ti-flask" style="margin-right:4px;color:var(--amber)"></i>Lots / Batches</div>
   <div class="tab" onclick="invTab('movements',this)">Stock Movements</div>
   <div class="tab" onclick="invTab('returns',this)">Return Items</div>
   <div class="tab" onclick="invTab('transfers',this)">Transfers</div>
@@ -7484,7 +7485,7 @@ function invTab(type, el) {
   el.classList.add('active');
   const body = document.getElementById('inv-body');
   if(!body) return;
-  if(type==='items') { body.innerHTML = buildInventoryItems(); if(window._invSearch) filterInvSearch(window._invSearch); }
+  if(type==='lots') { body.innerHTML = buildLotsTab(); return; }
   else if(type==='movements') body.innerHTML = buildInventoryMovements();
   else if(type==='returns') body.innerHTML = buildInventoryReturns();
   else if(type==='transfers') body.innerHTML = buildInventoryTransfers();
@@ -8716,6 +8717,379 @@ function filterInvSearch(val) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// LOT / BATCH MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Get all lots across all items, sorted by expiry (FEFO)
+function getAllLots() {
+  const lots = [];
+  (state.inventory||[]).forEach(item=>{
+    (item.lots||[]).forEach(lot=>{
+      lots.push({ ...lot, itemId:item.id, itemName:item.name, unit:item.unit, category:item.category });
+    });
+    // Legacy: if item has batchNo/lotNo but no lots array, create virtual lot
+    if((!item.lots||!item.lots.length) && (item.batchNo||item.lotNo) && (item.qty||0)>0) {
+      lots.push({ lotId:'LEGACY', batchNo:item.batchNo||'', lotNo:item.lotNo||'', expiryDate:item.expiryDate||'', qty:item.qty||0, qtyReceived:item.qty||0, dateReceived:'', itemId:item.id, itemName:item.name, unit:item.unit, category:item.category });
+    }
+  });
+  return lots.sort((a,b)=>(a.expiryDate||'9999').localeCompare(b.expiryDate||'9999'));
+}
+
+// Get lots for a specific item, FEFO sorted
+function getItemLots(itemId) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return [];
+  const lots = (item.lots||[]).map(l=>({...l, itemId, unit:item.unit}))
+    .sort((a,b)=>(a.expiryDate||'9999').localeCompare(b.expiryDate||'9999'));
+  // Include legacy single-lot items
+  if(!lots.length && (item.batchNo||item.lotNo) && (item.qty||0)>0) {
+    lots.push({ lotId:'LEGACY', batchNo:item.batchNo||'', lotNo:item.lotNo||'', expiryDate:item.expiryDate||'', qty:item.qty||0, itemId, unit:item.unit });
+  }
+  return lots;
+}
+
+// Total qty of an item across all lots
+function getLotTotalQty(itemId) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return 0;
+  if(item.lots?.length) return item.lots.reduce((s,l)=>s+(l.qty||0),0);
+  return item.qty||0;
+}
+
+// Add a new lot to an item
+function addLotToItem(itemId, lot) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return;
+  if(!item.lots) item.lots=[];
+  const lotId = 'LOT-'+itemId+'-'+String(item.lots.length+1).padStart(3,'0');
+  item.lots.push({ lotId, ...lot, dateReceived:lot.dateReceived||today() });
+  // Update item.qty to reflect total
+  item.qty = item.lots.reduce((s,l)=>s+(l.qty||0),0);
+}
+
+// Deduct qty from item lots using FEFO
+function deductFEFO(itemId, qtyNeeded) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return [];
+  if(!item.lots?.length) {
+    // Legacy single lot
+    const deducted = Math.min(item.qty||0, qtyNeeded);
+    item.qty = Math.max(0,(item.qty||0)-deducted);
+    return deducted>0?[{lotId:'LEGACY', batchNo:item.batchNo, lotNo:item.lotNo, expiryDate:item.expiryDate, qtyDeducted:deducted}]:[];
+  }
+  const sorted = [...item.lots].sort((a,b)=>(a.expiryDate||'9999').localeCompare(b.expiryDate||'9999'));
+  let remaining = qtyNeeded;
+  const used = [];
+  for(const lot of sorted) {
+    if(remaining<=0) break;
+    if((lot.qty||0)<=0) continue;
+    const take = Math.min(lot.qty, remaining);
+    lot.qty -= take;
+    remaining -= take;
+    used.push({ lotId:lot.lotId, batchNo:lot.batchNo, lotNo:lot.lotNo, expiryDate:lot.expiryDate, qtyDeducted:take });
+  }
+  // Remove empty lots
+  item.lots = item.lots.filter(l=>(l.qty||0)>0);
+  item.qty = item.lots.reduce((s,l)=>s+(l.qty||0),0);
+  return used;
+}
+
+// ── LOTS TAB ─────────────────────────────────────────────────────────────────
+function buildLotsTab() {
+  const lots = getAllLots();
+  const now = new Date();
+  const today30 = new Date(now.getTime()+30*864e5).toISOString().slice(0,10);
+  const today60 = new Date(now.getTime()+60*864e5).toISOString().slice(0,10);
+  const today90 = new Date(now.getTime()+90*864e5).toISOString().slice(0,10);
+  const expired  = lots.filter(l=>l.expiryDate&&l.expiryDate<today());
+  const exp30    = lots.filter(l=>l.expiryDate&&l.expiryDate>=today()&&l.expiryDate<=today30);
+  const exp60    = lots.filter(l=>l.expiryDate&&l.expiryDate>today30&&l.expiryDate<=today60);
+  const noExpiry = lots.filter(l=>!l.expiryDate);
+  const invFilter = window._lotsFilter||'';
+
+  const filtered = lots.filter(l=>{
+    if(!invFilter) return true;
+    return (l.itemName||'').toLowerCase().includes(invFilter.toLowerCase()) ||
+      (l.batchNo||'').toLowerCase().includes(invFilter.toLowerCase()) ||
+      (l.lotNo||'').toLowerCase().includes(invFilter.toLowerCase()) ||
+      (l.itemId||'').toLowerCase().includes(invFilter.toLowerCase());
+  });
+
+  function expiryBadge(exp) {
+    if(!exp) return '<span style="font-size:11px;color:var(--text-tertiary)">No expiry</span>';
+    if(exp<today()) return `<span class="badge" style="background:var(--red-bg);color:var(--red)">EXPIRED</span>`;
+    if(exp<=today30) return `<span class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">Exp in ≤30d</span>`;
+    if(exp<=today60) return `<span class="badge" style="background:rgba(245,158,11,0.12);color:var(--amber)">Exp in ≤60d</span>`;
+    if(exp<=today90) return `<span class="badge" style="background:rgba(245,158,11,0.08);color:var(--amber)">Exp in ≤90d</span>`;
+    return `<span class="badge paid">Good</span>`;
+  }
+
+  return `
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-flask"></i>Total Lots</div><div class="kpi-value">${lots.length}</div></div>
+  <div class="kpi"><div class="kpi-label" style="color:var(--red)"><i class="ti ti-skull"></i>Expired</div><div class="kpi-value neg">${expired.length}</div></div>
+  <div class="kpi"><div class="kpi-label" style="color:var(--amber)"><i class="ti ti-alert-triangle"></i>Expiring ≤30 days</div><div class="kpi-value" style="color:var(--amber)">${exp30.length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>No Expiry Date</div><div class="kpi-value" style="color:var(--text-secondary)">${noExpiry.length}</div></div>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+  <input type="text" placeholder="🔍 Search item, batch or lot…" value="${invFilter}" oninput="window._lotsFilter=this.value;document.getElementById('inv-body').innerHTML=buildLotsTab()"
+    style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:220px">
+  <button class="btn primary" onclick="showAddLotModal()"><i class="ti ti-plus"></i>Add Lot / Batch</button>
+  <button class="btn" onclick="showLotTraceModal()"><i class="ti ti-route"></i>Lot Traceability</button>
+</div>
+<table>
+  <thead><tr style="white-space:nowrap">
+    <th>Lot ID</th><th>Item</th><th>Category</th><th>Batch No.</th><th>Lot No.</th>
+    <th style="text-align:right">Qty Received</th><th style="text-align:right">Qty On Hand</th>
+    <th>Date Received</th><th>Expiry Date</th><th>Expiry Status</th><th>Actions</th>
+  </tr></thead>
+  <tbody>
+  ${filtered.length===0?`<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No lots found.</td></tr>`:''}
+  ${filtered.map(l=>{
+    const pct = l.qtyReceived>0?Math.round((l.qty||0)/l.qtyReceived*100):100;
+    return `<tr>
+      <td class="mono" style="font-size:11px">${l.lotId}</td>
+      <td style="font-weight:500">${l.itemName}<div style="font-size:10px;color:var(--text-tertiary)">${l.itemId}</div></td>
+      <td style="font-size:12px;color:var(--text-secondary)">${l.category||'—'}</td>
+      <td class="mono" style="font-size:12px">${l.batchNo||'—'}</td>
+      <td class="mono" style="font-size:12px">${l.lotNo||'—'}</td>
+      <td style="text-align:right">${l.qtyReceived||l.qty||0} ${l.unit||''}</td>
+      <td style="text-align:right;font-weight:600">
+        <span style="color:${(l.qty||0)===0?'var(--text-tertiary)':(l.qty||0)<=(l.qtyReceived||0)*0.2?'var(--red)':'var(--green)'}">${l.qty||0} ${l.unit||''}</span>
+        <div style="font-size:9px;color:var(--text-tertiary)">${pct}% remaining</div>
+      </td>
+      <td style="font-size:12px;color:var(--text-secondary)">${l.dateReceived||'—'}</td>
+      <td class="mono" style="font-size:12px;color:${l.expiryDate&&l.expiryDate<today()?'var(--red)':l.expiryDate&&l.expiryDate<=today30?'var(--amber)':'inherit'}">${l.expiryDate||'—'}</td>
+      <td>${expiryBadge(l.expiryDate)}</td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditLotModal('${l.itemId}','${l.lotId}')"><i class="ti ti-edit"></i></button>
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showLotHistoryModal('${l.itemId}','${l.lotId}')"><i class="ti ti-history"></i></button>
+        ${l.lotId!=='LEGACY'?`<button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteLot('${l.itemId}','${l.lotId}')"><i class="ti ti-trash"></i></button>`:''}
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>`;
+}
+
+// ── ADD LOT MODAL ─────────────────────────────────────────────────────────────
+function showAddLotModal(preItemId) {
+  const items = (state.inventory||[]);
+  const itemOpts = items.map(i=>`<option value="${i.id}" ${i.id===preItemId?'selected':''}>${i.id} — ${i.name}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-flask" style="margin-right:6px;color:var(--accent)"></i>Add Lot / Batch</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:14px;font-size:12px;color:var(--accent)">
+  <i class="ti ti-info-circle" style="margin-right:4px"></i>Lots are tracked separately per item. System uses <strong>FEFO</strong> (First Expiry, First Out) automatically when issuing.
+</div>
+<div class="form-group"><label>Item <span style="color:var(--red)">*</span></label>
+  <select id="lot-item" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+    <option value="">— Select item —</option>${itemOpts}
+  </select>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Batch Number</label><input type="text" id="lot-batch" placeholder="e.g. B-2025-001"></div>
+  <div class="form-group"><label>Lot Number</label><input type="text" id="lot-lot" placeholder="e.g. LOT-4521"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Quantity Received <span style="color:var(--red)">*</span></label><input type="number" id="lot-qty" min="1" value="1"></div>
+  <div class="form-group"><label>Unit Cost (per unit)</label><input type="number" id="lot-cost" min="0" step="0.01" placeholder="0.00"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Received</label><input type="date" id="lot-received" value="${today()}"></div>
+  <div class="form-group"><label>Expiry Date</label><input type="date" id="lot-expiry"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier</label><input type="text" id="lot-supplier" placeholder="Supplier or manufacturer"></div>
+  <div class="form-group"><label>PO Reference</label><input type="text" id="lot-poref" placeholder="e.g. PO-0001"></div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="lot-notes" placeholder="Any additional notes"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveLot()"><i class="ti ti-check"></i>Add Lot</button>
+</div>`);
+}
+
+function saveLot() {
+  const itemId   = document.getElementById('lot-item')?.value;
+  const batchNo  = document.getElementById('lot-batch')?.value.trim()||'';
+  const lotNo    = document.getElementById('lot-lot')?.value.trim()||'';
+  const qty      = parseInt(document.getElementById('lot-qty')?.value)||0;
+  const unitCost = parseFloat(document.getElementById('lot-cost')?.value)||0;
+  const received = document.getElementById('lot-received')?.value||today();
+  const expiry   = document.getElementById('lot-expiry')?.value||'';
+  const supplier = document.getElementById('lot-supplier')?.value.trim()||'';
+  const poRef    = document.getElementById('lot-poref')?.value.trim()||'';
+  const notes    = document.getElementById('lot-notes')?.value.trim()||'';
+
+  if(!itemId) { alert('Please select an item.'); return; }
+  if(qty<=0)  { alert('Quantity must be greater than zero.'); return; }
+
+  const lot = { batchNo, lotNo, qty, qtyReceived:qty, unitCost, dateReceived:received, expiryDate:expiry, supplier, poRef, notes };
+  addLotToItem(itemId, lot);
+
+  // Add stock movement
+  if(!state.inventoryMovements) state.inventoryMovements=[];
+  state.inventoryMovements.push({
+    id:'MOV-'+String(state.inventoryMovements.length+1).padStart(4,'0'),
+    date:received, item:itemId, type:'in', qty,
+    ref:poRef||'RECEIPT',
+    note:`Lot received${batchNo?' — Batch '+batchNo:''}${lotNo?' / Lot '+lotNo:''}${expiry?' | Exp: '+expiry:''}${supplier?' | '+supplier:''}`
+  });
+
+  auditLog('CREATE','Inventory Lot',itemId,{description:`Added lot${batchNo?' B:'+batchNo:''}${lotNo?' L:'+lotNo:''} qty ${qty} for ${itemId} — exp ${expiry||'N/A'}`});
+  save(); closeModal();
+  // Refresh lots tab
+  document.querySelector('.tab.active')?.click();
+  render();
+}
+
+// ── EDIT LOT ──────────────────────────────────────────────────────────────────
+function showEditLotModal(itemId, lotId) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  const lot  = (item?.lots||[]).find(l=>l.lotId===lotId);
+  if(!item||!lot) return;
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Lot — ${lotId}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px"><strong>${item.name}</strong> (${item.id})</div>
+<div class="form-row">
+  <div class="form-group"><label>Batch Number</label><input type="text" id="elot-batch" value="${lot.batchNo||''}"></div>
+  <div class="form-group"><label>Lot Number</label><input type="text" id="elot-lot" value="${lot.lotNo||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Qty On Hand</label><input type="number" id="elot-qty" value="${lot.qty||0}" min="0"></div>
+  <div class="form-group"><label>Expiry Date</label><input type="date" id="elot-expiry" value="${lot.expiryDate||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Received</label><input type="date" id="elot-received" value="${lot.dateReceived||''}"></div>
+  <div class="form-group"><label>Supplier</label><input type="text" id="elot-supplier" value="${lot.supplier||''}"></div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="elot-notes" value="${lot.notes||''}"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditLot('${itemId}','${lotId}')"><i class="ti ti-check"></i>Save</button>
+</div>`);
+}
+
+function saveEditLot(itemId, lotId) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  const lot  = (item?.lots||[]).find(l=>l.lotId===lotId);
+  if(!item||!lot) return;
+  lot.batchNo     = document.getElementById('elot-batch')?.value.trim()||'';
+  lot.lotNo       = document.getElementById('elot-lot')?.value.trim()||'';
+  lot.qty         = parseInt(document.getElementById('elot-qty')?.value)||0;
+  lot.expiryDate  = document.getElementById('elot-expiry')?.value||'';
+  lot.dateReceived= document.getElementById('elot-received')?.value||'';
+  lot.supplier    = document.getElementById('elot-supplier')?.value.trim()||'';
+  lot.notes       = document.getElementById('elot-notes')?.value.trim()||'';
+  // Update item total qty
+  item.qty = item.lots.reduce((s,l)=>s+(l.qty||0),0);
+  save(); closeModal();
+  document.querySelector('.tab.active')?.click();
+  render();
+}
+
+// ── DELETE LOT ────────────────────────────────────────────────────────────────
+function deleteLot(itemId, lotId) {
+  if(!confirm('Delete this lot? This cannot be undone.')) return;
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return;
+  item.lots = (item.lots||[]).filter(l=>l.lotId!==lotId);
+  item.qty  = item.lots.reduce((s,l)=>s+(l.qty||0),0);
+  save(); document.querySelector('.tab.active')?.click(); render();
+}
+
+// ── LOT HISTORY ───────────────────────────────────────────────────────────────
+function showLotHistoryModal(itemId, lotId) {
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  const lot  = (item?.lots||[]).find(l=>l.lotId===lotId)||{batchNo:item?.batchNo,lotNo:item?.lotNo,expiryDate:item?.expiryDate};
+  const movements = (state.inventoryMovements||[]).filter(m=>m.item===itemId&&(m.note||'').includes(lot.batchNo||'NOMATCH'));
+  const soUsed = (state.invoices||[]).filter(i=>(i.lotRefs||[]).some(r=>r.lotId===lotId));
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-history" style="margin-right:6px;color:var(--accent)"></i>Lot History — ${lotId}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+  <div class="kpi"><div class="kpi-label">Batch</div><div style="font-size:15px;font-weight:700;font-family:monospace">${lot.batchNo||'—'}</div></div>
+  <div class="kpi"><div class="kpi-label">Lot No.</div><div style="font-size:15px;font-weight:700;font-family:monospace">${lot.lotNo||'—'}</div></div>
+  <div class="kpi"><div class="kpi-label">Expiry</div><div style="font-size:15px;font-weight:700;color:${lot.expiryDate&&lot.expiryDate<today()?'var(--red)':'var(--text-primary)'}">${lot.expiryDate||'N/A'}</div></div>
+</div>
+<div style="font-size:13px;font-weight:600;margin-bottom:8px">Invoices Using This Lot</div>
+${soUsed.length===0?`<div style="font-size:12px;color:var(--text-tertiary);padding:8px">No invoice records found for this lot.</div>`
+:soUsed.map(i=>`<div style="padding:8px 0;border-bottom:1px solid var(--border-light);font-size:12px;display:flex;justify-content:space-between">
+  <span>${i.id} — ${i.customer}</span><span style="color:var(--text-secondary)">${i.date}</span>
+</div>`).join('')}
+<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>`);
+}
+
+// ── LOT TRACEABILITY ──────────────────────────────────────────────────────────
+function showLotTraceModal() {
+  const lots = getAllLots();
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-route" style="margin-right:6px;color:var(--accent)"></i>Lot Traceability Search</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-group"><label>Search by Batch or Lot Number</label>
+  <input type="text" id="trace-input" placeholder="Enter batch or lot number…" oninput="renderLotTrace(this.value)"
+    style="width:100%;padding:10px 12px;border:1.5px solid var(--accent);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:14px;font-family:var(--font);outline:none">
+</div>
+<div id="trace-results" style="margin-top:10px;font-size:13px;color:var(--text-secondary)">Enter a batch or lot number to trace.</div>
+<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" onclick="closeModal()">Close</button></div>`);
+  setTimeout(()=>document.getElementById('trace-input')?.focus(),50);
+}
+
+function renderLotTrace(q) {
+  if(!q||q.length<2) { document.getElementById('trace-results').innerHTML='<span style="color:var(--text-secondary)">Enter at least 2 characters.</span>'; return; }
+  const lots = getAllLots().filter(l=>
+    (l.batchNo||'').toLowerCase().includes(q.toLowerCase())||
+    (l.lotNo||'').toLowerCase().includes(q.toLowerCase()));
+  if(!lots.length) { document.getElementById('trace-results').innerHTML=`<span style="color:var(--text-secondary)">No lots found for "${q}".</span>`; return; }
+  document.getElementById('trace-results').innerHTML = lots.map(l=>`
+    <div style="padding:12px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-sm);margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-weight:700;color:var(--accent)">${l.lotId}</span>
+        <span style="font-size:11px;color:var(--text-secondary)">${l.itemId}</span>
+      </div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px">${l.itemName}</div>
+      <div style="font-size:12px;color:var(--text-secondary);display:flex;gap:16px;flex-wrap:wrap">
+        ${l.batchNo?`<span>Batch: <strong>${l.batchNo}</strong></span>`:''}
+        ${l.lotNo?`<span>Lot: <strong>${l.lotNo}</strong></span>`:''}
+        <span>Qty on hand: <strong>${l.qty||0} ${l.unit||''}</strong></span>
+        ${l.expiryDate?`<span>Expiry: <strong style="color:${l.expiryDate<today()?'var(--red)':'inherit'}">${l.expiryDate}</strong></span>`:''}
+        ${l.dateReceived?`<span>Received: ${l.dateReceived}</span>`:''}
+        ${l.supplier?`<span>Supplier: ${l.supplier}</span>`:''}
+      </div>
+    </div>`).join('');
+}
+
+// Show lots when viewing item details (used in SO/Invoice line item selection)
+function showItemLotsInfo(itemId) {
+  const lots = getItemLots(itemId);
+  const item = (state.inventory||[]).find(i=>i.id===itemId);
+  if(!item) return;
+  const today30 = new Date(new Date().getTime()+30*864e5).toISOString().slice(0,10);
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-flask" style="margin-right:6px;color:var(--accent)"></i>${item.name} — Lots (FEFO order)</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Total on hand: <strong>${item.qty||0} ${item.unit||''}</strong> across ${lots.length} lot(s) — issued in First Expiry, First Out order</div>
+${lots.length===0?'<div style="text-align:center;padding:20px;color:var(--text-tertiary)">No lots recorded. Add a lot to start tracking.</div>':`
+<table style="width:100%;font-size:12px;border-collapse:collapse">
+  <thead><tr style="background:var(--bg-secondary)">
+    <th style="padding:6px 8px">Lot ID</th><th>Batch</th><th>Lot No.</th>
+    <th style="text-align:right">Qty</th><th>Expiry</th><th>Status</th>
+  </tr></thead>
+  <tbody>
+  ${lots.map((l,i)=>`<tr style="border-bottom:1px solid var(--border-light);${i===0?'background:rgba(16,185,129,0.05)':''}">
+    <td style="padding:6px 8px;font-family:monospace;font-size:11px">${l.lotId}${i===0?' <span style="font-size:9px;color:var(--green);font-weight:700">NEXT</span>':''}</td>
+    <td style="padding:6px 8px">${l.batchNo||'—'}</td>
+    <td style="padding:6px 8px">${l.lotNo||'—'}</td>
+    <td style="padding:6px 8px;text-align:right;font-weight:600">${l.qty||0} ${l.unit||''}</td>
+    <td style="padding:6px 8px;font-family:monospace;color:${l.expiryDate&&l.expiryDate<today()?'var(--red)':l.expiryDate&&l.expiryDate<=today30?'var(--amber)':'inherit'}">${l.expiryDate||'N/A'}</td>
+    <td style="padding:6px 8px">${!l.expiryDate?'—':l.expiryDate<today()?'<span style="color:var(--red)">EXPIRED</span>':l.expiryDate<=today30?'<span style="color:var(--amber)">⚠ Expiring soon</span>':'<span style="color:var(--green)">Good</span>'}</td>
+  </tr>`).join('')}
+  </tbody>
+</table>`}
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Close</button>
+  <button class="btn primary" onclick="closeModal();showAddLotModal('${itemId}')"><i class="ti ti-plus"></i>Add Lot</button>
+</div>`);
+}
+
 function buildInventoryItems() {
   const branches = getBranches();
   const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
@@ -8755,10 +9129,12 @@ function buildInventoryItems() {
         <td style="font-weight:500">${it.name}</td>
         <td style="font-size:12px;color:var(--text-secondary)">${it.brand||'—'}</td>
         <td style="font-size:11px;color:var(--text-secondary)">
-          ${it.batchNo?`<div>Batch: <span class="mono">${it.batchNo}</span></div>`:''}
-          ${it.lotNo?`<div>Lot: <span class="mono">${it.lotNo}</span></div>`:''}
-          ${!it.batchNo&&!it.lotNo?'—':''}
-          ${it.expiryDate?`<div style="color:${new Date(it.expiryDate)<new Date()?'var(--red)':'var(--text-tertiary)'}">Exp: ${it.expiryDate}</div>`:''}
+          ${(it.lots||[]).length>0
+            ? `<button onclick="showItemLotsInfo('${it.id}')" style="background:none;border:1px solid var(--accent);border-radius:99px;padding:1px 8px;font-size:10px;color:var(--accent);cursor:pointer"><i class="ti ti-flask" style="font-size:10px"></i> ${it.lots.length} lot${it.lots.length!==1?'s':''}</button>`
+            : it.batchNo?`<div>Batch: <span class="mono">${it.batchNo}</span></div>`:''}
+          ${(it.lots||[]).length===0&&it.lotNo?`<div>Lot: <span class="mono">${it.lotNo}</span></div>`:''}
+          ${(it.lots||[]).length===0&&!it.batchNo&&!it.lotNo?'—':''}
+          ${it.expiryDate&&(it.lots||[]).length===0?`<div style="color:${new Date(it.expiryDate)<new Date()?'var(--red)':'var(--text-tertiary)'}">Exp: ${it.expiryDate}</div>`:''}
         </td>
         <td style="color:var(--text-secondary)">${it.unit}</td>
         <td style="text-align:right">${fmt(it.costPrice)}</td>
@@ -8773,6 +9149,8 @@ function buildInventoryItems() {
         <td><div class="action-btns">
           ${canEdit?`<button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditItem('${it.id}')" title="Edit item details"><i class="ti ti-pencil"></i></button>`:''}
           <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showAdjustQty('${it.id}')" title="Adjust stock"><i class="ti ti-arrow-right-left"></i></button>
+          <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="showAddLotModal('${it.id}')" title="Add lot/batch"><i class="ti ti-flask"></i></button>
+          ${(it.lots||[]).length>0?`<button class="btn" style="padding:2px 8px;font-size:11px" onclick="showItemLotsInfo('${it.id}')" title="View lots"><i class="ti ti-list-details"></i></button>`:''}
           ${canEdit?`<button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteItem('${it.id}')"><i class="ti ti-trash"></i></button>`:''}
         </div></td>
       </tr>`;
@@ -9188,36 +9566,44 @@ function saveItem() {
   const isMain = !myBranchId || myBranchId === mainId;
 
   if(isMain) {
-    // Admin or main branch user — add directly to main inventory
-    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel });
+    // Build initial lots array if batch/lot info provided
+    const initialLots = [];
+    if(qty>0 && (batchNo||lotNo||expiryDate)) {
+      initialLots.push({
+        lotId: 'LOT-'+id+'-001',
+        batchNo, lotNo, expiryDate,
+        qty, qtyReceived:qty,
+        unitCost: costPrice,
+        dateReceived: today(),
+        notes: 'Opening stock'
+      });
+    }
+    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty, reorderLevel, lots: initialLots });
     if(qty > 0) {
       if(!state.inventoryMovements) state.inventoryMovements = [];
       state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:'OPENING', note:'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
     }
   } else {
-    // Branch-assigned user — item goes to main with qty:0, then a received
-    // transfer adds the opening stock directly to their branch
-    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty:0, reorderLevel });
+    const initialLots = [];
+    if(qty>0 && (batchNo||lotNo||expiryDate)) {
+      initialLots.push({ lotId:'LOT-'+id+'-001', batchNo, lotNo, expiryDate, qty, qtyReceived:qty, unitCost:costPrice, dateReceived:today(), notes:'Opening stock' });
+    }
+    state.inventory.push({ id, name, category, brand, batchNo, lotNo, expiryDate, unit, costPrice, salePrice, qty:0, reorderLevel, lots:initialLots });
     if(qty > 0) {
-      // Create a pre-received transfer representing the opening stock at this branch
       const txNum = String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
       const txId = 'TX-'+txNum;
       if(!state.inventoryTransfers) state.inventoryTransfers = [];
       state.inventoryTransfers.push({
-        id: txId,
-        date: today(),
-        fromBranch: mainId,
-        toBranch: myBranchId,
+        id: txId, date: today(),
+        fromBranch: mainId, toBranch: myBranchId,
         lines: [{ itemId:id, desc:name, qty, unit }],
         notes: 'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:''),
         transferredBy: currentUser?.name||'System',
-        status: 'received', // Mark as already received so stock shows immediately
-        receivedDate: today(),
-        receivedBy: currentUser?.name||'System'
+        status: 'received', receivedDate: today(), receivedBy: currentUser?.name||'System'
       });
       if(!state.inventoryMovements) state.inventoryMovements = [];
       const myBranch = branches.find(b=>b.id===myBranchId);
-      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+( myBranch?.name||myBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
+      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+(myBranch?.name||myBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
     }
   }
   save();
@@ -10932,9 +11318,16 @@ function saveIssueDR(soId, drNumDefault, count) {
   // Save DR record to SO
   if(!so.drIssued) so.drIssued = [];
   so.drIssued.push({ drNum, date: today(), items });
-  // Store latest DR number on the SO itself
   so.drNo = drNum;
   stampUpdate(so);
+
+  // FEFO deduction from inventory lots
+  items.forEach(item=>{
+    if(!item.itemId) return;
+    const used = deductFEFO(item.itemId, item.qty);
+    // Tag DR with lot info for traceability
+    if(used.length) item.lotsUsed = used;
+  });
 
   // Sync DR number to the linked invoice (if any) — append without duplicates
   const linkedInv = (state.invoices||[]).find(i=>i.soRef===soId);
