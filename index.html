@@ -7485,13 +7485,14 @@ function invTab(type, el) {
   el.classList.add('active');
   const body = document.getElementById('inv-body');
   if(!body) return;
-  if(type==='lots') { body.innerHTML = buildLotsTab(); return; }
+  if(type==='items')        { body.innerHTML = buildInventoryItems(); if(window._invSearch) filterInvSearch(window._invSearch); }
+  else if(type==='lots')    { body.innerHTML = buildLotsTab(); }
   else if(type==='movements') body.innerHTML = buildInventoryMovements();
   else if(type==='returns') body.innerHTML = buildInventoryReturns();
   else if(type==='transfers') body.innerHTML = buildInventoryTransfers();
   else if(type==='consolidated') body.innerHTML = buildConsolidatedInventory();
   else if(type==='consigned') body.innerHTML = buildConsignedItems();
-  else if(type==='report') body.innerHTML = buildConsolidatedReport();
+  else if(type==='report')  body.innerHTML = buildConsolidatedReport();
 }
 
 // ── IN-TRANSIT HELPER ─────────────────────────────────────────────────────────
@@ -8925,22 +8926,47 @@ function saveLot() {
   if(!itemId) { alert('Please select an item.'); return; }
   if(qty<=0)  { alert('Quantity must be greater than zero.'); return; }
 
-  const lot = { batchNo, lotNo, qty, qtyReceived:qty, unitCost, dateReceived:received, expiryDate:expiry, supplier, poRef, notes };
-  addLotToItem(itemId, lot);
+  const branches  = getBranches();
+  const mainId    = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId= currentUser?.branchId || null;
+  const isMain    = !myBranchId || myBranchId === mainId;
 
-  // Add stock movement
+  const lot = { batchNo, lotNo, qty, qtyReceived:qty, unitCost, dateReceived:received, expiryDate:expiry, supplier, poRef, notes };
+
+  if(isMain) {
+    // Add lot directly to item
+    addLotToItem(itemId, lot);
+  } else {
+    // Branch user — add lot to item but create a transfer receipt to assign stock to branch
+    addLotToItem(itemId, lot);
+    // Record as a branch receipt transfer
+    const txId = 'TX-'+String(((state.inventoryTransfers||[]).length)+1).padStart(3,'0');
+    if(!state.inventoryTransfers) state.inventoryTransfers=[];
+    const item = (state.inventory||[]).find(i=>i.id===itemId);
+    state.inventoryTransfers.push({
+      id:txId, date:received,
+      fromBranch:mainId, toBranch:myBranchId,
+      lines:[{ itemId, desc:item?.name||itemId, qty, unit:item?.unit||'pcs', batchNo, lotNo, expiryDate:expiry }],
+      notes:`Lot received${batchNo?' — Batch '+batchNo:''}${lotNo?' / Lot '+lotNo:''}${expiry?' | Exp: '+expiry:''} | ${supplier||''}`,
+      transferredBy:currentUser?.name||'System',
+      status:'received', receivedDate:received, receivedBy:currentUser?.name||'System'
+    });
+  }
+
+  // Add stock movement record
   if(!state.inventoryMovements) state.inventoryMovements=[];
   state.inventoryMovements.push({
     id:'MOV-'+String(state.inventoryMovements.length+1).padStart(4,'0'),
     date:received, item:itemId, type:'in', qty,
-    ref:poRef||'RECEIPT',
-    note:`Lot received${batchNo?' — Batch '+batchNo:''}${lotNo?' / Lot '+lotNo:''}${expiry?' | Exp: '+expiry:''}${supplier?' | '+supplier:''}`
+    ref:poRef||'LOT-RECEIPT',
+    note:`Lot received${batchNo?' — Batch '+batchNo:''}${lotNo?' / Lot '+lotNo:''}${expiry?' | Exp: '+expiry:''}${supplier?' | '+supplier:''}${myBranchId&&!isMain?' | Branch: '+(branches.find(b=>b.id===myBranchId)?.name||myBranchId):''}`
   });
 
-  auditLog('CREATE','Inventory Lot',itemId,{description:`Added lot${batchNo?' B:'+batchNo:''}${lotNo?' L:'+lotNo:''} qty ${qty} for ${itemId} — exp ${expiry||'N/A'}`});
+  auditLog('CREATE','Inventory Lot',itemId,{description:`Added lot${batchNo?' B:'+batchNo:''}${lotNo?' L:'+lotNo:''} qty ${qty} for ${itemId}${isMain?'':' (branch)'} — exp ${expiry||'N/A'}`});
   save(); closeModal();
   // Refresh lots tab
-  document.querySelector('.tab.active')?.click();
+  const activeTab = document.querySelector('#inv-tabs .tab.active');
+  if(activeTab) activeTab.click();
   render();
 }
 
@@ -9419,9 +9445,13 @@ function saveMovement2() {
   if(!it) return;
   if(type==='out' && qty > it.qty) { alert(`Cannot remove ${qty} — only ${it.qty} in stock.`); return; }
   it.qty += type==='in' ? qty : -qty;
+  // Also update lot if item has lots
+  if(it.lots?.length && type==='in') {
+    // Add as untracked adjustment — user should use Add Lot for proper lot tracking
+  }
   const id = 'MOV-' + String(state.inventoryMovements.length+1).padStart(3,'0');
   state.inventoryMovements.push({ id, date, item:itemId, type, qty, ref, note });
-  auditLog('UPDATE','Inventory',it.id,{description:`Updated item: ${it.name}`},_beforeItem,{...it});
+  auditLog('UPDATE','Inventory',it.id,{description:`Stock ${type==='in'?'added':'removed'}: ${qty} ${it.unit||''} — ${it.name} (${ref||'manual'})`});
   save(); closeModal(); render();
 }
 
