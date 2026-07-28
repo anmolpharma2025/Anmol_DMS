@@ -30,7 +30,23 @@
 html{height:100%;background:var(--bg)}
 body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow-x:hidden}
 
-/* ── HEADER ── */
+/* ── LOGIN ── */
+#login-screen{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);border-radius:24px;padding:36px 28px;display:flex;flex-direction:column;gap:18px}
+.login-logo{width:60px;height:60px;background:linear-gradient(135deg,#4f8ef7,#a78bfa);border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 4px}
+.login-logo i{font-size:30px;color:#fff}
+.login-title{text-align:center;font-size:20px;font-weight:800;letter-spacing:-0.3px}
+.login-sub{text-align:center;font-size:13px;color:var(--text2);margin-top:-10px}
+.login-field{display:flex;flex-direction:column;gap:7px}
+.login-field label{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.06em}
+.login-field input{padding:13px 14px;border:1.5px solid var(--border2);border-radius:12px;background:var(--card2);color:var(--text);font-size:15px;font-family:var(--font);outline:none;transition:border-color 0.15s;-webkit-appearance:none}
+.login-field input:focus{border-color:var(--blue)}
+.login-btn{padding:15px;background:var(--blue);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:opacity 0.15s;width:100%}
+.login-btn:active{opacity:0.8}
+.login-btn:disabled{opacity:0.5;cursor:not-allowed}
+.login-err{background:var(--red2);border:1px solid var(--red);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--red);text-align:center;display:none}
+.login-spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
 .app-header{
   position:sticky;top:0;z-index:200;
   background:rgba(6,13,26,0.94);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
@@ -198,6 +214,33 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
 </head>
 <body>
 
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo"><i class="ti ti-chart-pie"></i></div>
+    <div>
+      <div class="login-title">Management Dashboard</div>
+      <div class="login-sub">ANMOL PHARMACEUTICALS US CORP.</div>
+    </div>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="l-user" placeholder="Enter username" autocomplete="username" autocapitalize="none">
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="l-pass" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div id="login-err" class="login-err"></div>
+    <button class="login-btn" id="login-btn" onclick="doLogin()">
+      <i class="ti ti-login" style="margin-right:6px"></i>Sign In
+    </button>
+    <div style="text-align:center;font-size:11px;color:var(--text2)">
+      <i class="ti ti-lock" style="font-size:11px;margin-right:3px"></i>
+      Restricted to management and admin users only
+    </div>
+  </div>
+</div>
+
 <!-- Header -->
 <div class="app-header">
   <div class="brand">
@@ -208,8 +251,10 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
     </div>
   </div>
   <div class="hdr-right">
+    <span id="hdr-user" style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:5px;white-space:nowrap"></span>
     <span class="refresh-time" id="refresh-time">—</span>
     <button class="hdr-btn" onclick="loadData()"><i class="ti ti-refresh" style="font-size:14px"></i>Refresh</button>
+    <button class="hdr-btn" onclick="logout()" style="color:var(--red);border-color:rgba(255,71,87,0.3)" title="Sign out"><i class="ti ti-logout" style="font-size:14px"></i></button>
   </div>
 </div>
 
@@ -269,11 +314,111 @@ const FB_CONFIG = {
   messagingSenderId:"838744686940",
   appId:"1:838744686940:web:28d9b95c27031abf794199"
 };
+// ── AUTH ─────────────────────────────────────────────────────────────────────
+const SESSION_KEY = 'anmol_mgmt_session';
+let currentUser = null;
+
+function getSession() {
+  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null'); } catch(e){ return null; }
+}
+function saveSession(user) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+}
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+async function doLogin() {
+  const username = document.getElementById('l-user')?.value.trim();
+  const password = document.getElementById('l-pass')?.value;
+  const errEl    = document.getElementById('login-err');
+  const btn      = document.getElementById('login-btn');
+
+  if(!username || !password) { showLoginErr('Please enter username and password.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="login-spinner"></span>Signing in…';
+  errEl.style.display = 'none';
+
+  try {
+    // Load users from Firebase meta doc
+    const snap = await db.doc('companies/anmol_meta').get();
+    const meta = snap.exists ? snap.data() : {};
+    const users = meta.users || [];
+
+    const user = users.find(u =>
+      (u.username||'').toLowerCase() === username.toLowerCase() &&
+      u.password === password
+    );
+
+    if(!user) { showLoginErr('Invalid username or password.'); resetLoginBtn(); return; }
+
+    // Only allow admin and management roles
+    const allowedRoles = ['admin','accountant','sales','hr','viewer','mgmt'];
+    if(!allowedRoles.includes(user.role)) {
+      showLoginErr('Access denied. This dashboard is for management only.');
+      resetLoginBtn(); return;
+    }
+
+    // Success
+    currentUser = { id:user.id, name:user.name, username:user.username, role:user.role };
+    saveSession(currentUser);
+    document.getElementById('login-screen').style.display = 'none';
+    // Update header with user info
+    updateHeaderUser();
+    loadData();
+
+  } catch(e) {
+    showLoginErr('Connection error: ' + e.message);
+    resetLoginBtn();
+  }
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById('login-err');
+  if(el) { el.textContent = msg; el.style.display = 'block'; }
+}
+
+function resetLoginBtn() {
+  const btn = document.getElementById('login-btn');
+  if(btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-login" style="margin-right:6px"></i>Sign In'; }
+}
+
+function updateHeaderUser() {
+  const el = document.getElementById('hdr-user');
+  if(el && currentUser) {
+    el.innerHTML = `<i class="ti ti-user-circle" style="font-size:15px"></i> ${currentUser.name}
+      <span style="font-size:10px;color:var(--text2);margin-left:4px">${currentUser.role}</span>`;
+  }
+}
+
+function logout() {
+  if(!confirm('Sign out of the Management Dashboard?')) return;
+  clearSession();
+  currentUser = null;
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('l-pass').value = '';
+  document.getElementById('login-err').style.display = 'none';
+  resetLoginBtn();
+  S = null;
+}
+
 function initFirebase() {
   if(typeof firebase==='undefined'){setTimeout(initFirebase,100);return;}
   if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
   db = firebase.firestore();
-  loadData();
+  // Check for existing session
+  const session = getSession();
+  if(session) {
+    currentUser = session;
+    document.getElementById('login-screen').style.display = 'none';
+    updateHeaderUser();
+    loadData();
+  } else {
+    // Show login, focus username field
+    document.getElementById('login-screen').style.display = 'flex';
+    setTimeout(()=>document.getElementById('l-user')?.focus(), 300);
+  }
 }
 
 // ── STATE ────────────────────────────────────────────────────────────────────
