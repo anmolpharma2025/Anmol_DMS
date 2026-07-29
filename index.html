@@ -9310,12 +9310,19 @@ function saveEditItem(id) {
 function showAdjustQty(id) {
   const it = state.inventory.find(i=>i.id===id);
   if(!it) return;
+  const branches   = getBranches();
+  const mainId     = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId = currentUser?.branchId || null;
+  const isMain     = !myBranchId || myBranchId === mainId;
+  const branchStock = myBranchId && !isMain ? getBranchStock(myBranchId) : null;
+  const displayQty  = branchStock ? (branchStock[id]||0) : (it.qty||0);
+  const branchName  = myBranchId ? (branches.find(b=>b.id===myBranchId)?.name||myBranchId) : 'Main';
   showModal(`
 <div class="modal-head"><h3>Adjust: ${it.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
   <div style="padding:12px;background:var(--bg-secondary);border-radius:var(--radius-md);text-align:center">
-    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Current stock</div>
-    <div style="font-size:24px;font-weight:500">${it.qty} <span style="font-size:13px;color:var(--text-secondary)">${it.unit}</span></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Current stock${myBranchId&&!isMain?` (${branchName})`:''}</div>
+    <div style="font-size:24px;font-weight:500">${displayQty} <span style="font-size:13px;color:var(--text-secondary)">${it.unit}</span></div>
   </div>
   <div style="padding:12px;background:var(--bg-secondary);border-radius:var(--radius-md);text-align:center">
     <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Reorder level</div>
@@ -9331,6 +9338,7 @@ function showAdjustQty(id) {
   <div class="form-group"><label>Date</label><input type="date" id="adj-date" value="${today()}"></div>
 </div>
 <div class="form-group"><label>Notes</label><input type="text" id="adj-note" placeholder="Brief description"></div>
+${myBranchId&&!isMain?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);font-size:12px;color:var(--accent)"><i class="ti ti-building-store" style="margin-right:4px"></i>This adjustment will be recorded for <strong>${branchName}</strong>.</div>`:''}
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveMovement('${id}')">Save Movement</button>
@@ -9339,17 +9347,59 @@ function showAdjustQty(id) {
 
 function saveMovement(itemId) {
   const type = document.getElementById('adj-type').value;
-  const qty = parseInt(document.getElementById('adj-qty').value)||0;
-  const ref = document.getElementById('adj-ref').value||'MANUAL';
+  const qty  = parseInt(document.getElementById('adj-qty').value)||0;
+  const ref  = document.getElementById('adj-ref').value||'MANUAL';
   const date = document.getElementById('adj-date').value;
   const note = document.getElementById('adj-note').value||'Manual adjustment';
   if(!qty) { alert('Please enter a quantity.'); return; }
+
   const it = state.inventory.find(i=>i.id===itemId);
   if(!it) return;
   if(type==='out' && qty > it.qty) { alert(`Cannot remove ${qty} units — only ${it.qty} in stock.`); return; }
+
+  const branches   = getBranches();
+  const mainId     = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId = currentUser?.branchId || null;
+  const isMain     = !myBranchId || myBranchId === mainId;
+
+  // Update master item qty
   it.qty += type==='in' ? qty : -qty;
-  const id = 'MOV-' + String(state.inventoryMovements.length+1).padStart(3,'0');
-  state.inventoryMovements.push({ id, date, item:itemId, type, qty, ref, note });
+
+  // Record movement
+  if(!state.inventoryMovements) state.inventoryMovements=[];
+  const movId = 'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0');
+  state.inventoryMovements.push({
+    id:movId, date, item:itemId, type, qty, ref,
+    note: note + (myBranchId&&!isMain?' | Branch: '+(branches.find(b=>b.id===myBranchId)?.name||myBranchId):'')
+  });
+
+  // Branch user stocks IN — create received transfer so getBranchStock picks it up
+  if(type==='in' && myBranchId && !isMain) {
+    if(!state.inventoryTransfers) state.inventoryTransfers=[];
+    const txId = 'TX-'+String(state.inventoryTransfers.length+1).padStart(3,'0');
+    state.inventoryTransfers.push({
+      id:txId, date, fromBranch:mainId, toBranch:myBranchId,
+      lines:[{ itemId, desc:it.name, qty, unit:it.unit||'pcs' }],
+      notes:`Stock in — ${note} (${ref})`,
+      transferredBy:currentUser?.name||'System',
+      status:'received', receivedDate:date, receivedBy:currentUser?.name||'System'
+    });
+  }
+
+  // Branch user stocks OUT — create transfer to deduct from branch
+  if(type==='out' && myBranchId && !isMain) {
+    if(!state.inventoryTransfers) state.inventoryTransfers=[];
+    const txId = 'TX-'+String(state.inventoryTransfers.length+1).padStart(3,'0');
+    state.inventoryTransfers.push({
+      id:txId, date, fromBranch:myBranchId, toBranch:mainId,
+      lines:[{ itemId, desc:it.name, qty, unit:it.unit||'pcs' }],
+      notes:`Stock out — ${note} (${ref})`,
+      transferredBy:currentUser?.name||'System',
+      status:'received', receivedDate:date, receivedBy:currentUser?.name||'System'
+    });
+  }
+
+  auditLog('UPDATE','Inventory',it.id,{description:`Stock ${type==='in'?'added':'removed'}: ${qty} ${it.unit||''} — ${it.name}${myBranchId&&!isMain?' (branch)':''} (${ref||'manual'})`});
   save(); closeModal(); render();
 }
 
