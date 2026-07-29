@@ -11178,12 +11178,17 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Items</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Items</th><th>DR No.</th><th>Invoice</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
-  ${displayed.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
+  ${displayed.length===0?`<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
   ${displayed.map(so=>{
     const soTotal=so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     const approvedCount=so.lines.filter(l=>l.approved).length;
+    // Find linked invoice
+    const linkedInv=(state.invoices||[]).find(i=>i.soRef===so.id);
+    // DR numbers from drIssued
+    const drNums=[...new Set((so.drIssued||[]).map(d=>d.drNum).filter(Boolean))];
+    if(so.drNo&&!drNums.includes(so.drNo)) drNums.unshift(so.drNo);
     return `<tr>
       <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
       <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
@@ -11194,6 +11199,8 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
   if(!undelivered.length) return '<span style="color:var(--green);font-size:11px">✓ All delivered</span>';
   return undelivered.map(l=>{const k=l.itemId||l.desc;const rem=(l.qty||0)-(issuedMap[k]||0);return `${l.desc}×${rem}${l.approved?'<span style="color:var(--green);margin-left:2px">✓</span>':''}`;}).join(', ');
 })()}</td>
+      <td style="font-size:12px;color:var(--green);font-weight:500">${drNums.length?drNums.join(', '):'—'}</td>
+      <td style="font-size:12px;color:var(--accent)">${linkedInv?linkedInv.id:'—'}</td>
       <td style="text-align:right;font-weight:500">${fmt(soTotal)}</td>
       <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${so.preparedBy||'—'}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[so.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[so.status]||'var(--text-secondary)'}">${so.status}</span>
@@ -11201,6 +11208,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
       </td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewSO('${so.id}')"><i class="ti ti-eye"></i>View</button>
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditSO('${so.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printSO('${so.id}')"><i class="ti ti-printer"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteSO('${so.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
@@ -11728,6 +11736,62 @@ function deliverSO(id) {
   save(); render();
 }
 function deleteSO(id) { if(!requireAdmin('delete sales orders')) return; if(!confirm('Delete this sales order?')) return; const _so2=state.salesOrders.find(s=>s.id===id); auditLog('DELETE','Sales Order',id,{description:`Deleted SO ${id} for ${_so2?.customer}`}); state.salesOrders=(state.salesOrders||[]).filter(s=>s.id!==id); save(); render(); }
+
+function showEditSO(id) {
+  const so = (state.salesOrders||[]).find(s=>s.id===id);
+  if(!so) return;
+  window._soLines = so.lines.map(l=>({...l}));
+  window._editSOId = id;
+  const custOpts = state.customers.map(c=>`<option value="${c.name}" ${c.name===so.customer?'selected':''}>${c.name}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit SO — ${id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+${so.status!=='pending'?`<div style="padding:8px 12px;background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px;color:var(--amber)"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>This SO is <strong>${so.status}</strong>. Editing will reset approval status for changed lines.</div>`:''}
+<div class="form-row">
+  <div class="form-group"><label>Customer</label>
+    <select id="eso-cust" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+      ${custOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Prepared By</label>
+    <input type="text" id="eso-by" value="${so.preparedBy||''}" style="padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);width:100%">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Order Date</label><input type="date" id="eso-date" value="${so.date}"></div>
+  <div class="form-group"><label>Requested Delivery</label><input type="date" id="eso-del" value="${so.deliveryDate||''}"></div>
+</div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <span style="font-size:12px;color:var(--text-secondary)">Order lines</span>
+    <button class="btn" style="padding:3px 10px;font-size:12px" onclick="addSOLine()"><i class="ti ti-plus"></i>Add line</button>
+  </div>
+  ${orderLineTableHtml('so')}
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="eso-notes" value="${so.notes||''}" placeholder="Special instructions or notes"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditSO('${id}')"><i class="ti ti-check"></i>Save Changes</button>
+</div>`);
+  renderOrderLines('so');
+}
+
+function saveEditSO(id) {
+  const so = (state.salesOrders||[]).find(s=>s.id===id);
+  if(!so) return;
+  const customer    = document.getElementById('eso-cust')?.value||so.customer;
+  const date        = document.getElementById('eso-date')?.value||so.date;
+  const deliveryDate= document.getElementById('eso-del')?.value||'';
+  const notes       = document.getElementById('eso-notes')?.value||'';
+  const preparedBy  = document.getElementById('eso-by')?.value||so.preparedBy;
+  if(!customer) { alert('Please select a customer.'); return; }
+  const lines = (window._soLines||[]).map(l=>({...l,qty:parseFloat(l.qty)||1,unitPrice:parseFloat(l.unitPrice)||0,lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)})).filter(l=>l.desc||l.itemId);
+  if(!lines.length) { alert('Add at least one line item.'); return; }
+  so.customer=customer; so.date=date; so.deliveryDate=deliveryDate;
+  so.notes=notes; so.preparedBy=preparedBy; so.lines=lines;
+  stampUpdate(so);
+  auditLog('UPDATE','Sales Order',id,{description:`Edited SO ${id} — ${lines.length} item(s)`});
+  save(); closeModal(); render();
+}
 
 function showAddSO() {
   const custOpts = '<option value="">— Select customer —</option>' +
@@ -12303,6 +12367,7 @@ function renderPurchaseRequests(c, ta) {
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 8px;font-size:11px" onclick="viewPR('${pr.id}')"><i class="ti ti-eye"></i></button>
         ${pr.status==='pending'&&isAdmin()?`
+          <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditPR('${pr.id}')"><i class="ti ti-edit"></i></button>
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
         `:''}
@@ -12439,6 +12504,90 @@ function savePR() {
   };
   state.purchaseRequests.push(pr);
   auditLog('CREATE','Purchase Request',id,{description:`PR ${id} submitted by ${pr.requestedBy} — ${items.length} item(s)`});
+  save(); closeModal(); render();
+}
+
+function showEditPR(id) {
+  const pr = (state.purchaseRequests||[]).find(p=>p.id===id);
+  if(!pr) return;
+  const empOpts = (state.employees||[]).map(e=>`<option value="${e.name}" ${e.name===pr.requestedBy?'selected':''}>${e.name} — ${e.department||'—'}</option>`).join('');
+  const deptOpts = [...new Set((state.employees||[]).map(e=>e.department).filter(Boolean))].map(d=>`<option ${d===pr.department?'selected':''}>${d}</option>`).join('');
+  window._editPRItems = JSON.parse(JSON.stringify(pr.items||[]));
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit PR — ${id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Requested By</label>
+    <select id="epr-by" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      ${empOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Department</label>
+    <select id="epr-dept" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      ${deptOpts}
+    </select>
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Date Needed</label><input type="date" id="epr-needed" value="${pr.dateNeeded||''}"></div>
+  <div class="form-group"><label>Priority</label>
+    <select id="epr-priority" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="normal" ${pr.priority==='normal'?'selected':''}>Normal</option>
+      <option value="high"   ${pr.priority==='high'?'selected':''}>High</option>
+      <option value="urgent" ${pr.priority==='urgent'?'selected':''}>Urgent</option>
+    </select>
+  </div>
+</div>
+<div class="form-group"><label>Purpose / Justification</label>
+  <textarea id="epr-purpose" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);resize:vertical">${pr.purpose||''}</textarea>
+</div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em">Items</label>
+    <button class="btn" style="padding:2px 10px;font-size:11px" onclick="addPRItemRow()"><i class="ti ti-plus"></i>Add Item</button>
+  </div>
+  <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;color:var(--text-secondary);font-weight:600;padding:0 4px">
+    <span>Description</span><span>Unit</span><span style="text-align:right">Qty</span><span style="text-align:right">Est. Unit Price</span><span></span>
+  </div>
+  <div id="pr-item-rows">
+    ${pr.items.map((it,idx)=>`
+    <div class="pr-item-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+      <input type="text" id="pr-desc-${idx}" value="${it.desc||''}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="text" id="pr-unit-${idx}" value="${it.unit||''}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="number" id="pr-qty-${idx}" value="${it.qty||1}" min="1" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <input type="number" id="pr-price-${idx}" value="${it.unitPrice||0}" min="0" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <button type="button" onclick="this.closest('.pr-item-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 5px">×</button>
+    </div>`).join('')}
+  </div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="epr-notes" value="${pr.notes||''}" placeholder="Supplier preference, specifications, etc."></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditPR('${id}')"><i class="ti ti-check"></i>Save Changes</button>
+</div>`);
+}
+
+function saveEditPR(id) {
+  const pr = (state.purchaseRequests||[]).find(p=>p.id===id);
+  if(!pr) return;
+  const rows = [...document.querySelectorAll('.pr-item-row')];
+  const items = rows.map((row,idx)=>{
+    const desc  = row.querySelector(`#pr-desc-${idx}`)?.value||'';
+    const unit  = row.querySelector(`#pr-unit-${idx}`)?.value||'';
+    const qty   = parseFloat(row.querySelector(`#pr-qty-${idx}`)?.value)||0;
+    const price = parseFloat(row.querySelector(`#pr-price-${idx}`)?.value)||0;
+    if(!desc||qty<=0) return null;
+    return { desc, unit, qty, unitPrice:price, estTotal:qty*price };
+  }).filter(Boolean);
+  if(!items.length) { alert('Add at least one item.'); return; }
+  pr.requestedBy = document.getElementById('epr-by')?.value||pr.requestedBy;
+  pr.department  = document.getElementById('epr-dept')?.value||pr.department;
+  pr.dateNeeded  = document.getElementById('epr-needed')?.value||pr.dateNeeded;
+  pr.priority    = document.getElementById('epr-priority')?.value||pr.priority;
+  pr.purpose     = document.getElementById('epr-purpose')?.value.trim()||pr.purpose;
+  pr.notes       = document.getElementById('epr-notes')?.value.trim()||pr.notes;
+  pr.items       = items;
+  stampUpdate(pr);
+  auditLog('UPDATE','Purchase Request',id,{description:`Edited PR ${id}`});
   save(); closeModal(); render();
 }
 
@@ -12891,7 +13040,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
-        ${po.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditPO('${po.id}')"><i class="ti ti-edit"></i></button>`:''}
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditPO('${po.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printPO('${po.id}')"><i class="ti ti-printer"></i></button>
         ${po.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="approvePO('${po.id}')">Approve</button>`:''}
         ${po.status==='approved'?`<button class="btn" style="padding:3px 9px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="receivePO('${po.id}')"><i class="ti ti-package-import"></i>Receive</button>`:''}
