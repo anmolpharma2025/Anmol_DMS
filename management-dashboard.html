@@ -52,7 +52,8 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
   background:rgba(6,13,26,0.94);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
   border-bottom:1px solid var(--border);
   padding:calc(env(safe-area-inset-top)+10px) 16px 10px;
-  display:flex;align-items:center;justify-content:space-between;gap:12px
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  max-width:100%;box-sizing:border-box;overflow:hidden
 }
 .brand{display:flex;align-items:center;gap:10px}
 .logo{width:36px;height:36px;background:linear-gradient(135deg,#4f8ef7,#a78bfa);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -247,14 +248,15 @@ body{min-height:100%;background:var(--bg);color:var(--text);font-family:var(--fo
     <div class="logo"><i class="ti ti-chart-pie"></i></div>
     <div>
       <div class="brand-name">Management</div>
-      <div class="brand-sub">Anmol Pharmaceuticals</div>
+      <div class="brand-sub" id="hdr-user">Anmol Pharmaceuticals</div>
+      <div id="refresh-time" style="font-size:9px;color:var(--text3);margin-top:1px">—</div>
     </div>
   </div>
-  <div class="hdr-right">
-    <span id="hdr-user" style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:5px;white-space:nowrap"></span>
-    <span class="refresh-time" id="refresh-time">—</span>
-    <button class="hdr-btn" onclick="loadData()"><i class="ti ti-refresh" style="font-size:14px"></i>Refresh</button>
-    <button class="hdr-btn" onclick="logout()" style="color:var(--red);border-color:rgba(255,71,87,0.3)" title="Sign out"><i class="ti ti-logout" style="font-size:14px"></i></button>
+  <div class="hdr-right" style="flex-shrink:0">
+    <div style="display:flex;flex-direction:column;gap:4px;align-items:stretch;min-width:72px">
+      <button class="hdr-btn" onclick="loadData()" style="justify-content:center;white-space:nowrap"><i class="ti ti-refresh" style="font-size:13px"></i>Refresh</button>
+      <button class="hdr-btn" onclick="logout()" style="color:var(--red);border-color:rgba(255,71,87,0.3);justify-content:center;white-space:nowrap"><i class="ti ti-logout" style="font-size:13px"></i>Logout</button>
+    </div>
   </div>
 </div>
 
@@ -387,8 +389,7 @@ function resetLoginBtn() {
 function updateHeaderUser() {
   const el = document.getElementById('hdr-user');
   if(el && currentUser) {
-    el.innerHTML = `<i class="ti ti-user-circle" style="font-size:15px"></i> ${currentUser.name}
-      <span style="font-size:10px;color:var(--text2);margin-left:4px">${currentUser.role}</span>`;
+    el.textContent = currentUser.name + ' · ' + currentUser.role;
   }
 }
 

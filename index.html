@@ -16487,7 +16487,11 @@ function renderAttendance(c, ta) {
   <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Location</th><th>Remarks</th><th>Actions</th></tr></thead>
   <tbody>
   ${emps.map(emp=>{
-    const rec = dayRecords.find(a=>a.empId===emp.id);
+    const rec = dayRecords.find(a=>
+      a.empId===emp.id ||
+      a.empId===emp.name ||
+      (a.empName&&a.empName===emp.name)
+    );
     if(!rec) return `<tr style="background:rgba(239,68,68,0.04)">
       <td style="font-weight:500">
         <div style="display:flex;align-items:center;gap:8px">
