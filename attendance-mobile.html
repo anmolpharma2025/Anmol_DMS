@@ -436,6 +436,13 @@ body{display:flex;flex-direction:column;height:100dvh}
       </div>
     </div>
 
+    <!-- Leave Application button -->
+    <div style="padding:0 16px 12px">
+      <button onclick="showLeaveModal()" style="width:100%;padding:14px;background:linear-gradient(135deg,rgba(167,139,250,0.15),rgba(167,139,250,0.05));border:1.5px solid rgba(167,139,250,0.4);border-radius:16px;color:#a78bfa;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+        <i class="ti ti-calendar-plus" style="font-size:18px"></i>File Leave Application
+      </button>
+    </div>
+
     <!-- Attendance records -->
     <div class="section-head">
       <h3>Attendance History</h3>
@@ -443,6 +450,67 @@ body{display:flex;flex-direction:column;height:100dvh}
     </div>
     <div class="rec-list" id="rec-list">
       <div class="rec-empty">Loading records…</div>
+    </div>
+  </div>
+
+  <!-- Leave Application Modal -->
+  <div id="leave-overlay" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center">
+    <div style="background:#0d1b2a;border-radius:24px 24px 0 0;padding:24px 20px 40px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
+      <div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 20px"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <div style="font-size:18px;font-weight:800;color:#fff"><i class="ti ti-calendar-plus" style="margin-right:8px;color:#a78bfa"></i>Leave Application</div>
+        <button onclick="hideLeaveModal()" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:32px;height:32px;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center">×</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Leave Type</label>
+          <select id="leave-type" style="width:100%;padding:13px 14px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;-webkit-appearance:none">
+            <option value="sick">Sick Leave</option>
+            <option value="vacation">Vacation Leave</option>
+            <option value="emergency">Emergency Leave</option>
+            <option value="maternity">Maternity Leave</option>
+            <option value="paternity">Paternity Leave</option>
+            <option value="solo_parent">Solo Parent Leave</option>
+            <option value="unpaid">Unpaid Leave</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Date From</label>
+            <input type="date" id="leave-from" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Date To</label>
+            <input type="date" id="leave-to" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box">
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Reason / Details</label>
+          <textarea id="leave-reason" rows="3" placeholder="Briefly describe the reason for your leave…" style="width:100%;padding:13px 14px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;resize:none;box-sizing:border-box"></textarea>
+        </div>
+
+        <div>
+          <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">With Pay?</label>
+          <div style="display:flex;gap:10px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#fff;cursor:pointer">
+              <input type="radio" name="leave-pay" value="yes" checked style="accent-color:#a78bfa"> With Pay
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#fff;cursor:pointer">
+              <input type="radio" name="leave-pay" value="no" style="accent-color:#a78bfa"> Without Pay
+            </label>
+          </div>
+        </div>
+
+        <div id="leave-err" style="display:none;padding:10px 14px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);border-radius:10px;font-size:13px;color:#ff6b6b"></div>
+
+        <button onclick="submitLeave()" id="leave-submit-btn" style="padding:15px;background:linear-gradient(135deg,#a78bfa,#7c3aed);border:none;border-radius:14px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);width:100%">
+          <i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -864,12 +932,24 @@ async function recordAttendance(verified, confidence) {
 
   try {
     if(clockMode === 'in') {
-      // Check no duplicate — look in mobile collection
+      // Check no duplicate — look in mobile collection AND ERP state
       const existing = await db.collection('companies/anmol/attendance_mobile')
         .where('empId','==',empId).get();
       const allRecs = existing.docs.map(d=>({id:d.id,...d.data()}));
       const dupToday = allRecs.find(r=>r.date===todayStr&&r.timeIn);
-      if(dupToday) {
+
+      // Also check ERP state directly
+      const erpDocChk = await db.doc('companies/anmol').get();
+      const erpStateChk = JSON.parse(erpDocChk.data()?.data||'{}');
+      const erpDup = (erpStateChk.attendance||[]).find(r=>
+        r.date===todayStr && r.timeIn &&
+        (r.empId===empId || r.empName===empName)
+      );
+
+      if(dupToday || erpDup) {
+        // Load existing record into todayRecord so UI shows it
+        todayRecord = dupToday || erpDup;
+        await loadTodayStatus();
         toast('Already clocked in today!','warning'); return;
       }
 
@@ -1029,9 +1109,27 @@ async function loadTodayStatus() {
   try {
     const snap = await db.collection('companies/anmol/attendance_mobile')
       .where('empId','==',selectedEmp.id).get();
-    const all = snap.docs.map(d=>({ firestoreId:d.id, ...d.data() }));
+    let all = snap.docs.map(d=>({ firestoreId:d.id, ...d.data() }));
     todayRecord = all.find(r=>r.date===today()) || null;
-  } catch(e) { todayRecord=null; }
+
+    // Fallback: check by empName if not found by id
+    if(!todayRecord) {
+      const snap2 = await db.collection('companies/anmol/attendance_mobile')
+        .where('empName','==',selectedEmp.name).get();
+      all = snap2.docs.map(d=>({ firestoreId:d.id, ...d.data() }));
+      todayRecord = all.find(r=>r.date===today()) || null;
+    }
+
+    // Fallback 2: check ERP state directly
+    if(!todayRecord) {
+      const erpDoc = await db.doc('companies/anmol').get();
+      const erpState = JSON.parse(erpDoc.data()?.data||'{}');
+      const td = today();
+      todayRecord = (erpState.attendance||[]).find(r=>
+        r.date===td && (r.empId===selectedEmp.id || r.empId===selectedEmp.name || r.empName===selectedEmp.name)
+      ) || null;
+    }
+  } catch(e) { todayRecord=null; console.error('loadTodayStatus:',e); }
 
   const badge   = document.getElementById('today-badge');
   const bigTime = document.getElementById('today-timein-big');
@@ -1118,6 +1216,88 @@ async function loadHistory() {
 // ══════════════════════════════════════════════════════════════════════
 // LOGOUT — back to login
 // ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// LEAVE APPLICATION
+// ══════════════════════════════════════════════════════════════════════
+function showLeaveModal() {
+  const overlay = document.getElementById('leave-overlay');
+  overlay.style.display = 'flex';
+  // Default dates to today
+  const t = today();
+  document.getElementById('leave-from').value = t;
+  document.getElementById('leave-to').value   = t;
+  document.getElementById('leave-reason').value = '';
+  document.getElementById('leave-err').style.display = 'none';
+  document.getElementById('leave-submit-btn').disabled = false;
+  document.getElementById('leave-submit-btn').innerHTML = '<i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application';
+}
+
+function hideLeaveModal() {
+  document.getElementById('leave-overlay').style.display = 'none';
+}
+
+async function submitLeave() {
+  if(!selectedEmp) { alert('Please select an employee first.'); return; }
+
+  const leaveType = document.getElementById('leave-type').value;
+  const from      = document.getElementById('leave-from').value;
+  const to        = document.getElementById('leave-to').value;
+  const reason    = document.getElementById('leave-reason').value.trim();
+  const withPay   = document.querySelector('input[name="leave-pay"]:checked')?.value === 'yes';
+  const errEl     = document.getElementById('leave-err');
+  const btn       = document.getElementById('leave-submit-btn');
+
+  errEl.style.display = 'none';
+
+  if(!from || !to) { errEl.textContent='Please select leave dates.'; errEl.style.display='block'; return; }
+  if(from > to)    { errEl.textContent='Start date must be before end date.'; errEl.style.display='block'; return; }
+  if(!reason)      { errEl.textContent='Please provide a reason for the leave.'; errEl.style.display='block'; return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Submitting…';
+
+  try {
+    const erpDoc   = await db.doc('companies/anmol').get();
+    const erpState = JSON.parse(erpDoc.data()?.data||'{}');
+    if(!erpState.leaves) erpState.leaves = [];
+
+    // Calculate days
+    const d1=new Date(from), d2=new Date(to);
+    const days = Math.round((d2-d1)/864e5)+1;
+
+    const leaveTypeLabels = { sick:'Sick Leave', vacation:'Vacation Leave', emergency:'Emergency Leave', maternity:'Maternity Leave', paternity:'Paternity Leave', solo_parent:'Solo Parent Leave', unpaid:'Unpaid Leave', other:'Other' };
+
+    const id = 'LV-'+String(erpState.leaves.length+1).padStart(4,'0');
+    const leave = {
+      id, empId:selectedEmp.id||selectedEmp.name, empName:selectedEmp.name,
+      department:selectedEmp.department||'',
+      leaveType, leaveTypeLabel:leaveTypeLabels[leaveType]||leaveType,
+      from, to, days, reason, withPay,
+      status:'pending',
+      appliedOn:today(),
+      appliedAt:new Date().toISOString(),
+      source:'mobile_app'
+    };
+
+    erpState.leaves.push(leave);
+
+    await db.doc('companies/anmol').set({
+      data: JSON.stringify(erpState),
+      updatedAt: new Date().toISOString(),
+      updatedBy: selectedEmp.name
+    });
+
+    hideLeaveModal();
+    toast(`✅ Leave application submitted! ${days} day(s) — pending approval.`, 'success', 4000);
+
+  } catch(e) {
+    errEl.textContent = 'Error submitting leave: ' + e.message;
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application';
+  }
+}
+
 function doLogout() {
   selectedEmp  = null;
   todayRecord  = null;
