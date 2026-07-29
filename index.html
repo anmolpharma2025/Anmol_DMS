@@ -711,8 +711,19 @@ function fbSaveMeta() {
         }
       } catch(e) {}
       const mergedRoles = { ...remoteRoles, ...localRoles };
-      // Users: use whichever list has more entries (never shrink the user base)
-      const finalUsers = (remoteUsers.length > localUsers.length) ? remoteUsers : localUsers;
+      // Users: merge by ID — local changes win for matching IDs, new remote users added
+      const userMap = {};
+      remoteUsers.forEach(u=>{ userMap[u.id||u.username]=u; });
+      localUsers.forEach(u=>{
+        const key=u.id||u.username;
+        if(userMap[key]) {
+          // Local wins — but keep remote fields not present locally
+          userMap[key]={...userMap[key],...u};
+        } else {
+          userMap[key]=u;
+        }
+      });
+      const finalUsers = Object.values(userMap);
       const localEmailTplPayslip = JSON.parse(localStorage.getItem('anmolpharma_email_tpl_payslip') || '{}');
       const localEmailTplSOA     = JSON.parse(localStorage.getItem('anmolpharma_email_tpl_soa') || '{}');
       const meta = {
@@ -740,11 +751,20 @@ async function fbLoadMeta() {
     const doc = await db.doc(FB_META_DOC).get();
     if(!doc.exists || !doc.data()) return;
     const meta = doc.data();
-    // Users: only apply if remote has more or equal (don't overwrite with stale data)
+    // Users: merge by ID so assignedCustomers and other local updates are never lost
     if(meta.users && meta.users.length > 0) {
       const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
-      if(meta.users.length >= localUsers.length)
-        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+      const userMap = {};
+      // Remote as base
+      meta.users.forEach(u=>{ userMap[u.id||u.username]=u; });
+      // Local wins for same ID (preserves assignedCustomers set by admin)
+      localUsers.forEach(u=>{
+        const key=u.id||u.username;
+        if(userMap[key]) userMap[key]={...userMap[key],...u};
+        else userMap[key]=u;
+      });
+      const merged=Object.values(userMap);
+      try { localStorage.setItem('anmolpharma_users', JSON.stringify(merged)); } catch(e) {}
     }
     // Custom roles: merge so no roles are lost
     if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
@@ -771,8 +791,14 @@ function fbListenMeta() {
     if(meta.deviceId === FB_DEVICE_ID) return;
     if(meta.users && meta.users.length > 0) {
       const localUsers = JSON.parse(localStorage.getItem('anmolpharma_users') || '[]');
-      if(meta.users.length >= localUsers.length)
-        try { localStorage.setItem('anmolpharma_users', JSON.stringify(meta.users)); } catch(e) {}
+      const userMap = {};
+      meta.users.forEach(u=>{ userMap[u.id||u.username]=u; });
+      localUsers.forEach(u=>{
+        const key=u.id||u.username;
+        if(userMap[key]) userMap[key]={...userMap[key],...u};
+        else userMap[key]=u;
+      });
+      try { localStorage.setItem('anmolpharma_users', JSON.stringify(Object.values(userMap))); } catch(e) {}
     }
     if(meta.customRoles && Object.keys(meta.customRoles).length > 0) {
       const localRoles = JSON.parse(localStorage.getItem('anmolpharma_custom_roles') || '{}');
@@ -990,24 +1016,37 @@ function getRolePages(role) {
 
 // ── CUSTOMER RESTRICTION HELPER ─────────────────────────────────────────────
 // Returns null if user sees all customers, or array of allowed customer IDs/names
+// Returns [] if user has restriction with zero customers assigned (sees nothing)
 function getAssignedCustomers() {
-  if(!currentUser || currentUser.role==='admin') return null;
-  // Use cached value on currentUser (set at login)
-  if(currentUser.assignedCustomers && currentUser.assignedCustomers.length > 0) return currentUser.assignedCustomers;
-  // Fall back to checking user record (handles session restore)
+  if(!currentUser || currentUser.role==='admin') return null; // admin sees all
+
+  // Check user record for assignment
   const u = getUsers().find(u=>u.id===currentUser.id);
-  if(!u || !u.assignedCustomers || u.assignedCustomers.length===0) return null;
-  currentUser.assignedCustomers = u.assignedCustomers; // cache it
-  return u.assignedCustomers;
+
+  // If user has no assignedCustomers property at all → no restriction
+  if(!u || !('assignedCustomers' in u)) return null;
+
+  // assignedCustomers exists (even if empty) → restriction is active
+  // Update cache
+  currentUser.assignedCustomers = u.assignedCustomers;
+  return u.assignedCustomers; // could be [] (no access) or ['id1','id2'] (specific access)
 }
 
 // Filter records by customer restriction
 function filterByCustomer(records, customerField='customer') {
   const allowed = getAssignedCustomers();
   if(!allowed) return records; // no restriction
+  // Build a set of allowed customer names by looking up IDs in state.customers
+  const allowedNames = new Set();
+  allowed.forEach(a=>{
+    allowedNames.add(String(a).toLowerCase()); // could be a name directly
+    // Also look up by ID to get the name
+    const cust = (state.customers||[]).find(c=>String(c.id)===String(a));
+    if(cust?.name) allowedNames.add(cust.name.toLowerCase());
+  });
   return records.filter(r=>{
-    const custVal = r[customerField]||'';
-    return allowed.some(a=>String(a)===String(custVal)||String(a)===String(r.customerId||''));
+    const custVal = (r[customerField]||r.customerId||r.custName||'').toLowerCase();
+    return allowedNames.has(custVal);
   });
 }
 
@@ -2111,7 +2150,14 @@ function saveEditUser(id) { if(!requireAdmin("edit user accounts")) return;
     u.assignedCustomers = selected; // empty array = no access to any customer
   }
 
-  saveUsers(users); closeModal(); render();
+  saveUsers(users);
+  // Immediately refresh currentUser restrictions if editing the logged-in user
+  if(currentUser && currentUser.id === id) {
+    currentUser.assignedCustomers = ('assignedCustomers' in u) ? u.assignedCustomers : null;
+    currentUser.branchId = u.branchId || null;
+    currentUser.role = u.role;
+  }
+  closeModal(); render();
 }
 
 let state = {
@@ -9990,15 +10036,26 @@ function saveEditSupplier(id) {
 // ── CUSTOMERS ─────────────────────────────────────────────────────────────────
 function renderCustomers(c, ta) {
   const q = (window._custSearch||'').toLowerCase();
-  const custs = (state.customers||[]).filter(cu=>
-    !q ||
-    cu.name?.toLowerCase().includes(q) ||
-    cu.tin?.toLowerCase().includes(q) ||
-    cu.email?.toLowerCase().includes(q) ||
-    cu.phone?.toLowerCase().includes(q) ||
-    cu.address?.toLowerCase().includes(q) ||
-    (cu.branches||[]).some(b=>b.name?.toLowerCase().includes(q))
-  );
+  const allowed = getAssignedCustomers(); // null = no restriction (admin/no assignment)
+
+  const custs = (state.customers||[]).filter(cu=>{
+    // Apply customer restriction first
+    if(allowed) {
+      const match = allowed.some(a=>
+        String(a)===String(cu.id||'') ||
+        String(a).toLowerCase()===(cu.name||'').toLowerCase()
+      );
+      if(!match) return false;
+    }
+    // Then apply search
+    return !q ||
+      cu.name?.toLowerCase().includes(q) ||
+      cu.tin?.toLowerCase().includes(q) ||
+      cu.email?.toLowerCase().includes(q) ||
+      cu.phone?.toLowerCase().includes(q) ||
+      cu.address?.toLowerCase().includes(q) ||
+      (cu.branches||[]).some(b=>b.name?.toLowerCase().includes(q));
+  });
 
   ta.innerHTML = `
     <input type="text" id="cust-search" value="${window._custSearch||''}" placeholder="Search customers…" oninput="window._custSearch=this.value;renderCurrentPage()" style="padding:6px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);min-width:200px">
