@@ -94,6 +94,11 @@ body{display:flex;flex-direction:column;height:100dvh}
 }
 .btn-main:active{opacity:0.88;transform:scale(0.98)}
 .btn-main:disabled{opacity:0.45}
+.action-choice-btn{background:rgba(255,255,255,0.05);border:1.5px solid rgba(255,255,255,0.1);border-radius:16px;padding:16px 10px;color:#fff;font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer;text-align:center;transition:all 0.18s;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.action-choice-btn.leave-btn{flex-direction:row;padding:14px 16px}
+.action-choice-btn#choice-in.selected{background:rgba(52,201,138,0.12);border-color:#34c98a;box-shadow:0 0 0 2px rgba(52,201,138,0.2)}
+.action-choice-btn#choice-out.selected{background:rgba(240,92,110,0.12);border-color:#f05c6e;box-shadow:0 0 0 2px rgba(240,92,110,0.2)}
+.action-choice-btn#choice-leave.selected{background:rgba(167,139,250,0.12);border-color:#a78bfa;box-shadow:0 0 0 2px rgba(167,139,250,0.2)}
 .login-err{min-height:18px;font-size:12px;color:var(--red);text-align:center;margin-top:10px}
 
 /* ── CAMERA SCREEN ── */
@@ -315,8 +320,8 @@ body{display:flex;flex-direction:column;height:100dvh}
   </div>
   <div class="login-sheet">
     <div class="login-sheet-handle"></div>
-    <div class="sheet-title">Clock In / Out</div>
-    <div class="sheet-sub">Select your name to continue with face verification</div>
+    <div class="sheet-title">Attendance Portal</div>
+    <div class="sheet-sub">Select your name then choose an action</div>
     <div class="field">
       <label>Select Employee</label>
       <div class="select-wrap">
@@ -325,16 +330,28 @@ body{display:flex;flex-direction:column;height:100dvh}
         </select>
       </div>
     </div>
-    <div class="field" style="margin-bottom:6px">
-      <label>Action</label>
-      <div class="select-wrap">
-        <select id="action-select">
-          <option value="in">Clock In</option>
-          <option value="out">Clock Out</option>
-        </select>
-      </div>
+    <!-- Hidden action select kept for compatibility -->
+    <select id="action-select" style="display:none">
+      <option value="in">Clock In</option>
+      <option value="out">Clock Out</option>
+      <option value="leave">File Leave</option>
+    </select>
+    <!-- Action buttons -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <button class="action-choice-btn" id="choice-in" onclick="selectAction('in')">
+        <i class="ti ti-clock-play" style="font-size:22px;display:block;margin-bottom:6px;color:#34c98a"></i>
+        <span>Clock In</span>
+      </button>
+      <button class="action-choice-btn" id="choice-out" onclick="selectAction('out')">
+        <i class="ti ti-clock-stop" style="font-size:22px;display:block;margin-bottom:6px;color:#f05c6e"></i>
+        <span>Clock Out</span>
+      </button>
     </div>
-    <button class="btn-main" id="login-btn" onclick="startVerification()">
+    <button class="action-choice-btn leave-btn" id="choice-leave" onclick="selectAction('leave')" style="width:100%;margin-bottom:10px">
+      <i class="ti ti-calendar-plus" style="font-size:20px;margin-right:8px;color:#a78bfa"></i>
+      <span>File Leave Application</span>
+    </button>
+    <button class="btn-main" id="login-btn" onclick="handleActionBtn()" style="display:none">
       <i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Verify
     </button>
     <div class="login-err" id="login-err"></div>
@@ -692,15 +709,63 @@ function updateCamLocUI() {
 // ══════════════════════════════════════════════════════════════════════
 // LOGIN FLOW — Start verification from login screen
 // ══════════════════════════════════════════════════════════════════════
+// ── LOGIN SCREEN ACTION SELECTION ────────────────────────────────────────────
+let selectedAction = null;
+
+function selectAction(action) {
+  selectedAction = action;
+  // Update button styles
+  ['in','out','leave'].forEach(a => {
+    const btn = document.getElementById('choice-'+a);
+    if(btn) btn.classList.toggle('selected', a===action);
+  });
+
+  const empVal = document.getElementById('emp-select')?.value;
+  const errEl  = document.getElementById('login-err');
+  errEl.textContent = '';
+
+  if(!empVal) {
+    errEl.textContent = 'Please select your name first.';
+    // Deselect
+    selectedAction = null;
+    document.getElementById('choice-'+action)?.classList.remove('selected');
+    return;
+  }
+
+  if(action === 'leave') {
+    // Show leave modal directly from login screen
+    const emp = employees.find(e=>(e.id||e.name)===empVal);
+    if(emp) selectedEmp = emp;
+    showLeaveModal();
+    return;
+  }
+
+  // Clock in/out — update hidden select and show camera button
+  document.getElementById('action-select').value = action;
+  const btn = document.getElementById('login-btn');
+  btn.style.display = 'block';
+  btn.innerHTML = action==='in'
+    ? '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock In'
+    : '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock Out';
+}
+
+function handleActionBtn() {
+  // Validate
+  const empVal = document.getElementById('emp-select')?.value;
+  if(!empVal) { document.getElementById('login-err').textContent='Please select your name.'; return; }
+  if(!selectedAction || selectedAction==='leave') return;
+  startVerification();
+}
+
 function startVerification() {
   const empId  = document.getElementById('emp-select').value;
-  const action = document.getElementById('action-select').value;
+  const action = selectedAction || document.getElementById('action-select').value;
   const errEl  = document.getElementById('login-err');
   errEl.textContent = '';
 
   if(!empId) { errEl.textContent = 'Please select your name.'; return; }
 
-  const emp = employees.find(e=>e.id===empId);
+  const emp = employees.find(e=>(e.id||e.name)===empId) || employees.find(e=>e.id===empId||e.name===empId);
   if(!emp) { errEl.textContent = 'Employee not found.'; return; }
 
   if(!emp.photo) {
@@ -709,7 +774,7 @@ function startVerification() {
   }
 
   selectedEmp = emp;
-  clockMode   = action;
+  clockMode   = action==='leave' ? 'in' : action;
   openCamera();
 }
 
@@ -1222,7 +1287,6 @@ async function loadHistory() {
 function showLeaveModal() {
   const overlay = document.getElementById('leave-overlay');
   overlay.style.display = 'flex';
-  // Default dates to today
   const t = today();
   document.getElementById('leave-from').value = t;
   document.getElementById('leave-to').value   = t;
@@ -1234,6 +1298,12 @@ function showLeaveModal() {
 
 function hideLeaveModal() {
   document.getElementById('leave-overlay').style.display = 'none';
+  // Reset login screen selection if called from login
+  if(!selectedEmp) {
+    selectedAction = null;
+    ['in','out','leave'].forEach(a=>document.getElementById('choice-'+a)?.classList.remove('selected'));
+    document.getElementById('login-btn').style.display='none';
+  }
 }
 
 async function submitLeave() {
@@ -1288,6 +1358,13 @@ async function submitLeave() {
     });
 
     hideLeaveModal();
+    // Reset selected emp if filed from login screen
+    if(!document.getElementById('home-screen').classList.contains('active')) {
+      selectedEmp = null;
+      selectedAction = null;
+      ['in','out','leave'].forEach(a=>document.getElementById('choice-'+a)?.classList.remove('selected'));
+      document.getElementById('login-btn').style.display='none';
+    }
     toast(`✅ Leave application submitted! ${days} day(s) — pending approval.`, 'success', 4000);
 
   } catch(e) {
