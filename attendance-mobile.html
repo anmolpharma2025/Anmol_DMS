@@ -548,9 +548,10 @@ const FB_CONFIG = {
 const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
 
 // Office coordinates — UPDATE THESE to your actual office location
-const OFFICE_LAT  = 10.3157;   // ← replace with your office latitude
-const OFFICE_LNG  = 123.8854;  // ← replace with your office longitude
-const OFFICE_RADIUS_M = 200;   // meters radius considered "in office"
+// Office coordinates — loaded dynamically from Firebase company profile
+let OFFICE_LAT    = 10.3157;   // fallback default
+let OFFICE_LNG    = 123.8854;  // fallback default
+let OFFICE_RADIUS_M = 200;     // fallback default
 
 // ══════════════════════════════════════════════════════════════════════
 // STATE
@@ -601,6 +602,7 @@ function initFirebase() {
     if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
     db = firebase.firestore();
     console.log('Firebase ready');
+    loadOfficeCoords(); // Load office GPS coords from company profile
     loadEmployees();
   } catch(e) {
     document.getElementById('login-err').textContent = 'Firebase error: ' + e.message;
@@ -610,6 +612,18 @@ function initFirebase() {
 // ══════════════════════════════════════════════════════════════════════
 // LOAD EMPLOYEES from Firebase
 // ══════════════════════════════════════════════════════════════════════
+async function loadOfficeCoords() {
+  try {
+    const snap = await db.doc('companies/anmol_meta').get();
+    if(snap.exists) {
+      const company = snap.data()?.company || {};
+      if(company.officeLat)    OFFICE_LAT      = parseFloat(company.officeLat);
+      if(company.officeLng)    OFFICE_LNG      = parseFloat(company.officeLng);
+      if(company.officeRadius) OFFICE_RADIUS_M = parseInt(company.officeRadius);
+    }
+  } catch(e) { console.warn('Could not load office coords:', e); }
+}
+
 async function loadEmployees() {
   const sel = document.getElementById('emp-select');
   try {

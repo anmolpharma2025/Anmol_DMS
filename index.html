@@ -11175,7 +11175,25 @@ function showEditCompany() {
   <div class="form-group"><label>Website</label><input type="text" id="cp-web" value="${p.website||''}"></div>
   <div class="form-group"><label>BIR RDO</label><input type="text" id="cp-rdo" value="${p.rdo||''}" placeholder="e.g. RDO 40 — Quezon City"></div>
 </div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+
+<!-- Office Location for Mobile Attendance -->
+<div style="margin-top:14px;padding:12px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md)">
+  <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.06em"><i class="ti ti-map-pin" style="margin-right:5px"></i>Office Location (Mobile Attendance)</div>
+  <div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px">Used by the mobile attendance app to detect if employees are clocking in from the office. Enter your exact office GPS coordinates.</div>
+  <div class="form-row" style="margin-bottom:8px">
+    <div class="form-group"><label>Office Latitude</label><input type="number" id="cp-lat" step="any" value="${p.officeLat||''}" placeholder="e.g. 10.3157"></div>
+    <div class="form-group"><label>Office Longitude</label><input type="number" id="cp-lng" step="any" value="${p.officeLng||''}" placeholder="e.g. 123.8854"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>Radius (meters)</label><input type="number" id="cp-radius" value="${p.officeRadius||200}" placeholder="200" min="50" max="2000"></div>
+    <div class="form-group" style="display:flex;align-items:flex-end">
+      <button class="btn" onclick="getMyLocation()" style="width:100%"><i class="ti ti-current-location"></i>Use My Current Location</button>
+    </div>
+  </div>
+  ${p.officeLat?`<div style="font-size:11px;color:var(--green);margin-top:6px"><i class="ti ti-check" style="margin-right:4px"></i>Current: ${p.officeLat}, ${p.officeLng} · Radius: ${p.officeRadius||200}m</div>`:'<div style="font-size:11px;color:var(--amber);margin-top:6px"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>No coordinates set yet. Mobile attendance will not detect office location.</div>'}
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveCompanyProfile2()">Save Profile</button>
 </div>`);
@@ -11191,12 +11209,22 @@ function saveCompanyProfile2() {
     email:  document.getElementById('cp-email').value.trim(),
     website:document.getElementById('cp-web').value.trim(),
     rdo:    document.getElementById('cp-rdo').value.trim(),
+    officeLat:    parseFloat(document.getElementById('cp-lat')?.value)||0,
+    officeLng:    parseFloat(document.getElementById('cp-lng')?.value)||0,
+    officeRadius: parseInt(document.getElementById('cp-radius')?.value)||200,
   };
   saveCompanyProfile(p);
-  // Update login screen company name
   const nameEl = document.getElementById('login-company-name');
   if(nameEl) nameEl.innerHTML = p.name.replace(/ — /g,'<br>').replace(/ \/ /g,'<br>');
   closeModal(); render();
+}
+
+function getMyLocation() {
+  if(!navigator.geolocation) { alert('Geolocation not supported on this device.'); return; }
+  navigator.geolocation.getCurrentPosition(pos=>{
+    document.getElementById('cp-lat').value = pos.coords.latitude.toFixed(6);
+    document.getElementById('cp-lng').value = pos.coords.longitude.toFixed(6);
+  }, err=>alert('Could not get location: '+err.message));
 }
 
 // ── SALES ORDERS ──────────────────────────────────────────────────────────────
