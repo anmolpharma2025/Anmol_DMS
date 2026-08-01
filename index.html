@@ -4594,6 +4594,14 @@ function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(con
 // Invoice line items state
 let invLines = [];
 
+function updateInvNumHint(val) {
+  const hint = document.getElementById('inv-num-hint');
+  if(!hint) return;
+  const auto = !val || val === nextInvNum();
+  hint.textContent = auto ? '✨ Auto-detected' : '✏ Manual';
+  hint.style.color = auto ? 'var(--green)' : 'var(--amber)';
+}
+
 function nextInvNum() {
   const prefix = 'INV-';
   const todayStr = today();
@@ -4672,10 +4680,10 @@ function showAddInvoice() {
 <div class="form-row">
   <div class="form-group">
     <label>Invoice Number
-      <span id="inv-num-hint" style="font-size:10px;color:var(--green);margin-left:6px;font-weight:400"><i class="ti ti-sparkles" style="font-size:10px"></i>Auto-detected</span>
+      <span id="inv-num-hint" style="font-size:10px;color:var(--green);margin-left:6px;font-weight:400">✨ Auto-detected</span>
     </label>
     <input type="text" id="inv-number" value="${nextInvNum()}"
-      oninput="document.getElementById('inv-num-hint').innerHTML=this.value?'<i class=\'ti ti-edit\' style=\'font-size:10px\'></i> Manual':'<i class=\'ti ti-sparkles\' style=\'font-size:10px\'></i>Auto-detected'"
+      oninput="updateInvNumHint(this.value)"
       style="font-family:monospace;font-weight:600;border-color:var(--green)">
   </div>
   <div class="form-group"><label>Customer</label>${searchDropHTML('inv-cust-inp','inv-cust-dd','inv-cust','Select or search customer…')}</div>
