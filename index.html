@@ -216,15 +216,31 @@
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
     body { background: #fff !important; font-size: 11px; color: #111 !important; margin: 0; padding: 0; }
 
-    /* Hide UI chrome */
-    .sidebar, .topbar, .no-print,
-    .chat-float-btn, #ai-panel, #ai-btn,
-    .action-btns, .tab, .btn-row { display: none !important; }
+    /* ── HIDE everything that is NOT the report ── */
+    #login-screen,
+    #login-overlay,
+    #chat-panel,
+    #ai-panel,
+    .chat-float-btn,
+    .sidebar,
+    .topbar,
+    .modal-bg,
+    .modal-overlay,
+    #modal-container,
+    .no-print,
+    .action-btns,
+    .tabs,
+    .tab,
+    .tab-bar,
+    .btn-row,
+    #ai-btn { display: none !important; }
 
-    /* Full-width layout — override ALL height/overflow constraints */
-    html, body, .shell, .main, .content, #report-body,
-    .main-scroll, .page-content, [class*="scroll"],
-    [style*="overflow"], [style*="max-height"], [style*="height:calc"] {
+    /* ── Show the shell ── */
+    #shell { display: block !important; }
+
+    /* ── Full-width layout — kill ALL scroll/height constraints ── */
+    html, body, #shell, .shell, .main, .content,
+    #report-body, .main-scroll, .page-content {
       display: block !important;
       height: auto !important;
       max-height: none !important;
@@ -232,17 +248,15 @@
       overflow: visible !important;
       overflow-x: visible !important;
       overflow-y: visible !important;
-    }
-
-    .shell { display: block !important; }
-    .main  { display: block !important; margin: 0 !important; padding: 0 !important; }
-    .content {
-      padding: 0 !important;
       width: 100% !important;
       max-width: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
     }
 
-    /* Strip ALL backgrounds — white only */
+    /* Strip ALL backgrounds */
     *, *::before, *::after {
       background: transparent !important;
       background-color: transparent !important;
@@ -252,53 +266,36 @@
       color: #111 !important;
     }
 
-    /* Remove all max-width constraints for printing */
+    /* Remove max-width on report sections */
     .report-section, #report-body, #report-body > *,
     [style*="max-width"] { max-width: none !important; width: 100% !important; }
-
-    /* Unwrap overflow containers */
-    [style*="overflow-x"], [style*="overflow-y"], [style*="overflow:"] {
-      overflow: visible !important;
-    }
 
     /* Tables */
     table { width: 100% !important; border-collapse: collapse !important; page-break-inside: auto; }
     thead { display: table-header-group; }
     thead tr th { background: #f0f0f0 !important; color: #111 !important; font-weight: 700; }
     tr { page-break-inside: avoid; }
-    th, td { padding: 4px 6px !important; font-size: 11px !important; border: 0.5px solid #bbb !important; }
-
-    /* Zebra rows — light grey only */
+    th, td { padding: 4px 6px !important; font-size: 10px !important; border: 0.5px solid #bbb !important; color: #111 !important; }
     tbody tr:nth-child(even) td { background: #f8f8f8 !important; }
-
-    /* Total/footer rows */
     tfoot tr td, tfoot tr th { background: #eee !important; font-weight: 700 !important; border-top: 1.5px solid #888 !important; }
-
-    /* Section header rows inside tbody */
     tr[style*="background"] td { background: #f0f0f0 !important; font-weight: 600 !important; }
 
     /* KPI cards */
     .kpi-grid { display: grid !important; grid-template-columns: repeat(4,1fr) !important; gap: 6px !important; }
-    .kpi { padding: 8px !important; border: 0.5px solid #bbb !important; border-radius: 0 !important; background: #fff !important; }
-    .kpi-value { font-size: 14px !important; color: #111 !important; }
+    .kpi { padding: 8px !important; border: 0.5px solid #bbb !important; border-radius: 0 !important; }
+    .kpi-value { font-size: 14px !important; }
 
-    /* Badges — just text */
-    .badge { background: none !important; border: 0.5px solid #999 !important; color: #111 !important; padding: 1px 4px !important; border-radius: 3px !important; font-size: 10px !important; }
+    /* Badges */
+    .badge { background: none !important; border: 0.5px solid #999 !important; padding: 1px 4px !important; border-radius: 3px !important; font-size: 10px !important; }
 
-    /* Report section */
+    /* Report sections */
     .report-section { border: none !important; padding: 0 !important; margin-bottom: 12px !important; page-break-inside: avoid; }
-    .report-section-title { font-size: 10px !important; color: #555 !important; }
 
-    /* Tabs — hide */
-    .tabs, .tab-bar { display: none !important; }
-
-    /* Page settings — landscape for wide tables */
+    /* Page settings */
     @page { margin: 12mm 10mm; size: A4 landscape; }
 
-    /* Print doc */
+    /* Print doc (disbursement vouchers etc.) */
     .print-doc { display: block !important; }
-
-    /* Avoid breaking */
     .dv-paper { page-break-inside: avoid; }
   }
   .print-doc { display: none; }
@@ -5954,7 +5951,7 @@ let reportPeriodFrom = '';
 let reportPeriodTo = '';
 
 function renderReports(c, ta) {
-  ta.innerHTML = `<button class="btn no-print" onclick="window.print()"><i class="ti ti-printer"></i>Print report</button>`;
+  ta.innerHTML = `<button class="btn no-print" onclick="printCurrentReport()"><i class="ti ti-printer"></i>Print Report</button>`;
   // Default to All Time so BIR reports capture all data
   // Users can narrow down using the period filter buttons
   c.innerHTML = `
@@ -6038,6 +6035,53 @@ function switchReport(type, el) {
   document.querySelectorAll('#report-tabs .tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   showReport(type);
+}
+
+function printCurrentReport() {
+  const body = document.getElementById('report-body');
+  if(!body) { window.print(); return; }
+  const content = body.innerHTML;
+  const company = getCompanyProfile();
+  const win = window.open('','_blank','width=1100,height=800');
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<title>Report — ${company.name||'Anmol Pharmaceuticals'}</title>
+<style>
+  * { box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body { font-family:Arial,sans-serif; font-size:11px; color:#111; margin:0; padding:12px 16px; background:#fff; }
+  h1,h2,h3 { color:#111; margin:0 0 8px; }
+  table { width:100%; border-collapse:collapse; margin-bottom:14px; }
+  th { background:#f0f0f0; font-weight:700; padding:5px 7px; border:0.5px solid #bbb; font-size:10px; text-align:left; }
+  td { padding:4px 7px; border:0.5px solid #ddd; font-size:10px; }
+  tbody tr:nth-child(even) td { background:#f8f8f8; }
+  tfoot td, tfoot th { background:#e8e8e8; font-weight:700; border-top:1.5px solid #888; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:14px; }
+  .kpi { border:1px solid #ccc; padding:8px; border-radius:3px; }
+  .kpi-label { font-size:10px; color:#555; margin-bottom:3px; }
+  .kpi-value { font-size:14px; font-weight:700; }
+  .kpi-sub { font-size:10px; color:#888; }
+  .badge { border:0.5px solid #999; padding:1px 4px; border-radius:3px; font-size:10px; }
+  .report-section { margin-bottom:14px; }
+  .section-head { margin-bottom:6px; font-weight:700; font-size:11px; border-bottom:1px solid #ccc; padding-bottom:4px; }
+  .no-print, button, .action-btns { display:none !important; }
+  .mono { font-family:monospace; }
+  .pos { color:#16a34a; }
+  .neg { color:#dc2626; }
+  @page { margin:10mm 8mm; size:A4 landscape; }
+</style>
+</head>
+<body>
+<div style="text-align:center;margin-bottom:14px;border-bottom:2px solid #333;padding-bottom:8px">
+  <div style="font-size:16px;font-weight:800">${company.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+  <div style="font-size:11px;color:#555">${company.address||''}</div>
+  <div style="font-size:11px;color:#555">TIN: ${company.tin||''} &nbsp;|&nbsp; Printed: ${today()}</div>
+</div>
+${content}
+<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close();}<\/script>
+</body>
+</html>`);
+  win.document.close();
 }
 
 function showReport(type) {
