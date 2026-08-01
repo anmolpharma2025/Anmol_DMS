@@ -400,6 +400,7 @@
     <div class="nav-item" title="Sales Orders" data-page="salesorders"><i class="ti ti-clipboard-list"></i><span>Sales Orders</span></div>
     <div class="nav-item" title="Invoices" data-page="invoices"><i class="ti ti-file-invoice"></i><span>Invoices</span></div>
     <div class="nav-item" title="Sales Returns" data-page="salesreturns"><i class="ti ti-arrow-back-up"></i><span>Sales Returns</span></div>
+    <div class="nav-item" title="Supplier Invoices" data-page="supplierinvoices"><i class="ti ti-file-invoice"></i><span>Supplier Invoices</span></div>
     <div class="nav-item" title="Purchase Requests" data-page="purchaserequests"><i class="ti ti-clipboard-list"></i><span>Purchase Requests</span></div>
     <div class="nav-item" title="Purchase Orders" data-page="purchaseorders"><i class="ti ti-truck-delivery"></i><span>Purchase Orders</span></div>
     <div class="nav-item" title="Expenses" data-page="expenses"><i class="ti ti-receipt"></i><span>Expenses</span></div>
@@ -1458,7 +1459,8 @@ const ALL_PAGES = [
   { id:'salesorders', label:'Sales Orders',           section:'Transactions' },
   { id:'invoices',    label:'Invoices',              section:'Transactions' },
   { id:'salesreturns',label:'Sales Returns',         section:'Transactions' },
-  { id:'purchaserequests',label:'Purchase Requests', section:'Transactions' },
+  { id:'supplierinvoices', label:'Supplier Invoices', section:'Transactions' },
+  { id:'purchaserequests', label:'Purchase Requests',  section:'Transactions' },
   { id:'purchaseorders',  label:'Purchase Orders',   section:'Transactions' },
   { id:'expenses',    label:'Expenses',              section:'Transactions' },
   { id:'deposits',    label:'Deposit Transactions',  section:'Transactions' },
@@ -2197,6 +2199,7 @@ let state = {
   vouchers: [],
   collections: [],
   salesOrders: [],
+  supplierInvoices: [],
   purchaseRequests: [],
   purchaseOrders:   [],
   inventory: [],
@@ -2417,7 +2420,7 @@ function renderPage(page) {
   const c  = document.getElementById('content');
   const ta = document.getElementById('top-actions');
   if(!c||!ta) return;
-  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, supplierinvoices: renderSupplierInvoices, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   if(pages[page]) pages[page](c, ta);
 }
 
@@ -2450,7 +2453,7 @@ function render() {
     ta.innerHTML = '';
     return;
   }
-  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
+  const pages = { dashboard: renderDashboard, mgmt: renderMgmtDashboard, journal: renderJournal, disbursement: renderDisbursementJournal, salesorders: renderSalesOrders, invoices: renderInvoices, salesreturns: renderSalesReturns, supplierinvoices: renderSupplierInvoices, purchaserequests: renderPurchaseRequests, purchaseorders: renderPurchaseOrders, purchases: renderPurchases, expenses: renderExpenses, lapsing: renderLapsingSchedule, coa: renderCOA, reports: renderReports, collections: renderCollections, inventory: renderInventory, customers: renderCustomers, suppliers: renderSuppliers, users: renderUsers, company: renderCompanyProfile, employees: renderEmployees, attendance: renderAttendance, payroll: renderPayroll, chat: renderChat, deposits: renderDeposits, auditlog: renderAuditLog, leaves: renderLeaves, performance: renderPerformance, training: renderTraining, discipline: renderDiscipline, documents: renderDocuments, orgchart: renderOrgChart, announcements: renderAnnouncements };
   (pages[state.page] || renderDashboard)(c, ta);
 }
 
@@ -12484,8 +12487,504 @@ ${so.notes?`<div class="notes-box"><strong>Notes:</strong> ${so.notes}</div>`:''
 
 // ── PURCHASE ORDERS ───────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-// PURCHASE REQUEST MODULE
+// SUPPLIER INVOICES (Accounts Payable)
 // ══════════════════════════════════════════════════════════════════════════════
+function getSIStatus(si) {
+  if(si.status==='paid') return 'paid';
+  const bal = (si.total||0) - (si.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+  if(bal<=0) return 'paid';
+  if(si.dueDate && si.dueDate < today()) return 'overdue';
+  if((si.payments||[]).length>0) return 'partial';
+  return 'unpaid';
+}
+
+function getSIBalance(si) {
+  return Math.max(0,(si.total||0) - (si.payments||[]).reduce((s,p)=>s+(p.amount||0),0));
+}
+
+function renderSupplierInvoices(c, ta) {
+  ta.innerHTML = `
+    <button class="btn primary" onclick="showAddSI()"><i class="ti ti-plus"></i>New Supplier Invoice</button>
+    <button class="btn" onclick="showReceiveFromPO()"><i class="ti ti-truck-delivery"></i>Receive from PO</button>`;
+
+  if(!state.supplierInvoices) state.supplierInvoices=[];
+  const sis = [...state.supplierInvoices].sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+
+  const totalAP      = sis.filter(s=>getSIStatus(s)!=='paid').reduce((s,i)=>s+getSIBalance(i),0);
+  const totalOverdue = sis.filter(s=>getSIStatus(s)==='overdue').reduce((s,i)=>s+getSIBalance(i),0);
+  const totalPaid    = sis.filter(s=>getSIStatus(s)==='paid').reduce((s,i)=>s+(i.total||0),0);
+  const dueThisMonth = sis.filter(s=>{
+    const st=getSIStatus(s); return (st==='unpaid'||st==='partial'||st==='overdue')&&(s.dueDate||'').startsWith(today().slice(0,7));
+  }).reduce((s,i)=>s+getSIBalance(i),0);
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-building-bank"></i>Total AP Outstanding</div><div class="kpi-value neg">${fmt(totalAP)}</div><div class="kpi-sub">${sis.filter(s=>getSIStatus(s)!=='paid').length} unpaid invoices</div></div>
+  <div class="kpi"><div class="kpi-label" style="color:var(--red)"><i class="ti ti-alert-circle"></i>Overdue</div><div class="kpi-value neg">${fmt(totalOverdue)}</div><div class="kpi-sub">${sis.filter(s=>getSIStatus(s)==='overdue').length} invoices overdue</div></div>
+  <div class="kpi"><div class="kpi-label" style="color:var(--amber)"><i class="ti ti-calendar-due"></i>Due This Month</div><div class="kpi-value" style="color:var(--amber)">${fmt(dueThisMonth)}</div></div>
+  <div class="kpi"><div class="kpi-label" style="color:var(--green)"><i class="ti ti-check"></i>Total Paid</div><div class="kpi-value pos">${fmt(totalPaid)}</div><div class="kpi-sub">${sis.filter(s=>getSIStatus(s)==='paid').length} paid</div></div>
+</div>
+
+<table>
+  <thead><tr>
+    <th>SI No.</th><th>Supplier Inv#</th><th>Date</th><th>Due Date</th><th>Supplier</th><th>PO Ref</th><th style="text-align:right">Total</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th><th>Status</th><th>Actions</th>
+  </tr></thead>
+  <tbody>
+  ${sis.length===0?`<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No supplier invoices yet. Create one or receive from a PO.</td></tr>`:''}
+  ${sis.map(si=>{
+    const st=getSIStatus(si), bal=getSIBalance(si);
+    const paid=((si.total||0)-bal);
+    const sc=st==='paid'?'var(--green)':st==='overdue'?'var(--red)':st==='partial'?'var(--amber)':'var(--text-secondary)';
+    const daysOverdue=si.dueDate&&si.dueDate<today()?Math.floor((new Date()-new Date(si.dueDate))/864e5):0;
+    return `<tr>
+      <td class="mono" style="font-weight:600">${si.id}</td>
+      <td class="mono" style="font-size:12px;color:var(--accent)">${si.supplierInvNo||'—'}</td>
+      <td>${si.date}</td>
+      <td style="color:${st==='overdue'?'var(--red)':'inherit'};font-weight:${st==='overdue'?'600':'400'}">
+        ${si.dueDate||'—'}${daysOverdue>0?`<div style="font-size:10px;color:var(--red)">${daysOverdue}d overdue</div>`:''}
+      </td>
+      <td style="font-weight:500">${si.supplier}</td>
+      <td style="font-size:12px;color:var(--accent)">${si.poRef||'—'}</td>
+      <td style="text-align:right;font-weight:500">${fmt(si.total||0)}</td>
+      <td style="text-align:right;color:var(--green)">${fmt(paid)}</td>
+      <td style="text-align:right;font-weight:700;color:${bal>0?'var(--red)':'var(--green)'}">${fmt(bal)}</td>
+      <td>
+        <span class="badge" style="background:${sc}22;color:${sc}">${st.toUpperCase()}</span>
+        ${(si.payments||[]).length>0?`<div style="font-size:10px;color:var(--text-tertiary);margin-top:2px">${(si.payments||[]).length} payment${(si.payments||[]).length>1?'s':''}</div>`:''}
+      </td>
+      <td><div class="action-btns">
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="viewSI('${si.id}')"><i class="ti ti-eye"></i></button>
+        ${getSIStatus(si)!=='paid'?`<button class="btn primary" style="padding:2px 8px;font-size:11px" onclick="showPaySI('${si.id}')"><i class="ti ti-cash"></i>Pay</button>`:''}
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditSI('${si.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn" style="padding:2px 8px;font-size:11px" onclick="printSI('${si.id}')"><i class="ti ti-printer"></i></button>
+        <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteSI('${si.id}')"><i class="ti ti-trash"></i></button>
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody>
+</table>
+
+<!-- AP Aging -->
+<div style="margin-top:20px">
+  <div style="font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px"><i class="ti ti-chart-bar" style="color:var(--red)"></i>AP Aging</div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+  ${[['Current',0,30],['1–30 days',1,30],['31–60 days',31,60],['61–90 days',61,90],['90+ days',91,9999]].map(([lbl,min,max],i)=>{
+    const bucket=sis.filter(si=>{
+      if(getSIStatus(si)==='paid') return false;
+      if(!si.dueDate) return i===0;
+      const days=Math.floor((new Date()-new Date(si.dueDate))/864e5);
+      if(i===0) return days<=0;
+      return days>=min&&days<=max;
+    });
+    const amt=bucket.reduce((s,si)=>s+getSIBalance(si),0);
+    const clr=['var(--green)','var(--accent)','var(--amber)','var(--red)','#8b0000'][i];
+    return `<div style="padding:12px;border-radius:var(--radius-md);border:1px solid var(--border-light);background:var(--bg-card);text-align:center">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${lbl}</div>
+      <div style="font-size:18px;font-weight:700;color:${clr}">${fmt(amt)}</div>
+      <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">${bucket.length} invoice${bucket.length!==1?'s':''}</div>
+    </div>`;
+  }).join('')}
+  </div>
+</div>`;
+}
+
+// ── ADD / EDIT SUPPLIER INVOICE ───────────────────────────────────────────────
+function showAddSI(prefill) {
+  const supOpts=(state.suppliers||[]).map(s=>`<option value="${s.name}" ${prefill?.supplier===s.name?'selected':''}>${s.name}</option>`).join('');
+  const poOpts=(state.purchaseOrders||[]).filter(p=>p.status==='approved'||p.status==='received').map(p=>`<option value="${p.id}" ${prefill?.poRef===p.id?'selected':''}>${p.id} — ${p.supplier}</option>`).join('');
+  window._siLines=prefill?.lines||[{desc:'',qty:1,unit:'pcs',unitPrice:0,lineTotal:0,vatExempt:false}];
+  const due=new Date(); due.setDate(due.getDate()+30);
+  const dueStr=`${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,'0')}-${String(due.getDate()).padStart(2,'0')}`;
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-file-invoice" style="margin-right:6px;color:var(--accent)"></i>New Supplier Invoice</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier <span style="color:var(--red)">*</span></label>
+    <select id="si-sup" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="">— Select supplier —</option>${supOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Supplier Invoice No. <span style="color:var(--red)">*</span></label>
+    <input type="text" id="si-invno" value="${prefill?.supplierInvNo||''}" placeholder="e.g. ABC-2025-001">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Invoice Date</label><input type="date" id="si-date" value="${prefill?.date||today()}"></div>
+  <div class="form-group"><label>Due Date</label><input type="date" id="si-due" value="${prefill?.dueDate||dueStr}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Linked PO</label>
+    <select id="si-po" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px" onchange="prefillFromPO(this.value)">
+      <option value="">— None —</option>${poOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>DR / Delivery Ref</label>
+    <input type="text" id="si-drno" value="${prefill?.drNo||''}" placeholder="Supplier DR number">
+  </div>
+</div>
+<div style="margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em">Items Received</label>
+    <button class="btn" style="padding:2px 10px;font-size:11px" onclick="addSILine()"><i class="ti ti-plus"></i>Add Line</button>
+  </div>
+  <table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead><tr style="background:var(--bg-secondary)">
+      <th style="padding:5px 7px;text-align:left">Description</th>
+      <th style="padding:5px 7px;text-align:center">Unit</th>
+      <th style="padding:5px 7px;text-align:right">Qty</th>
+      <th style="padding:5px 7px;text-align:right">Unit Price</th>
+      <th style="padding:5px 7px;text-align:center">VAT Ex.</th>
+      <th style="padding:5px 7px;text-align:right">Total</th>
+      <th></th>
+    </tr></thead>
+    <tbody id="si-lines-body"></tbody>
+  </table>
+  <div style="display:flex;justify-content:flex-end;gap:20px;margin-top:8px;font-size:12px;padding-right:30px">
+    <span>Subtotal: <strong id="si-subtotal">₱0.00</strong></span>
+    <span>VAT (12%): <strong id="si-vat">₱0.00</strong></span>
+    <span style="font-size:14px;font-weight:700">Total: <strong id="si-total" style="color:var(--accent)">₱0.00</strong></span>
+  </div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="si-notes" value="${prefill?.notes||''}" placeholder="Remarks or special instructions"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveSI()"><i class="ti ti-check"></i>Save Supplier Invoice</button>
+</div>`);
+  renderSILines();
+}
+
+function addSILine() {
+  if(!window._siLines) window._siLines=[];
+  window._siLines.push({desc:'',qty:1,unit:'pcs',unitPrice:0,lineTotal:0,vatExempt:false});
+  renderSILines();
+}
+
+function renderSILines() {
+  const tbody=document.getElementById('si-lines-body'); if(!tbody) return;
+  tbody.innerHTML=(window._siLines||[]).map((l,i)=>`
+  <tr>
+    <td style="padding:4px"><input type="text" value="${l.desc||''}" oninput="window._siLines[${i}].desc=this.value" style="width:100%;padding:5px 7px;border:1px solid var(--border-mid);border-radius:4px;background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)"></td>
+    <td style="padding:4px"><input type="text" value="${l.unit||'pcs'}" oninput="window._siLines[${i}].unit=this.value" style="width:64px;padding:5px 7px;border:1px solid var(--border-mid);border-radius:4px;background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)"></td>
+    <td style="padding:4px"><input type="number" value="${l.qty||1}" min="0" oninput="window._siLines[${i}].qty=+this.value;calcSILine(${i})" style="width:70px;padding:5px 7px;border:1px solid var(--border-mid);border-radius:4px;background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)"></td>
+    <td style="padding:4px"><input type="number" value="${l.unitPrice||0}" min="0" step="0.01" oninput="window._siLines[${i}].unitPrice=+this.value;calcSILine(${i})" style="width:90px;padding:5px 7px;border:1px solid var(--border-mid);border-radius:4px;background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)"></td>
+    <td style="padding:4px;text-align:center"><input type="checkbox" ${l.vatExempt?'checked':''} onchange="window._siLines[${i}].vatExempt=this.checked;calcSITotals()"></td>
+    <td style="padding:4px;text-align:right;font-weight:500">${fmt(l.lineTotal||0)}</td>
+    <td style="padding:4px"><button onclick="window._siLines.splice(${i},1);renderSILines()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button></td>
+  </tr>`).join('');
+  calcSITotals();
+}
+
+function calcSILine(i) {
+  const l=window._siLines[i];
+  l.lineTotal=(l.qty||0)*(l.unitPrice||0);
+  calcSITotals();
+  renderSILines();
+}
+
+function calcSITotals() {
+  const lines=window._siLines||[];
+  let subtotal=0,vat=0;
+  lines.forEach(l=>{
+    const base=l.vatExempt?l.lineTotal:(l.lineTotal/1.12);
+    subtotal+=l.vatExempt?l.lineTotal:base;
+    if(!l.vatExempt) vat+=(l.lineTotal/1.12*0.12);
+  });
+  const total=subtotal+vat;
+  const s=document.getElementById('si-subtotal'),v=document.getElementById('si-vat'),t=document.getElementById('si-total');
+  if(s) s.textContent=fmt(subtotal);
+  if(v) v.textContent=fmt(vat);
+  if(t) t.textContent=fmt(total);
+  window._siTotal={subtotal,vat,total};
+}
+
+function prefillFromPO(poId) {
+  if(!poId) return;
+  const po=(state.purchaseOrders||[]).find(p=>p.id===poId);
+  if(!po) return;
+  window._siLines=(po.lines||[]).map(l=>({desc:l.desc||'',qty:l.qty||1,unit:l.unit||'pcs',unitPrice:l.unitPrice||0,lineTotal:l.lineTotal||(l.qty||1)*(l.unitPrice||0),vatExempt:l.vatExempt||false}));
+  const supSel=document.getElementById('si-sup');
+  if(supSel) supSel.value=po.supplier||'';
+  renderSILines();
+}
+
+function saveSI() {
+  const supplier=document.getElementById('si-sup')?.value;
+  const invNo=document.getElementById('si-invno')?.value.trim();
+  const date=document.getElementById('si-date')?.value||today();
+  const dueDate=document.getElementById('si-due')?.value||'';
+  const poRef=document.getElementById('si-po')?.value||'';
+  const drNo=document.getElementById('si-drno')?.value.trim()||'';
+  const notes=document.getElementById('si-notes')?.value.trim()||'';
+  if(!supplier){alert('Please select a supplier.');return;}
+  if(!invNo){alert('Please enter the supplier invoice number.');return;}
+  const lines=(window._siLines||[]).filter(l=>l.desc&&(l.qty||0)>0);
+  if(!lines.length){alert('Add at least one line item.');return;}
+  calcSITotals();
+  const {subtotal=0,vat=0,total=0}=window._siTotal||{};
+  if(!state.supplierInvoices) state.supplierInvoices=[];
+  const id='SI-'+String(state.supplierInvoices.length+1).padStart(4,'0');
+  const si={id,supplier,supplierInvNo:invNo,date,dueDate,poRef,drNo,notes,lines,subtotal,vat,total,payments:[],status:'unpaid',createdAt:new Date().toISOString(),createdBy:currentUser?.name||''};
+  state.supplierInvoices.push(si);
+  // Mark linked PO as received
+  if(poRef){const po=(state.purchaseOrders||[]).find(p=>p.id===poRef);if(po){po.status='received';po.siRef=id;stampUpdate(po);}}
+  // Auto journal entry: Debit Purchases/Inventory, Credit AP
+  const apAcc=(state.accounts||[]).find(a=>{const n=(a.name||'').toLowerCase();return n.includes('accounts payable')&&!n.includes('withholding')&&!n.includes('output');});
+  const purchAcc=(state.accounts||[]).find(a=>{const n=(a.name||'').toLowerCase();return n.includes('purchase')||n.includes('inventory')||a.type==='Expense';});
+  if(apAcc&&purchAcc){
+    const jId='JV-SI-'+id;
+    if(!state.journal) state.journal=[];
+    state.journal.push({id:jId,groupId:jId,date,type:'general',debit:String(purchAcc.id),credit:String(apAcc.id),amount:total,desc:`Supplier invoice ${invNo} from ${supplier}${poRef?' ('+poRef+')':''}`,ref:id,payee:supplier,createdAt:new Date().toISOString()});
+  }
+  auditLog('CREATE','Supplier Invoice',id,{description:`SI ${id} — ${invNo} from ${supplier} — ${fmt(total)}`});
+  save(); closeModal(); render();
+}
+
+// ── VIEW SUPPLIER INVOICE ─────────────────────────────────────────────────────
+function viewSI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  const st=getSIStatus(si), bal=getSIBalance(si), paid=(si.total||0)-bal;
+  const sc=st==='paid'?'var(--green)':st==='overdue'?'var(--red)':st==='partial'?'var(--amber)':'var(--text-secondary)';
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-file-invoice" style="margin-right:6px;color:var(--accent)"></i>${si.id} — ${si.supplierInvNo||'No SI#'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
+  <span><i class="ti ti-building"></i> ${si.supplier}</span><span>·</span>
+  <span><i class="ti ti-calendar"></i> ${si.date}</span><span>·</span>
+  <span>Due: <strong style="color:${st==='overdue'?'var(--red)':'inherit'}">${si.dueDate||'—'}</strong></span>
+  ${si.poRef?`<span>·</span><span><i class="ti ti-link"></i> ${si.poRef}</span>`:''}
+  <span>·</span><span style="color:${sc};font-weight:700">${st.toUpperCase()}</span>
+</div>
+<table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:12px">
+  <thead><tr style="background:var(--bg-secondary)">
+    <th style="padding:6px 8px;text-align:left">Description</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th>
+  </tr></thead>
+  <tbody>${(si.lines||[]).map(l=>`<tr style="border-bottom:1px solid var(--border-light)">
+    <td style="padding:6px 8px">${l.desc}</td><td style="text-align:center">${l.unit||''}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${fmt(l.unitPrice||0)}</td><td style="text-align:right;font-weight:500">${fmt(l.lineTotal||0)}</td>
+  </tr>`).join('')}</tbody>
+  <tfoot>
+    <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--text-secondary)">Subtotal</td><td style="text-align:right;padding:6px 8px">${fmt(si.subtotal||0)}</td></tr>
+    <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--accent)">VAT (12%)</td><td style="text-align:right;padding:6px 8px;color:var(--accent)">${fmt(si.vat||0)}</td></tr>
+    <tr style="background:var(--bg-secondary);font-weight:700"><td colspan="4" style="padding:6px 8px;text-align:right">TOTAL</td><td style="text-align:right;padding:6px 8px">${fmt(si.total||0)}</td></tr>
+  </tfoot>
+</table>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+  <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Total</div><div style="font-size:16px;font-weight:700">${fmt(si.total||0)}</div></div>
+  <div style="padding:10px;background:rgba(52,201,138,0.08);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--green);margin-bottom:3px">Paid</div><div style="font-size:16px;font-weight:700;color:var(--green)">${fmt(paid)}</div></div>
+  <div style="padding:10px;background:${bal>0?'rgba(240,92,110,0.08)':'rgba(52,201,138,0.08)'};border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:${bal>0?'var(--red)':'var(--green)'};margin-bottom:3px">Balance</div><div style="font-size:16px;font-weight:700;color:${bal>0?'var(--red)':'var(--green)'}">${fmt(bal)}</div></div>
+</div>
+${(si.payments||[]).length>0?`
+<div style="font-size:12px;font-weight:600;margin-bottom:6px">Payment History</div>
+${(si.payments||[]).map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-light);font-size:12px">
+  <div><span class="mono">${p.date}</span> · ${p.mode||'Cash'} ${p.ref?'· Ref: '+p.ref:''}</div>
+  <strong style="color:var(--green)">${fmt(p.amount)}</strong>
+</div>`).join('')}`:''}
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Close</button>
+  ${st!=='paid'?`<button class="btn primary" onclick="closeModal();showPaySI('${si.id}')"><i class="ti ti-cash"></i>Record Payment</button>`:''}
+  <button class="btn" onclick="closeModal();printSI('${si.id}')"><i class="ti ti-printer"></i>Print</button>
+</div>`);
+}
+
+// ── RECORD PAYMENT ────────────────────────────────────────────────────────────
+function showPaySI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  const bal=getSIBalance(si);
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-cash" style="margin-right:6px;color:var(--green)"></i>Record Payment — ${si.id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px">
+  <strong>${si.supplier}</strong> · SI# ${si.supplierInvNo||si.id} · Balance: <strong style="color:var(--red)">${fmt(bal)}</strong>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Payment Date</label><input type="date" id="pay-date" value="${today()}"></div>
+  <div class="form-group"><label>Amount <span style="color:var(--red)">*</span></label>
+    <input type="number" id="pay-amount" value="${bal.toFixed(2)}" min="0.01" max="${bal}" step="0.01">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Payment Mode</label>
+    <select id="pay-mode" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="cash">Cash</option>
+      <option value="check">Check</option>
+      <option value="bank_transfer">Bank Transfer</option>
+      <option value="pdc">Post-Dated Check (PDC)</option>
+      <option value="online">Online Payment</option>
+    </select>
+  </div>
+  <div class="form-group"><label>Reference / Check No.</label>
+    <input type="text" id="pay-ref" placeholder="Check # or transaction ref">
+  </div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="pay-notes" placeholder="Remarks"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="savePaySI('${id}')"><i class="ti ti-check"></i>Save Payment</button>
+</div>`);
+}
+
+function savePaySI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  const amount=parseFloat(document.getElementById('pay-amount')?.value)||0;
+  const date=document.getElementById('pay-date')?.value||today();
+  const mode=document.getElementById('pay-mode')?.value||'cash';
+  const ref=document.getElementById('pay-ref')?.value.trim()||'';
+  const notes=document.getElementById('pay-notes')?.value.trim()||'';
+  if(!amount||amount<=0){alert('Enter a valid payment amount.');return;}
+  const bal=getSIBalance(si);
+  if(amount>bal+0.01){alert(`Payment (${fmt(amount)}) exceeds balance (${fmt(bal)}).`);return;}
+  if(!si.payments) si.payments=[];
+  si.payments.push({date,amount,mode,ref,notes,recordedBy:currentUser?.name||''});
+  if(getSIBalance(si)<=0.01) si.status='paid';
+  stampUpdate(si);
+  // Auto journal: Debit AP, Credit Cash/Bank
+  const apAcc=(state.accounts||[]).find(a=>{const n=(a.name||'').toLowerCase();return n.includes('accounts payable')&&!n.includes('withholding')&&!n.includes('output');});
+  const cashAcc=(state.accounts||[]).find(a=>{const n=(a.name||'').toLowerCase();return n.includes('cash')||n.includes('bank');});
+  if(apAcc&&cashAcc){
+    const jId='JV-PAY-'+id+'-'+si.payments.length;
+    if(!state.journal) state.journal=[];
+    state.journal.push({id:jId,groupId:jId,date,type:'disbursement',debit:String(apAcc.id),credit:String(cashAcc.id),amount,desc:`Payment for SI ${si.supplierInvNo||id} — ${si.supplier}`,ref:id,payee:si.supplier,createdAt:new Date().toISOString()});
+  }
+  auditLog('CREATE','SI Payment',id,{description:`Paid ${fmt(amount)} for ${si.supplier} SI ${si.supplierInvNo||id}`});
+  save(); closeModal(); render();
+}
+
+// ── RECEIVE FROM PO ───────────────────────────────────────────────────────────
+function showReceiveFromPO() {
+  const approvedPOs=(state.purchaseOrders||[]).filter(p=>p.status==='approved'&&!p.siRef);
+  if(!approvedPOs.length){alert('No approved POs available to receive. Approve a PO first.');return;}
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-truck-delivery" style="margin-right:6px;color:var(--accent)"></i>Receive from Purchase Order</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Select a PO to create a Supplier Invoice from it. Lines will be pre-filled from the PO.</div>
+${approvedPOs.map(po=>`<div onclick="closeModal();showAddSI({supplier:'${po.supplier}',poRef:'${po.id}',lines:${JSON.stringify(po.lines).replace(/</g,'&lt;').replace(/>/g,'&gt;')}})" style="padding:12px 14px;border:1px solid var(--border-mid);border-radius:var(--radius-md);cursor:pointer;margin-bottom:8px;background:var(--bg-primary);transition:border-color 0.15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border-mid)'">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-weight:600">${po.id} — ${po.supplier}</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">${po.date} · ${(po.lines||[]).length} item(s) · ${fmt((po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0))}</div>
+    </div>
+    <i class="ti ti-chevron-right" style="color:var(--accent)"></i>
+  </div>
+</div>`).join('')}
+<div style="display:flex;justify-content:flex-end;margin-top:8px"><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+}
+
+// ── EDIT / DELETE / PRINT ─────────────────────────────────────────────────────
+function showEditSI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  window._editSIId=id;
+  window._siLines=JSON.parse(JSON.stringify(si.lines||[]));
+  const supOpts=(state.suppliers||[]).map(s=>`<option value="${s.name}" ${s.name===si.supplier?'selected':''}>${s.name}</option>`).join('');
+  const poOpts=(state.purchaseOrders||[]).map(p=>`<option value="${p.id}" ${p.id===si.poRef?'selected':''}>${p.id} — ${p.supplier}</option>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit SI — ${id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+<div class="form-row">
+  <div class="form-group"><label>Supplier</label>
+    <select id="si-sup" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      ${supOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>Supplier Invoice No.</label><input type="text" id="si-invno" value="${si.supplierInvNo||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Invoice Date</label><input type="date" id="si-date" value="${si.date}"></div>
+  <div class="form-group"><label>Due Date</label><input type="date" id="si-due" value="${si.dueDate||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Linked PO</label>
+    <select id="si-po" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="">— None —</option>${poOpts}
+    </select>
+  </div>
+  <div class="form-group"><label>DR / Delivery Ref</label><input type="text" id="si-drno" value="${si.drNo||''}"></div>
+</div>
+<div style="margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.06em">Items</label>
+    <button class="btn" style="padding:2px 10px;font-size:11px" onclick="addSILine()"><i class="ti ti-plus"></i>Add</button>
+  </div>
+  <table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead><tr style="background:var(--bg-secondary)">
+      <th style="padding:5px 7px;text-align:left">Description</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:center">VAT Ex.</th><th style="text-align:right">Total</th><th></th>
+    </tr></thead>
+    <tbody id="si-lines-body"></tbody>
+  </table>
+  <div style="display:flex;justify-content:flex-end;gap:20px;margin-top:8px;font-size:12px;padding-right:30px">
+    <span>Subtotal: <strong id="si-subtotal">₱0.00</strong></span>
+    <span>VAT: <strong id="si-vat">₱0.00</strong></span>
+    <span style="font-size:14px;font-weight:700">Total: <strong id="si-total" style="color:var(--accent)">₱0.00</strong></span>
+  </div>
+</div>
+<div class="form-group"><label>Notes</label><input type="text" id="si-notes" value="${si.notes||''}"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditSI('${id}')"><i class="ti ti-check"></i>Save</button>
+</div>`);
+  renderSILines();
+}
+
+function saveEditSI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  si.supplier=document.getElementById('si-sup')?.value||si.supplier;
+  si.supplierInvNo=document.getElementById('si-invno')?.value.trim()||si.supplierInvNo;
+  si.date=document.getElementById('si-date')?.value||si.date;
+  si.dueDate=document.getElementById('si-due')?.value||'';
+  si.poRef=document.getElementById('si-po')?.value||'';
+  si.drNo=document.getElementById('si-drno')?.value.trim()||'';
+  si.notes=document.getElementById('si-notes')?.value.trim()||'';
+  si.lines=JSON.parse(JSON.stringify(window._siLines||[]));
+  calcSITotals();
+  const {subtotal=0,vat=0,total=0}=window._siTotal||{};
+  si.subtotal=subtotal; si.vat=vat; si.total=total;
+  stampUpdate(si);
+  auditLog('UPDATE','Supplier Invoice',id,{description:`Edited SI ${id}`});
+  save(); closeModal(); render();
+}
+
+function deleteSI(id) {
+  if(!requireAdmin('delete supplier invoices')) return;
+  if(!confirm(`Delete supplier invoice ${id}?`)) return;
+  state.supplierInvoices=(state.supplierInvoices||[]).filter(s=>s.id!==id);
+  save(); render();
+}
+
+function printSI(id) {
+  const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
+  const company=getCompanyProfile();
+  const bal=getSIBalance(si), paid=(si.total||0)-bal;
+  const win=window.open('','_blank','width=900,height=700');
+  win.document.write(`<!DOCTYPE html><html><head><title>Supplier Invoice — ${si.id}</title>
+<style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:20px 28px;max-width:800px;margin:0 auto}
+h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-bottom:12px}
+th{background:#f0f0f0;padding:6px 8px;border:0.5px solid #bbb;text-align:left;font-size:11px}
+td{padding:5px 8px;border:0.5px solid #ddd;font-size:11px}tfoot td{background:#eee;font-weight:700}
+.header{display:flex;justify-content:space-between;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid #333}
+.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px;font-size:11px}
+.meta-item{display:flex;gap:6px}.meta-label{color:#666;flex-shrink:0}
+@page{margin:10mm;size:A4}</style></head><body>
+<div class="header"><div><h1>${company.name||'ANMOL PHARMACEUTICALS US CORP.'}</h1><div style="font-size:11px;color:#555">${company.address||''} · TIN: ${company.tin||''}</div></div>
+<div style="text-align:right"><div style="font-size:18px;font-weight:800;color:#1a1a1a">SUPPLIER INVOICE</div>
+<div style="font-size:13px;font-weight:700;color:#555">${si.id}</div></div></div>
+<div class="meta">
+  <div class="meta-item"><span class="meta-label">Supplier:</span><strong>${si.supplier}</strong></div>
+  <div class="meta-item"><span class="meta-label">SI No.:</span><strong>${si.supplierInvNo||'—'}</strong></div>
+  <div class="meta-item"><span class="meta-label">Invoice Date:</span>${si.date}</div>
+  <div class="meta-item"><span class="meta-label">Due Date:</span><strong style="color:${getSIStatus(si)==='overdue'?'red':'inherit'}">${si.dueDate||'—'}</strong></div>
+  <div class="meta-item"><span class="meta-label">PO Reference:</span>${si.poRef||'—'}</div>
+  <div class="meta-item"><span class="meta-label">DR Reference:</span>${si.drNo||'—'}</div>
+</div>
+<table><thead><tr><th>Description</th><th>Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead>
+<tbody>${(si.lines||[]).map(l=>`<tr><td>${l.desc}</td><td>${l.unit||''}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${Number(l.unitPrice||0).toFixed(2)}</td><td style="text-align:right">${Number(l.lineTotal||0).toFixed(2)}</td></tr>`).join('')}</tbody>
+<tfoot><tr><td colspan="4" style="text-align:right">Subtotal</td><td style="text-align:right">${Number(si.subtotal||0).toFixed(2)}</td></tr>
+<tr><td colspan="4" style="text-align:right">VAT (12%)</td><td style="text-align:right">${Number(si.vat||0).toFixed(2)}</td></tr>
+<tr><td colspan="4" style="text-align:right;font-size:13px">TOTAL</td><td style="text-align:right;font-size:13px">${Number(si.total||0).toFixed(2)}</td></tr>
+<tr><td colspan="4" style="text-align:right;color:green">Amount Paid</td><td style="text-align:right;color:green">${Number(paid).toFixed(2)}</td></tr>
+<tr><td colspan="4" style="text-align:right;color:${bal>0?'red':'green'}">Balance Due</td><td style="text-align:right;font-size:14px;color:${bal>0?'red':'green'}">${Number(bal).toFixed(2)}</td></tr>
+</tfoot></table>
+${(si.payments||[]).length>0?`<div style="margin-top:12px"><strong>Payment History</strong><table style="margin-top:6px"><thead><tr><th>Date</th><th>Mode</th><th>Reference</th><th style="text-align:right">Amount</th></tr></thead><tbody>${si.payments.map(p=>`<tr><td>${p.date}</td><td>${p.mode||'Cash'}</td><td>${p.ref||'—'}</td><td style="text-align:right">${Number(p.amount).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`:''}
+${si.notes?`<div style="margin-top:12px;font-size:11px;color:#555"><strong>Notes:</strong> ${si.notes}</div>`:''}
+<div style="margin-top:20px;font-size:10px;color:#888;border-top:1px solid #ccc;padding-top:8px">Printed: ${today()} · ${company.name||''}</div>
+<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close();}<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// ── PURCHASE REQUEST MODULE ───────────────────────────────────────────────────
 function renderPurchaseRequests(c, ta) {
   ta.innerHTML = `<button class="btn primary" onclick="showAddPR()"><i class="ti ti-plus"></i>New Purchase Request</button>`;
   if(!state.purchaseRequests) state.purchaseRequests=[];
