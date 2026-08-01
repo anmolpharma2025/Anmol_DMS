@@ -4983,6 +4983,61 @@ function saveInvoice() {
   }
 
   save(); closeModal(); render();
+
+  // Prompt to create another invoice
+  showContinueInvoicePrompt();
+}
+
+function showContinueInvoicePrompt() {
+  // Remove any existing prompt
+  document.getElementById('continue-inv-prompt')?.remove();
+
+  const prompt = document.createElement('div');
+  prompt.id = 'continue-inv-prompt';
+  prompt.style.cssText = `
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+    background:var(--bg-card);border:1.5px solid var(--green);border-radius:16px;
+    padding:14px 22px;display:flex;align-items:center;gap:14px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.4);z-index:9999;
+    animation:slideUp 0.25s ease;min-width:320px;max-width:480px
+  `;
+  prompt.innerHTML = `
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:2px">
+        <i class="ti ti-circle-check" style="margin-right:5px"></i>Invoice saved!
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary)">
+        Press <kbd style="background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:4px;padding:1px 6px;font-size:11px;font-family:monospace">Enter</kbd> or click the button to create another
+      </div>
+    </div>
+    <button onclick="document.getElementById('continue-inv-prompt')?.remove();showAddInvoice()" 
+      style="padding:9px 18px;background:var(--green);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font);white-space:nowrap">
+      <i class="ti ti-plus"></i> New Invoice
+    </button>
+    <button onclick="document.getElementById('continue-inv-prompt')?.remove()"
+      style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:18px;padding:2px 4px;line-height:1">×</button>
+  `;
+  document.body.appendChild(prompt);
+
+  // Enter key listener
+  const keyHandler = (e) => {
+    if(e.key === 'Enter') {
+      document.getElementById('continue-inv-prompt')?.remove();
+      document.removeEventListener('keydown', keyHandler);
+      showAddInvoice();
+    }
+    if(e.key === 'Escape') {
+      document.getElementById('continue-inv-prompt')?.remove();
+      document.removeEventListener('keydown', keyHandler);
+    }
+  };
+  document.addEventListener('keydown', keyHandler);
+
+  // Auto-dismiss after 8 seconds
+  setTimeout(() => {
+    document.getElementById('continue-inv-prompt')?.remove();
+    document.removeEventListener('keydown', keyHandler);
+  }, 8000);
 }
 
 function viewInvoice(id) {
