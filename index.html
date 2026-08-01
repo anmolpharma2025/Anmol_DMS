@@ -4387,7 +4387,7 @@ function renderInvoices(c, ta) {
           ? `<span style="font-size:10px;color:var(--text-tertiary)">${inv.soRef}</span>`
           : '—';
     return `<tr>
-      <td class="mono">${inv.id}</td><td>${inv.date}</td>
+      <td class="mono">${inv.id}${inv.source==='historical'?'<span title="Historical entry — no inventory deducted" style="font-size:10px;background:rgba(167,139,250,0.15);color:#a78bfa;border-radius:99px;padding:1px 5px;font-weight:600;margin-left:4px">📜 HIST</span>':''}</td><td>${inv.date}</td>
       <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
       <td style="${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?'color:var(--red);font-weight:500':''}">
         ${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}
@@ -4594,6 +4594,11 @@ function deleteInvoice(id) { if(!requireAdmin("delete invoices")) return; if(con
 // Invoice line items state
 let invLines = [];
 
+function toggleHistoricalMode(on) {
+  const banner = document.getElementById('hist-banner');
+  if(banner) banner.style.display = on ? 'block' : 'none';
+}
+
 function showAddInvoice() {
   const due = new Date(); due.setDate(due.getDate() + 30);
   invLines = [{ desc:'', qty:1, unitPrice:0, itemId:'' }];
@@ -4616,6 +4621,23 @@ function showAddInvoice() {
   document.getElementById('modal').style.display = 'flex';
   document.getElementById('modal-inner').innerHTML = `
 <div class="modal-head"><h3>New Invoice</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+
+<!-- Historical Entry Toggle -->
+<div id="hist-banner" style="display:none;padding:10px 14px;background:rgba(167,139,250,0.12);border:1.5px solid #a78bfa;border-radius:var(--radius-md);margin-bottom:10px">
+  <div style="display:flex;align-items:center;gap:8px">
+    <i class="ti ti-history" style="color:#a78bfa;font-size:16px"></i>
+    <div>
+      <div style="font-size:13px;font-weight:700;color:#a78bfa">Historical Entry Mode</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">Inventory will <strong>NOT</strong> be deducted. Use for invoices issued before you started using this system.</div>
+    </div>
+  </div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
+  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;flex:1">
+    <input type="checkbox" id="inv-historical" onchange="toggleHistoricalMode(this.checked)" style="accent-color:#a78bfa;width:16px;height:16px">
+    <span><i class="ti ti-history" style="margin-right:4px;color:#a78bfa"></i><strong>Historical Entry</strong> — invoice issued before this system (no inventory deduction)</span>
+  </label>
+</div>
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:11px 14px;margin-bottom:14px">
   <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);display:block;margin-bottom:5px"><i class="ti ti-clipboard-list" style="margin-right:5px"></i>Link to Sales Order (loads all items)</label>
   <select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">${soOpts}</select>
@@ -4931,18 +4953,22 @@ function saveInvoice() {
   else if(vatType==='inclusive') { const r=vatFromGross(subtotal); vatBase=r.vatBase; vat=r.vat; amount=r.amount; }
   else                           { vatBase=subtotal; vat=0; amount=subtotal; }
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
+  const isHistorical = document.getElementById('inv-historical')?.checked || false;
   const soRef = window._invLinkedSO || '';
-  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef });
-  // ── Deduct inventory for each linked item (stock out on sale) ──
-  lines.forEach(l => {
-    if(!l.itemId) return;
-    const it = (state.inventory||[]).find(i=>i.id===l.itemId);
-    if(!it) return;
-    it.qty = Math.max(0, it.qty - (l.qty||0));
-    const movId = 'MOV-' + String((state.inventoryMovements||[]).length+1).padStart(3,'0');
-    if(!state.inventoryMovements) state.inventoryMovements=[];
-    state.inventoryMovements.push({ id:movId, date, item:l.itemId, type:'out', qty:l.qty||0, ref:id, note:`Sale — Invoice ${id}${soRef?' / SO '+soRef:''}` });
-  });
+  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef, ...(isHistorical?{source:'historical'}:{}) });
+
+  // ── Deduct inventory — skip for historical entries ──
+  if(!isHistorical) {
+    lines.forEach(l => {
+      if(!l.itemId) return;
+      const it = (state.inventory||[]).find(i=>i.id===l.itemId);
+      if(!it) return;
+      it.qty = Math.max(0, it.qty - (l.qty||0));
+      const movId = 'MOV-' + String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+      if(!state.inventoryMovements) state.inventoryMovements=[];
+      state.inventoryMovements.push({ id:movId, date, item:l.itemId, type:'out', qty:l.qty||0, ref:id, note:`Sale — Invoice ${id}${soRef?' / SO '+soRef:''}` });
+    });
+  }
   window._invLinkedSO = null;
   recomputeBalances();
 
@@ -10821,7 +10847,9 @@ function renderCompanyProfile(c, ta) {
   if(!isAdmin()) { c.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-tertiary)">Admin access required.</div>'; return; }
   const p = getCompanyProfile();
   const logo = localStorage.getItem(LOGO_KEY)||'';
-  ta.innerHTML = `<button class="btn primary" onclick="showEditCompany()"><i class="ti ti-edit"></i>Edit Profile</button>`;
+  ta.innerHTML = `
+    <button class="btn primary" onclick="showEditCompany()"><i class="ti ti-edit"></i>Edit Profile</button>
+    <button class="btn" onclick="showOpeningBalanceWizard()" style="color:#a78bfa;border-color:#a78bfa"><i class="ti ti-history"></i>Opening Balance Wizard</button>`;
   c.innerHTML = `
 <div style="max-width:680px">
   <div class="report-section" style="max-width:none">
@@ -11274,6 +11302,195 @@ function copyFirestoreRules() {
     document.body.removeChild(ta);
     alert('Rules copied!');
   });
+}
+
+// ── OPENING BALANCE WIZARD ────────────────────────────────────────────────────
+function showOpeningBalanceWizard() {
+  const customers = state.customers||[];
+  const suppliers = state.suppliers||[];
+  const arAcc  = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts receivable')||n.includes('trade receivable'); });
+  const apAcc  = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts payable')&&!n.includes('withholding')&&!n.includes('output'); });
+  const revAcc = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return (n.includes('sales')&&!n.includes('return'))||n.includes('revenue'); });
+
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-history" style="margin-right:6px;color:#a78bfa"></i>Opening Balance Wizard</h3>
+  <button class="close-btn" onclick="closeModal()">×</button>
+</div>
+<div style="background:rgba(167,139,250,0.1);border:1.5px solid #a78bfa;border-radius:var(--radius-md);padding:12px 14px;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">
+  <i class="ti ti-info-circle" style="color:#a78bfa;margin-right:5px"></i>
+  Use this wizard to enter balances from <strong>before you started using this system</strong>. 
+  These entries set your opening AR, AP, and inventory without affecting current transactions.
+</div>
+
+<!-- Tab navigation -->
+<div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:10px">
+  <button id="ob-tab-ar"  onclick="obTab('ar')"  class="btn primary" style="font-size:12px">📥 Opening AR</button>
+  <button id="ob-tab-ap"  onclick="obTab('ap')"  class="btn" style="font-size:12px">📤 Opening AP</button>
+  <button id="ob-tab-inv" onclick="obTab('inv')" class="btn" style="font-size:12px">📦 Opening Inventory</button>
+</div>
+
+<!-- AR Tab -->
+<div id="ob-ar" style="display:block">
+  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Enter total unpaid amount owed by each customer from before you started this system.</div>
+  <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text-secondary);padding:0 4px">
+    <span>Customer</span><span>Date</span><span style="text-align:right">Opening AR Amount</span><span></span>
+  </div>
+  <div id="ob-ar-rows">
+    ${customers.slice(0,3).map((c,i)=>`
+    <div class="ob-ar-row" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+        <option value="">— Select customer —</option>
+        ${customers.map(cu=>`<option value="${cu.name}" ${cu.name===c.name?'selected':''}>${cu.name}</option>`).join('')}
+      </select>
+      <input type="date" value="${today()}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="number" min="0" step="0.01" placeholder="0.00" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <button onclick="this.closest('.ob-ar-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button>
+    </div>`).join('')}
+  </div>
+  <button class="btn" style="font-size:12px;margin-bottom:8px" onclick="addOBRow('ar','${customers.map(c=>c.name).join('|')}')"><i class="ti ti-plus"></i>Add Customer</button>
+  <div style="font-size:11px;color:var(--text-secondary);padding:8px 10px;background:var(--bg-secondary);border-radius:var(--radius-sm)">
+    <i class="ti ti-info-circle" style="margin-right:4px"></i>Creates an opening invoice (📜 HIST) per customer. No inventory deducted.
+    ${arAcc?`AR account: <strong>${arAcc.name}</strong>`:'<span style="color:var(--red)">⚠ No AR account found in Chart of Accounts</span>'}
+  </div>
+</div>
+
+<!-- AP Tab -->
+<div id="ob-ap" style="display:none">
+  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Enter total amounts you owe to each supplier from before you started this system.</div>
+  <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text-secondary);padding:0 4px">
+    <span>Supplier</span><span>Date</span><span style="text-align:right">Opening AP Amount</span><span></span>
+  </div>
+  <div id="ob-ap-rows">
+    ${suppliers.slice(0,2).map((s,i)=>`
+    <div class="ob-ap-row" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+      <select style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+        <option value="">— Select supplier —</option>
+        ${suppliers.map(su=>`<option value="${su.name}" ${su.name===s.name?'selected':''}>${su.name}</option>`).join('')}
+      </select>
+      <input type="date" value="${today()}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="number" min="0" step="0.01" placeholder="0.00" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <button onclick="this.closest('.ob-ap-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button>
+    </div>`).join('')}
+  </div>
+  <button class="btn" style="font-size:12px;margin-bottom:8px" onclick="addOBRow('ap','${suppliers.map(s=>s.name).join('|')}')"><i class="ti ti-plus"></i>Add Supplier</button>
+  <div style="font-size:11px;color:var(--text-secondary);padding:8px 10px;background:var(--bg-secondary);border-radius:var(--radius-sm)">
+    <i class="ti ti-info-circle" style="margin-right:4px"></i>Creates opening supplier invoice entries.
+    ${apAcc?`AP account: <strong>${apAcc.name}</strong>`:'<span style="color:var(--red)">⚠ No AP account found in Chart of Accounts</span>'}
+  </div>
+</div>
+
+<!-- Inventory Tab -->
+<div id="ob-inv" style="display:none">
+  <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">Enter actual quantities on hand today for each item. This sets your starting inventory level.</div>
+  <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;font-weight:600;color:var(--text-secondary);padding:0 4px">
+    <span>Item</span><span style="text-align:right">Current Qty</span><span style="text-align:right">Set Opening Qty To</span><span></span>
+  </div>
+  <div id="ob-inv-rows" style="max-height:240px;overflow-y:auto">
+    ${(state.inventory||[]).map((it,i)=>`
+    <div class="ob-inv-row" style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center" data-itemid="${it.id}">
+      <div style="font-size:12px;font-weight:500">${it.name}<div style="font-size:10px;color:var(--text-tertiary)">${it.id} · ${it.unit||'pcs'}</div></div>
+      <div style="text-align:right;font-size:13px;font-weight:600;color:${(it.qty||0)===0?'var(--red)':'inherit'}">${it.qty||0} ${it.unit||'pcs'}</div>
+      <input type="number" min="0" value="${it.qty||0}" placeholder="Opening qty" data-itemid="${it.id}" style="padding:7px 8px;border:1.5px solid var(--accent);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <span style="font-size:10px;color:var(--text-tertiary)">${it.unit||'pcs'}</span>
+    </div>`).join('')}
+  </div>
+  ${(state.inventory||[]).length===0?`<div style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:12px">No inventory items found. Add items first in the Inventory tab.</div>`:''}
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" style="background:#a78bfa;border-color:#a78bfa" onclick="saveOpeningBalances()"><i class="ti ti-check"></i>Save Opening Balances</button>
+</div>`);
+}
+
+function obTab(tab) {
+  ['ar','ap','inv'].forEach(t=>{
+    document.getElementById('ob-'+t).style.display = t===tab?'block':'none';
+    const btn=document.getElementById('ob-tab-'+t);
+    if(btn){ btn.className='btn'+(t===tab?' primary':''); }
+  });
+}
+
+function addOBRow(type, namesStr) {
+  const names=namesStr.split('|').filter(Boolean);
+  const container=document.getElementById('ob-'+type+'-rows');
+  if(!container) return;
+  const cls='ob-'+type+'-row';
+  const opts=names.map(n=>`<option value="${n}">${n}</option>`).join('');
+  const label=type==='ar'?'customer':'supplier';
+  const div=document.createElement('div');
+  div.className=cls;
+  div.style.cssText='display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  div.innerHTML=`
+    <select style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <option value="">— Select ${label} —</option>${opts}
+    </select>
+    <input type="date" value="${today()}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+    <input type="number" min="0" step="0.01" placeholder="0.00" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+    <button onclick="this.closest('.${cls}').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px">×</button>`;
+  container.appendChild(div);
+}
+
+function saveOpeningBalances() {
+  let saved=0;
+  const arAcc  = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts receivable')||n.includes('trade receivable'); });
+  const apAcc  = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts payable')&&!n.includes('withholding')&&!n.includes('output'); });
+  const revAcc = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return (n.includes('sales')&&!n.includes('return'))||n.includes('revenue'); });
+  const equityAcc = state.accounts.find(a=>a.type==='Equity')||state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('retained')||n.includes('equity')||n.includes('capital'); });
+
+  // ── Opening AR ──
+  document.querySelectorAll('.ob-ar-row').forEach(row=>{
+    const sel=row.querySelector('select'); const dateEl=row.querySelectorAll('input')[0]; const amtEl=row.querySelectorAll('input')[1];
+    const customer=sel?.value; const date=dateEl?.value||today(); const amount=parseFloat(amtEl?.value)||0;
+    if(!customer||!amount) return;
+    const id='OPEN-AR-'+String(state.invoices.length+1).padStart(4,'0');
+    state.invoices.push({ id, date, due:date, terms:'net30', customer, vatBase:amount, vat:0, amount, vatType:'exempt', status:'pending', lines:[{desc:'Opening Balance',qty:1,unitPrice:amount,lineTotal:amount}], source:'historical', isOpeningBalance:true });
+    if(arAcc&&equityAcc) {
+      const jId='JV-OB-AR-'+id;
+      if(!state.journal) state.journal=[];
+      state.journal.push({id:jId,groupId:jId,date,type:'general',debit:String(arAcc.id),credit:String(equityAcc.id),amount,desc:`Opening AR — ${customer}`,ref:id,payee:customer,source:'opening_balance'});
+    }
+    saved++;
+  });
+
+  // ── Opening AP ──
+  document.querySelectorAll('.ob-ap-row').forEach(row=>{
+    const sel=row.querySelector('select'); const dateEl=row.querySelectorAll('input')[0]; const amtEl=row.querySelectorAll('input')[1];
+    const supplier=sel?.value; const date=dateEl?.value||today(); const amount=parseFloat(amtEl?.value)||0;
+    if(!supplier||!amount) return;
+    const id='OPEN-AP-'+String((state.supplierInvoices||[]).length+1).padStart(4,'0');
+    if(!state.supplierInvoices) state.supplierInvoices=[];
+    state.supplierInvoices.push({id,supplier,supplierInvNo:'OPENING',date,dueDate:date,lines:[{desc:'Opening Balance',qty:1,unit:'',unitPrice:amount,lineTotal:amount}],subtotal:amount,vat:0,total:amount,payments:[],status:'unpaid',source:'opening_balance',createdAt:new Date().toISOString()});
+    if(apAcc&&equityAcc) {
+      const jId='JV-OB-AP-'+id;
+      if(!state.journal) state.journal=[];
+      state.journal.push({id:jId,groupId:jId,date,type:'general',debit:String(equityAcc.id),credit:String(apAcc.id),amount,desc:`Opening AP — ${supplier}`,ref:id,payee:supplier,source:'opening_balance'});
+    }
+    saved++;
+  });
+
+  // ── Opening Inventory ──
+  document.querySelectorAll('#ob-inv-rows input[data-itemid]').forEach(inp=>{
+    const itemId=inp.dataset.itemid;
+    const newQty=parseInt(inp.value)||0;
+    const it=(state.inventory||[]).find(i=>i.id===itemId);
+    if(!it) return;
+    const oldQty=it.qty||0;
+    if(newQty===oldQty) return; // no change
+    const diff=newQty-oldQty;
+    it.qty=newQty;
+    // Update lots total too
+    if(it.lots?.length) { /* keep lots as-is, just update master qty */ }
+    if(!state.inventoryMovements) state.inventoryMovements=[];
+    state.inventoryMovements.push({id:'MOV-OB-'+itemId+'-'+Date.now(),date:today(),item:itemId,type:diff>0?'in':'out',qty:Math.abs(diff),ref:'OPENING',note:`Opening balance adjustment: ${oldQty} → ${newQty} ${it.unit||'pcs'}`});
+    saved++;
+  });
+
+  if(!saved){ alert('No changes to save. Fill in at least one entry.'); return; }
+  auditLog('CREATE','Opening Balance','WIZARD',{description:`Opening balances saved — ${saved} entries`});
+  save(); closeModal(); render();
+  alert(`✅ Opening balances saved (${saved} entries).\n\nHistorical invoices are tagged 📜 HIST and excluded from inventory deduction.\nJournal entries have been created for AR and AP.`);
 }
 
 function showEditCompany() {
