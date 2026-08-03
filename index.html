@@ -3138,47 +3138,42 @@ function buildGeneralJournalRows(entries) {
   });
   if(!Object.keys(groups).length) return emptyState('ti-notebook','No Journal Entries Yet','Post your first general journal entry to start recording transactions.','New Journal Entry','showAddJournal()');
   const rows = Object.values(groups).map(g => {
-    return g.lines.map((l,idx) => {
-      const da = state.accounts.find(a=>String(a.id)===String(l.debit));
-      const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
-      const isFirst = idx===0;
-      const border = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
-      const rowStyle = g.cancelled ? ';opacity:0.5;background:var(--bg-secondary);text-decoration:line-through' : '';
-      const meta = isFirst ? `
-        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}${g.cancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
-        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px;font-size:11px">${g.ref||'—'}</td>
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">
-          <div style="font-weight:500">${g.desc}</div>
-          ${g.lines[0]?.payee?`<div style="font-size:11px;color:var(--text-secondary);margin-top:2px"><i class="ti ti-user" style="font-size:10px"></i> ${g.lines[0].payee}</div>`:''}
-          ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
-          <div style="font-size:10px;color:var(--text-tertiary);margin-top:3px">${g.lines.map(l=>{
-            const da=state.accounts.find(a=>String(a.id)===String(l.debit));
-            const ca=state.accounts.find(a=>String(a.id)===String(l.credit));
-            if(l.debit) return `DR: ${da?.name||l.debit}`;
-            return `CR: ${ca?.name||l.credit}`;
-          }).join(' | ')}</div>
-          ${g.cancelled&&g.lines[0]?.cancelReason?`<div style="font-size:10px;color:var(--red);margin-top:3px"><i class="ti ti-ban" style="font-size:10px"></i> Cancelled by ${g.lines[0].cancelledBy||'—'} on ${g.lines[0].cancelledAt||'—'}: <em>${g.lines[0].cancelReason}</em></div>`:''}
-        </td>
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px;text-align:right;font-weight:600;color:${g.cancelled?'var(--text-tertiary)':'inherit'}">
-          ${fmt(g.lines.reduce((s,l)=>s+(l.debit?l.amount:0),0))}
-          ${g.approved?`<div style="font-size:9px;color:var(--green);margin-top:2px"><i class="ti ti-lock"></i> Approved</div>`:''}
-        </td>` : '';
-      const actions = isFirst ? `
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
-          <div class="action-btns">
-            <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
-            ${!g.approved&&!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','general')"><i class="ti ti-edit"></i></button>`:''}
-            ${!g.approved&&!g.cancelled?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:g.approved&&!g.cancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
-            ${!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>`:''}
-            ${!g.approved&&!g.cancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
-            ${!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')" title="Cancel entry"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--red)"><i class="ti ti-ban"></i> Cancelled</span>`}
-          </div>
-        </td>` : '';
-      if(l.debit) return `<tr style="${border}${rowStyle}">${meta}
-        ${actions}</tr>`;
-      return ``;
-    }).join('');
+    const totalAmt = g.lines.reduce((s,l)=>s+(l.debit?l.amount:0),0);
+    const isCancelled = g.cancelled;
+    const rowStyle = isCancelled ? 'opacity:0.5;background:var(--bg-secondary)' : '';
+    // Build DR/CR summary
+    const summary = g.lines.map(l=>{
+      const da=state.accounts.find(a=>String(a.id)===String(l.debit));
+      const ca=state.accounts.find(a=>String(a.id)===String(l.credit));
+      if(l.debit)  return `<span style="color:var(--text-secondary);font-size:10px">DR: <strong>${da?.name||l.debit}</strong> ${fmt(l.amount)}</span>`;
+      return `<span style="color:var(--accent);font-size:10px;font-style:italic">CR: <strong>${ca?.name||l.credit}</strong> ${fmt(l.amount)}</span>`;
+    }).join('<span style="color:var(--text-tertiary);font-size:10px;margin:0 4px">|</span>');
+    return `<tr style="${rowStyle}">
+      <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
+      <td style="white-space:nowrap">${g.date}</td>
+      <td class="mono" style="font-size:11px;color:var(--text-secondary)">${g.ref||'—'}</td>
+      <td>
+        <div style="font-weight:500">${g.desc}</div>
+        ${g.lines[0]?.payee?`<div style="font-size:11px;color:var(--text-secondary);margin-top:2px"><i class="ti ti-user" style="font-size:10px"></i> ${g.lines[0].payee}</div>`:''}
+        ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
+        <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">${summary}</div>
+        ${isCancelled&&g.lines[0]?.cancelReason?`<div style="font-size:10px;color:var(--red);margin-top:3px"><i class="ti ti-ban" style="font-size:10px"></i> Cancelled by ${g.lines[0].cancelledBy||'—'} on ${g.lines[0].cancelledAt||'—'}: <em>${g.lines[0].cancelReason}</em></div>`:''}
+      </td>
+      <td style="text-align:right;font-weight:600;color:${isCancelled?'var(--text-tertiary)':'inherit'};white-space:nowrap">
+        ${fmt(totalAmt)}
+        ${g.approved?`<div style="font-size:9px;color:var(--green);margin-top:2px"><i class="ti ti-lock"></i> Approved</div>`:''}
+      </td>
+      <td class="no-print">
+        <div class="action-btns">
+          <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
+          ${!g.approved&&!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','general')"><i class="ti ti-edit"></i></button>`:''}
+          ${!g.approved&&!isCancelled?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:g.approved&&!isCancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
+          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>`:''}
+          ${!g.approved&&!isCancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')" title="Cancel entry"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--red)"><i class="ti ti-ban"></i> Cancelled</span>`}
+        </div>
+      </td>
+    </tr>`;
   }).join('');
   return `<table>
     <thead><tr>
