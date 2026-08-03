@@ -13099,49 +13099,86 @@ function saveSI() {
   save(); closeModal(); render();
 }
 
-// ── VIEW SUPPLIER INVOICE ─────────────────────────────────────────────────────
 function viewSI(id) {
   const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
   const st=getSIStatus(si), bal=getSIBalance(si), paid=(si.total||0)-bal;
   const sc=st==='paid'?'var(--green)':st==='overdue'?'var(--red)':st==='partial'?'var(--amber)':'var(--text-secondary)';
+  const hasFile=!!(si.attachmentData||si.attachmentName);
+
+  // Use full-width split layout if attachment exists
+  const modalStyle = hasFile ? 'max-width:1100px;width:98vw' : '';
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-file-invoice" style="margin-right:6px;color:var(--accent)"></i>${si.id} — ${si.supplierInvNo||'No SI#'}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
-  <span><i class="ti ti-building"></i> ${si.supplier}</span><span>·</span>
-  <span><i class="ti ti-calendar"></i> ${si.date}</span><span>·</span>
-  <span>Due: <strong style="color:${st==='overdue'?'var(--red)':'inherit'}">${si.dueDate||'—'}</strong></span>
-  ${si.poRef?`<span>·</span><span><i class="ti ti-link"></i> ${si.poRef}</span>`:''}
-  <span>·</span><span style="color:${sc};font-weight:700">${st.toUpperCase()}</span>
+<div class="modal-head">
+  <h3><i class="ti ti-file-invoice" style="margin-right:6px;color:var(--accent)"></i>${si.id} — ${si.supplierInvNo||'No SI#'}</h3>
+  <div style="display:flex;align-items:center;gap:8px">
+    ${hasFile?`<button class="btn" style="padding:3px 10px;font-size:11px" onclick="toggleSISplitView()"><i class="ti ti-layout-sidebar-right"></i>Toggle Preview</button>`:''}
+    <button class="close-btn" onclick="closeModal()">×</button>
+  </div>
 </div>
-<table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:12px">
-  <thead><tr style="background:var(--bg-secondary)">
-    <th style="padding:6px 8px;text-align:left">Description</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th>
-  </tr></thead>
-  <tbody>${(si.lines||[]).map(l=>`<tr style="border-bottom:1px solid var(--border-light)">
-    <td style="padding:6px 8px">${l.desc}</td><td style="text-align:center">${l.unit||''}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${fmt(l.unitPrice||0)}</td><td style="text-align:right;font-weight:500">${fmt(l.lineTotal||0)}</td>
-  </tr>`).join('')}</tbody>
-  <tfoot>
-    <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--text-secondary)">Subtotal</td><td style="text-align:right;padding:6px 8px">${fmt(si.subtotal||0)}</td></tr>
-    <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--accent)">VAT (12%)</td><td style="text-align:right;padding:6px 8px;color:var(--accent)">${fmt(si.vat||0)}</td></tr>
-    <tr style="background:var(--bg-secondary);font-weight:700"><td colspan="4" style="padding:6px 8px;text-align:right">TOTAL</td><td style="text-align:right;padding:6px 8px">${fmt(si.total||0)}</td></tr>
-  </tfoot>
-</table>
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-  <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Total</div><div style="font-size:16px;font-weight:700">${fmt(si.total||0)}</div></div>
-  <div style="padding:10px;background:rgba(52,201,138,0.08);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--green);margin-bottom:3px">Paid</div><div style="font-size:16px;font-weight:700;color:var(--green)">${fmt(paid)}</div></div>
-  <div style="padding:10px;background:${bal>0?'rgba(240,92,110,0.08)':'rgba(52,201,138,0.08)'};border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:${bal>0?'var(--red)':'var(--green)'};margin-bottom:3px">Balance</div><div style="font-size:16px;font-weight:700;color:${bal>0?'var(--red)':'var(--green)'}">${fmt(bal)}</div></div>
-</div>
-${(si.payments||[]).length>0?`
-<div style="font-size:12px;font-weight:600;margin-bottom:6px">Payment History</div>
-${(si.payments||[]).map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-light);font-size:12px">
-  <div><span class="mono">${p.date}</span> · ${p.mode||'Cash'} ${p.ref?'· Ref: '+p.ref:''}</div>
-  <strong style="color:var(--green)">${fmt(p.amount)}</strong>
-</div>`).join('')}`:''}
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-  <button class="btn" onclick="closeModal()">Close</button>
-  ${st!=='paid'?`<button class="btn primary" onclick="closeModal();showPaySI('${si.id}')"><i class="ti ti-cash"></i>Record Payment</button>`:''}
-  <button class="btn" onclick="closeModal();printSI('${si.id}')"><i class="ti ti-printer"></i>Print</button>
+<div style="display:flex;gap:16px;${modalStyle}">
+  <!-- Left: SI details -->
+  <div id="si-detail-pane" style="flex:1;min-width:0">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">
+      <span><i class="ti ti-building"></i> ${si.supplier}</span><span>·</span>
+      <span><i class="ti ti-calendar"></i> ${si.date}</span><span>·</span>
+      <span>Due: <strong style="color:${st==='overdue'?'var(--red)':'inherit'}">${si.dueDate||'—'}</strong></span>
+      ${si.poRef?`<span>·</span><span><i class="ti ti-link"></i> ${si.poRef}</span>`:''}
+      <span>·</span><span style="color:${sc};font-weight:700">${st.toUpperCase()}</span>
+    </div>
+    <table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:12px">
+      <thead><tr style="background:var(--bg-secondary)">
+        <th style="padding:6px 8px;text-align:left">Description</th><th style="text-align:center">Unit</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th>
+      </tr></thead>
+      <tbody>${(si.lines||[]).map(l=>`<tr style="border-bottom:1px solid var(--border-light)">
+        <td style="padding:6px 8px">${l.desc}</td><td style="text-align:center">${l.unit||''}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${fmt(l.unitPrice||0)}</td><td style="text-align:right;font-weight:500">${fmt(l.lineTotal||0)}</td>
+      </tr>`).join('')}</tbody>
+      <tfoot>
+        <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--text-secondary)">Subtotal</td><td style="text-align:right;padding:6px 8px">${fmt(si.subtotal||0)}</td></tr>
+        <tr><td colspan="4" style="padding:6px 8px;text-align:right;color:var(--accent)">VAT (12%)</td><td style="text-align:right;padding:6px 8px;color:var(--accent)">${fmt(si.vat||0)}</td></tr>
+        <tr style="background:var(--bg-secondary);font-weight:700"><td colspan="4" style="padding:6px 8px;text-align:right">TOTAL</td><td style="text-align:right;padding:6px 8px">${fmt(si.total||0)}</td></tr>
+      </tfoot>
+    </table>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--text-secondary);margin-bottom:3px">Total</div><div style="font-size:16px;font-weight:700">${fmt(si.total||0)}</div></div>
+      <div style="padding:10px;background:rgba(52,201,138,0.08);border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:var(--green);margin-bottom:3px">Paid</div><div style="font-size:16px;font-weight:700;color:var(--green)">${fmt(paid)}</div></div>
+      <div style="padding:10px;background:${bal>0?'rgba(240,92,110,0.08)':'rgba(52,201,138,0.08)'};border-radius:var(--radius-sm);text-align:center"><div style="font-size:10px;color:${bal>0?'var(--red)':'var(--green)'};margin-bottom:3px">Balance</div><div style="font-size:16px;font-weight:700;color:${bal>0?'var(--red)':'var(--green)'}">${fmt(bal)}</div></div>
+    </div>
+    ${(si.payments||[]).length>0?`
+    <div style="font-size:12px;font-weight:600;margin-bottom:6px">Payment History</div>
+    ${(si.payments||[]).map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-light);font-size:12px">
+      <div><span class="mono">${p.date}</span> · ${p.mode||'Cash'} ${p.ref?'· Ref: '+p.ref:''}</div>
+      <strong style="color:var(--green)">${fmt(p.amount)}</strong>
+    </div>`).join('')}`:''}
+    ${hasFile?`<div style="margin-top:10px;padding:8px 12px;background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:12px;display:flex;align-items:center;gap:8px">
+      <i class="ti ti-paperclip" style="color:var(--accent)"></i>
+      <span style="flex:1">${si.attachmentName||'Scanned Invoice'}</span>
+      <button class="btn" style="padding:2px 8px;font-size:11px" onclick="toggleSISplitView()"><i class="ti ti-eye"></i>Preview</button>
+    </div>`:''}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="closeModal()">Close</button>
+      ${st!=='paid'?`<button class="btn primary" onclick="closeModal();showPaySI('${si.id}')"><i class="ti ti-cash"></i>Record Payment</button>`:''}
+      <button class="btn" onclick="closeModal();printSI('${si.id}')"><i class="ti ti-printer"></i>Print</button>
+    </div>
+  </div>
+
+  <!-- Right: Attachment preview (hidden by default, toggled) -->
+  ${hasFile?`
+  <div id="si-preview-pane" style="display:none;width:480px;flex-shrink:0;border-left:1px solid var(--border-light);padding-left:16px">
+    <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px"><i class="ti ti-file-search" style="margin-right:5px"></i>${si.attachmentName||'Scanned Invoice'}</div>
+    ${si.attachmentData?.startsWith('data:image')?
+      `<img src="${si.attachmentData}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-light)">`
+      :si.attachmentData?.startsWith('data:application/pdf')?
+      `<iframe src="${si.attachmentData}" style="width:100%;height:600px;border:none;border-radius:var(--radius-sm)"></iframe>`
+      :`<div style="padding:24px;text-align:center;color:var(--text-tertiary)"><i class="ti ti-file" style="font-size:32px;display:block;margin-bottom:8px"></i>Preview not available</div>`
+    }
+  </div>`:''}
 </div>`);
+}
+
+function toggleSISplitView() {
+  const pane = document.getElementById('si-preview-pane');
+  if(!pane) return;
+  pane.style.display = pane.style.display==='none'?'block':'none';
 }
 
 // ── RECORD PAYMENT ────────────────────────────────────────────────────────────
@@ -14105,71 +14142,194 @@ function receivePO(id) {
   }
   const po=(state.purchaseOrders||[]).find(p=>p.id===id);
   if(!po||po.status==='received') return;
+  const poTotal=(po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0);
 
-  // Require supplier invoice and DR number
   showModal(`
 <div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px;color:var(--green)"></i>Receive PO — ${po.id}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="padding:10px 14px;background:var(--bg-secondary);border-radius:var(--radius-md);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
-  <strong>Supplier:</strong> ${po.supplier} &nbsp;·&nbsp;
-  <strong>PO Total:</strong> ${fmt((po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0))}
+  <strong>Supplier:</strong> ${po.supplier} &nbsp;·&nbsp; <strong>PO Total:</strong> ${fmt(poTotal)} &nbsp;·&nbsp; ${(po.lines||[]).length} item(s)
 </div>
+
+<!-- Supplier Invoice Details -->
+<div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:10px"><i class="ti ti-file-invoice" style="margin-right:5px"></i>Supplier Invoice Details</div>
 <div class="form-row">
   <div class="form-group">
     <label>Supplier Invoice No. <span style="color:var(--red)">*</span></label>
-    <input type="text" id="recv-inv-no" placeholder="e.g. SI-2026-001" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <input type="text" id="recv-inv-no" placeholder="e.g. SI-2026-001">
   </div>
   <div class="form-group">
-    <label>Delivery Receipt No. <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
-    <input type="text" id="recv-dr-no" placeholder="e.g. DR-2026-001" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <label>Delivery Receipt No.</label>
+    <input type="text" id="recv-dr-no" placeholder="e.g. DR-2026-001">
   </div>
 </div>
 <div class="form-row">
   <div class="form-group">
-    <label>Receipt Date</label>
-    <input type="date" id="recv-date" value="${today()}" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+    <label>Invoice Amount <span style="color:var(--red)">*</span></label>
+    <input type="number" id="recv-amount" value="${poTotal.toFixed(2)}" min="0" step="0.01" placeholder="${poTotal.toFixed(2)}">
   </div>
   <div class="form-group">
-    <label>Received By <span style="font-size:10px;color:var(--green);font-weight:400"><i class="ti ti-lock" style="font-size:10px"></i> auto-stamped</span></label>
-    <input type="text" value="${currentUser?.name||''}" readonly style="width:100%;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-secondary);color:var(--text-secondary);font-size:13px;font-family:var(--font);cursor:not-allowed">
+    <label>Due Date</label>
+    <input type="date" id="recv-due" value="${(()=>{const d=new Date();d.setDate(d.getDate()+30);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()}">
   </div>
 </div>
+<div class="form-row">
+  <div class="form-group">
+    <label>VAT Treatment <span style="color:var(--red)">*</span></label>
+    <select id="recv-vat" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)" onchange="calcRecvVAT()">
+      <option value="vat_inclusive">VAT Inclusive (amount includes 12% VAT)</option>
+      <option value="vat_exclusive">VAT Exclusive (add 12% on top of amount)</option>
+      <option value="vat_exempt">VAT Exempt / Zero-rated</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Receipt Date</label>
+    <input type="date" id="recv-date" value="${today()}">
+  </div>
+</div>
+
+<!-- VAT Breakdown Preview -->
+<div id="recv-vat-breakdown" style="padding:10px 14px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);margin-bottom:12px;font-size:12px">
+  <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--text-secondary)">Net of VAT</span><span id="recv-net" style="font-weight:600">${fmt(poTotal/1.12)}</span></div>
+  <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--accent)">Input VAT (12%)</span><span id="recv-vat-amt" style="font-weight:600;color:var(--accent)">${fmt(poTotal/1.12*0.12)}</span></div>
+  <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span style="font-weight:700">Total</span><span id="recv-total-amt" style="font-weight:700;color:var(--accent)">${fmt(poTotal)}</span></div>
+</div>
+
+<!-- Upload Scanned Invoice -->
+<div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px"><i class="ti ti-upload" style="margin-right:5px"></i>Upload Scanned Invoice</div>
+<div id="recv-upload-zone" onclick="document.getElementById('recv-file-input').click()"
+  style="border:2px dashed var(--border-mid);border-radius:var(--radius-md);padding:20px;text-align:center;cursor:pointer;background:var(--bg-primary);transition:border-color 0.2s;margin-bottom:12px"
+  ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+  ondragleave="this.style.borderColor='var(--border-mid)'"
+  ondrop="event.preventDefault();this.style.borderColor='var(--border-mid)';handleRecvFileDrop(event)">
+  <i class="ti ti-file-upload" style="font-size:28px;color:var(--text-tertiary);display:block;margin-bottom:8px"></i>
+  <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">Drop file here or click to upload</div>
+  <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">JPG, PNG, PDF · Max 10MB</div>
+  <input type="file" id="recv-file-input" accept="image/*,.pdf" style="display:none" onchange="handleRecvFile(this)">
+</div>
+<div id="recv-file-preview" style="display:none;margin-bottom:12px;padding:10px 12px;background:var(--bg-secondary);border-radius:var(--radius-md);border:1px solid var(--green);display:none;align-items:center;gap:10px">
+  <i class="ti ti-file-check" style="font-size:20px;color:var(--green)"></i>
+  <div style="flex:1"><div id="recv-file-name" style="font-size:13px;font-weight:600"></div><div id="recv-file-size" style="font-size:11px;color:var(--text-secondary)"></div></div>
+  <button onclick="clearRecvFile()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:18px">×</button>
+</div>
+
 <div class="form-group">
   <label>Remarks <span style="font-size:10px;color:var(--text-tertiary)">(optional)</span></label>
-  <input type="text" id="recv-notes" placeholder="Condition of goods, partial delivery, etc." style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+  <input type="text" id="recv-notes" placeholder="Condition of goods, partial delivery, etc.">
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="confirmReceivePO('${po.id}')"><i class="ti ti-package-import"></i>Confirm Receipt</button>
+  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="confirmReceivePO('${po.id}')">
+    <i class="ti ti-package-import"></i>Confirm & Create Supplier Invoice
+  </button>
 </div>`);
+  calcRecvVAT();
 }
 
-function confirmReceivePO(id) { auditLog('UPDATE','Purchase Order',id,{description:`Received PO ${id}`});
-  const supInvNo = document.getElementById('recv-inv-no')?.value.trim();
-  const drNo     = document.getElementById('recv-dr-no')?.value.trim();
-  const recvDate = document.getElementById('recv-date')?.value || today();
-  const notes    = document.getElementById('recv-notes')?.value.trim()||'';
-  if(!supInvNo) { alert('Supplier Invoice No. is required.'); return; }
+function calcRecvVAT() {
+  const amt    = parseFloat(document.getElementById('recv-amount')?.value)||0;
+  const vatTrx = document.getElementById('recv-vat')?.value||'vat_inclusive';
+  let net=0, vatAmt=0, total=0;
+  if(vatTrx==='vat_inclusive')  { net=amt/1.12; vatAmt=amt/1.12*0.12; total=amt; }
+  else if(vatTrx==='vat_exclusive') { net=amt; vatAmt=amt*0.12; total=amt+vatAmt; }
+  else { net=amt; vatAmt=0; total=amt; }
+  const s=v=>fmt(v);
+  const netEl=document.getElementById('recv-net'),
+        vatEl=document.getElementById('recv-vat-amt'),
+        totEl=document.getElementById('recv-total-amt');
+  if(netEl) netEl.textContent=s(net);
+  if(vatEl) vatEl.textContent=s(vatAmt);
+  if(totEl) totEl.textContent=s(total);
+  window._recvVAT={net,vatAmt,total,vatTrx};
+}
 
-  const po = (state.purchaseOrders||[]).find(p=>p.id===id);
-  if(!po) return;
-  po.status       = 'received';
-  po.receivedDate = recvDate;
-  po.receivedBy   = currentUser?.name || '';
-  po.supplierInvoiceNo = supInvNo;
-  po.drNo         = drNo;
-  po.receiptNotes = notes;
+function handleRecvFileDrop(e) {
+  const file=e.dataTransfer.files[0]; if(file) processRecvFile(file);
+}
+function handleRecvFile(input) {
+  const file=input.files[0]; if(file) processRecvFile(file);
+}
+function processRecvFile(file) {
+  if(file.size>10*1024*1024){alert('File too large. Max 10MB.');return;}
+  window._recvFile=file;
+  const reader=new FileReader();
+  reader.onload=e=>{window._recvFileData=e.target.result;};
+  reader.readAsDataURL(file);
+  // Show preview bar
+  const zone=document.getElementById('recv-upload-zone');
+  const prev=document.getElementById('recv-file-preview');
+  if(zone) zone.style.borderColor='var(--green)';
+  if(prev) {
+    prev.style.display='flex';
+    document.getElementById('recv-file-name').textContent=file.name;
+    document.getElementById('recv-file-size').textContent=(file.size/1024).toFixed(0)+' KB · '+file.type;
+  }
+}
+function clearRecvFile() {
+  window._recvFile=null; window._recvFileData=null;
+  document.getElementById('recv-file-input').value='';
+  document.getElementById('recv-file-preview').style.display='none';
+  document.getElementById('recv-upload-zone').style.borderColor='var(--border-mid)';
+}
+
+function confirmReceivePO(id) {
+  const supInvNo = document.getElementById('recv-inv-no')?.value.trim();
+  const drNo     = document.getElementById('recv-dr-no')?.value.trim()||'';
+  const recvDate = document.getElementById('recv-date')?.value||today();
+  const dueDate  = document.getElementById('recv-due')?.value||'';
+  const notes    = document.getElementById('recv-notes')?.value.trim()||'';
+  const vatTrx   = document.getElementById('recv-vat')?.value||'vat_inclusive';
+  const amount   = parseFloat(document.getElementById('recv-amount')?.value)||0;
+  if(!supInvNo){alert('Supplier Invoice No. is required.');return;}
+  if(!amount)  {alert('Please enter the invoice amount.');return;}
+
+  const po=(state.purchaseOrders||[]).find(p=>p.id===id); if(!po) return;
+  calcRecvVAT();
+  const {net=0,vatAmt=0,total=0}=window._recvVAT||{};
+
+  po.status='received'; po.receivedDate=recvDate; po.receivedBy=currentUser?.name||'';
+  po.supplierInvoiceNo=supInvNo; po.drNo=drNo; po.receiptNotes=notes;
 
   // Add received quantities to inventory
   (po.lines||[]).forEach(l=>{
     if(!l.itemId) return;
-    const it=(state.inventory||[]).find(i=>i.id===l.itemId);
-    if(!it) return;
-    it.qty = (it.qty||0) + (parseFloat(l.qty)||0);
-    const movId='MOV-'+String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+    const it=(state.inventory||[]).find(i=>i.id===l.itemId); if(!it) return;
+    it.qty=(it.qty||0)+(parseFloat(l.qty)||0);
     if(!state.inventoryMovements) state.inventoryMovements=[];
-    state.inventoryMovements.push({ id:movId, date:recvDate, item:l.itemId, type:'in', qty:parseFloat(l.qty)||0, ref:po.id, note:`PO Receipt — ${po.id} · SI: ${supInvNo}${drNo?' · DR: '+drNo:''}` });
+    const movId='MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0');
+    state.inventoryMovements.push({id:movId,date:recvDate,item:l.itemId,type:'in',qty:parseFloat(l.qty)||0,ref:po.id,note:`PO Receipt — ${po.id} · SI: ${supInvNo}${drNo?' · DR: '+drNo:''}`});
   });
-  save(); closeModal(); render();
+
+  // Create Supplier Invoice record
+  if(!state.supplierInvoices) state.supplierInvoices=[];
+  const siId='SI-'+String(state.supplierInvoices.length+1).padStart(4,'0');
+  const si={
+    id:siId, supplier:po.supplier, supplierInvNo:supInvNo,
+    date:recvDate, dueDate, poRef:po.id, drNo, notes,
+    lines:(po.lines||[]).map(l=>({desc:l.desc||'',qty:l.qty||1,unit:l.unit||'pcs',unitPrice:l.unitPrice||0,lineTotal:l.lineTotal||0,vatExempt:vatTrx==='vat_exempt'})),
+    subtotal:net, vat:vatAmt, total, vatTreatment:vatTrx,
+    payments:[], status:'unpaid',
+    attachmentName: window._recvFile?.name||'',
+    attachmentData: window._recvFileData||'',
+    createdAt:new Date().toISOString(), createdBy:currentUser?.name||''
+  };
+  state.supplierInvoices.push(si);
+  po.siRef=siId;
+
+  // Auto journal: Debit Purchases, Credit AP
+  const apAcc=state.accounts.find(a=>{const n=(a.name||'').toLowerCase();return n.includes('accounts payable')&&!n.includes('withholding')&&!n.includes('output');});
+  const purchAcc=state.accounts.find(a=>{const n=(a.name||'').toLowerCase();return n.includes('purchase')||n.includes('inventory');});
+  if(apAcc&&purchAcc&&state.journal){
+    const jId='JV-SI-'+siId;
+    state.journal.push({id:jId,groupId:jId,date:recvDate,type:'general',debit:String(purchAcc.id),credit:String(apAcc.id),amount:total,desc:`PO Receipt — ${supInvNo} from ${po.supplier} (${po.id})`,ref:siId,payee:po.supplier,createdAt:new Date().toISOString()});
+  }
+
+  auditLog('UPDATE','Purchase Order',id,{description:`Received PO ${id} — SI: ${supInvNo} — ${fmt(total)}`});
+  window._recvFile=null; window._recvFileData=null;
+  save(); closeModal();
+
+  // Redirect to Supplier Invoices tab and open the new SI
+  navigate('supplierinvoices');
+  setTimeout(()=>viewSI(siId),400);
 }
 function showEditPO(id) {
   if(!requireAdmin('edit purchase orders')) return;
