@@ -3206,14 +3206,14 @@ function buildDisbursementRows(entries) {
     const cashAcc = cashLine ? state.accounts.find(a=>String(a.id)===String(cashLine.credit)) : null;
     const totalDisb = crLines.reduce((s,l)=>s+(l.amount||0),0) || (cashLine?.amount||0);
     const isCancelled = g.lines[0]?.cancelled;
+    const payee = g.lines[0]?.payee||'—';
     return `<tr style="${isCancelled?'opacity:0.55;background:var(--bg-secondary)':''}">
       <td class="mono">${g.id}${isCancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
       <td>${g.date}</td>
-      <td class="mono">${g.ref}</td>
+      <td style="font-weight:500">${payee}</td>
       <td>
         ${g.desc}
-        ${g.lines[0]?.payee?`<div style="font-size:11px;color:var(--text-primary);margin-top:2px"><i class="ti ti-user" style="font-size:10px"></i> <strong>Payee:</strong> ${g.lines[0].payee}</div>`:''}
-        ${g.lines[0]?.checkNo?`<div style="font-size:11px;color:var(--text-secondary);margin-top:1px"><i class="ti ti-file-invoice" style="font-size:10px"></i> Ref/Check: <span class="mono">${g.lines[0].checkNo}</span></div>`:''}
+        ${g.lines[0]?.checkNo?`<div style="font-size:11px;color:var(--text-secondary);margin-top:1px"><i class="ti ti-file-invoice" style="font-size:10px"></i> Check/Ref: <span class="mono">${g.lines[0].checkNo}</span></div>`:''}
         ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
         ${isCancelled&&g.lines[0]?.cancelReason?`<div style="font-size:10px;color:var(--red);margin-top:3px"><i class="ti ti-ban" style="font-size:10px"></i> Cancelled by ${g.lines[0].cancelledBy||'—'} on ${g.lines[0].cancelledAt||'—'}: <em>${g.lines[0].cancelReason}</em></div>`:''}
       </td>
@@ -3228,14 +3228,14 @@ function buildDisbursementRows(entries) {
           ${g.approved&&!isCancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
           ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','disbursement')"><i class="ti ti-printer"></i></button>`:''}
           ${(!g.approved||isAdmin())&&!isCancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
-          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--amber)"><i class="ti ti-ban"></i>Cancelled</span>`}
+          ${!isCancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--red)"><i class="ti ti-ban"></i> Cancelled</span>`}
         </div>
       </td>
     </tr>`;
   }).join('');
   return `<table>
     <thead><tr>
-      <th>Entry #</th><th>Date</th><th>Reference</th><th>Payee / Description</th>
+      <th>Entry #</th><th>Date</th><th>Payee</th><th>Description</th>
       <th>Drawn From</th>
       <th>Created By</th>
       <th style="text-align:right">Amount Disbursed</th>
