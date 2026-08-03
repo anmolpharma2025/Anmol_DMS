@@ -3143,26 +3143,31 @@ function buildGeneralJournalRows(entries) {
       const ca = state.accounts.find(a=>String(a.id)===String(l.credit));
       const isFirst = idx===0;
       const border = isFirst ? 'border-top:1.5px solid var(--border-light)' : 'border-top:none';
+      const rowStyle = g.cancelled ? ';opacity:0.5;background:var(--bg-secondary);text-decoration:line-through' : '';
       const meta = isFirst ? `
-        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}</td>
+        <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.id}${g.cancelled?` <span style="color:var(--red);font-size:10px;font-weight:600">CANCELLED</span>`:''}</td>
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.date}</td>
         <td class="mono" rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.ref}</td>
-        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">${g.desc}${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}</td>` : '';
+        <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:8px">
+          ${g.desc}${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
+          ${g.cancelled&&g.lines[0]?.cancelReason?`<div style="font-size:10px;color:var(--red);margin-top:3px"><i class="ti ti-ban" style="font-size:10px"></i> Cancelled by ${g.lines[0].cancelledBy||'—'} on ${g.lines[0].cancelledAt||'—'}: <em>${g.lines[0].cancelReason}</em></div>`:''}
+        </td>` : '';
       const actions = isFirst ? `
         <td rowspan="${g.lines.length}" style="vertical-align:top;padding-top:6px">
           <div class="action-btns">
             <button class="btn" style="padding:3px 8px;font-size:11px" onclick="viewJournal('${g.id}')"><i class="ti ti-eye"></i></button>
-            ${!g.approved?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','general')"><i class="ti ti-edit"></i></button>`:''}
-            ${!g.approved?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`}
-            <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>
-            ${!g.approved?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+            ${!g.approved&&!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="editJournalEntry('${g.id}','general')"><i class="ti ti-edit"></i></button>`:''}
+            ${!g.approved&&!g.cancelled?`<button class="btn primary" style="padding:3px 8px;font-size:11px" onclick="approveJournalEntry('${g.id}')"><i class="ti ti-check"></i></button>`:g.approved&&!g.cancelled?`<span style="font-size:10px;color:var(--green)"><i class="ti ti-lock"></i>Approved</span>`:''}
+            ${!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="printJournal('${g.id}','general')"><i class="ti ti-printer"></i></button>`:''}
+            ${!g.approved&&!g.cancelled?`<button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteJournalGroup('${g.id}')"><i class="ti ti-trash"></i></button>`:''}
+            ${!g.cancelled?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelJournalEntry('${g.id}')" title="Cancel entry"><i class="ti ti-ban"></i></button>`:`<span style="font-size:10px;color:var(--red)"><i class="ti ti-ban"></i> Cancelled</span>`}
           </div>
         </td>` : '';
-      if(l.debit) return `<tr style="${border}">${meta}
+      if(l.debit) return `<tr style="${border}${rowStyle}">${meta}
         <td style="padding-left:12px;color:var(--text-secondary)">${da?da.name:l.debit}</td>
         <td></td><td style="text-align:right">${fmt(l.amount)}</td><td></td>
         ${actions}</tr>`;
-      return `<tr style="${border}">${meta}
+      return `<tr style="${border}${rowStyle}">${meta}
         <td></td>
         <td style="padding-left:24px;color:var(--text-secondary);font-style:italic">${ca?ca.name:l.credit}</td>
         <td></td><td style="text-align:right">${fmt(l.amount)}</td>
@@ -3210,6 +3215,7 @@ function buildDisbursementRows(entries) {
         ${g.lines[0]?.payee?`<div style="font-size:11px;color:var(--text-primary);margin-top:2px"><i class="ti ti-user" style="font-size:10px"></i> <strong>Payee:</strong> ${g.lines[0].payee}</div>`:''}
         ${g.lines[0]?.checkNo?`<div style="font-size:11px;color:var(--text-secondary);margin-top:1px"><i class="ti ti-file-invoice" style="font-size:10px"></i> Ref/Check: <span class="mono">${g.lines[0].checkNo}</span></div>`:''}
         ${g.lines[0]?.poRef?`<div style="font-size:10px;color:var(--accent);margin-top:2px"><i class="ti ti-truck-delivery" style="font-size:10px"></i> PO: ${g.lines[0].poRef}</div>`:''}
+        ${isCancelled&&g.lines[0]?.cancelReason?`<div style="font-size:10px;color:var(--red);margin-top:3px"><i class="ti ti-ban" style="font-size:10px"></i> Cancelled by ${g.lines[0].cancelledBy||'—'} on ${g.lines[0].cancelledAt||'—'}: <em>${g.lines[0].cancelReason}</em></div>`:''}
       </td>
       <td style="font-size:12px;color:var(--text-secondary)">${cashAcc?cashAcc.name:(cashLine?.credit||'—')}</td>
       <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${g.lines[0]?.preparedBy||'—'}</td>
@@ -3503,9 +3509,26 @@ function editJournalEntry(groupId, type) {
 }
 
 function cancelJournalEntry(groupId) {
-  if(!confirm('Cancel this journal entry? It will remain visible but marked as CANCELLED and excluded from reports. This cannot be undone.')) return;
-  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
-  lines.forEach(l => { l.cancelled = true; l.cancelledBy = currentUser.name; l.cancelledAt = today(); });
+  if(!requireAdmin('cancel journal entries')) return;
+  const lines = (state.journal||[]).filter(j=>(j.group||j.id||j.groupId)===groupId);
+  if(!lines.length) { alert('Journal entry not found.'); return; }
+  const isCancelled = lines.some(l=>l.cancelled);
+  if(isCancelled) { alert('This entry is already cancelled.'); return; }
+
+  const reason = prompt(
+    'Cancel this journal entry?\n\nEnter reason for cancellation (required):\n(It will remain visible but marked CANCELLED and excluded from all reports and account balances.)'
+  );
+  if(reason === null) return; // user pressed Cancel button
+  if(!reason.trim()) { alert('A reason is required to cancel a journal entry.'); return; }
+
+  lines.forEach(l => {
+    l.cancelled     = true;
+    l.cancelledBy   = currentUser?.name || '';
+    l.cancelledAt   = today();
+    l.cancelReason  = reason.trim();
+  });
+
+  auditLog('UPDATE','Journal',groupId,{description:`Cancelled journal entry ${groupId} — Reason: ${reason.trim()}`});
   save(); render();
 }
 
