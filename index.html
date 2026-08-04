@@ -17892,6 +17892,47 @@ async function saveEditEmployee(id) { if(!requireAdmin("edit employee records"))
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
 function renderAttendance(c, ta) {
+  // Sync any mobile attendance records not yet in state
+  syncMobileAttendance().then(()=>{
+    _renderAttendanceInner(c, ta);
+  });
+  _renderAttendanceInner(c, ta); // render immediately with current data too
+}
+
+async function syncMobileAttendance() {
+  try {
+    if(!db) return;
+    const snap = await db.collection('companies/anmol/attendance_mobile').get();
+    if(snap.empty) return;
+    let changed = false;
+    snap.docs.forEach(doc=>{
+      const r = doc.data();
+      if(!r.empId || !r.date) return;
+      const exists = (state.attendance||[]).some(a=>
+        a.id===r.id ||
+        (a.date===r.date && (a.empId===r.empId || a.empName===r.empName))
+      );
+      if(!exists) {
+        if(!state.attendance) state.attendance=[];
+        state.attendance.push({
+          id: r.id||doc.id,
+          date: r.date, empId: r.empId, empName: r.empName||'',
+          status: r.status||'present',
+          timeIn: r.timeIn||'', timeOut: r.timeOut||'',
+          hoursWorked: r.hoursWorked||0, overtimeHours: r.overtimeHours||0,
+          notes: r.notes||'', verifiedFace: r.verifiedFace||false,
+          faceConfidence: r.faceConfidence||0,
+          locTag: r.locTag||'', locLabel: r.locLabel||'',
+          source: 'mobile_app'
+        });
+        changed = true;
+      }
+    });
+    if(changed) { save(); render(); }
+  } catch(e) { console.warn('syncMobileAttendance:', e); }
+}
+
+function _renderAttendanceInner(c, ta) {
   const allRecords = state.attendance||[];
   const dates = [...new Set(allRecords.map(a=>a.date))].sort().reverse();
   const filterDate = window._attDate || (dates[0]||today());
@@ -17918,7 +17959,11 @@ function renderAttendance(c, ta) {
   <tbody>
   ${allRecords.length===0?`<tr><td colspan="10">${emptyState('ti-clock','No Attendance Records','Attendance will appear here once logged or verified via face recognition.','Log Attendance','showLogAttendance()')}</td></tr>`:''}
   ${[...allRecords].sort((a,b)=>(b.date+b.timeIn).localeCompare(a.date+a.timeIn)).map(a=>{
-    const emp = emps.find(e=>e.id===a.empId)||{name:a.empName||a.empId||'Unknown',department:'—'};
+    const emp = emps.find(e=>
+      String(e.id)===String(a.empId) ||
+      (a.empName && e.name.trim().toLowerCase()===a.empName.trim().toLowerCase()) ||
+      String(e.name)===String(a.empId)
+    ) || {name:a.empName||a.empId||'Unknown', department:'—'};
     return `<tr>
       <td class="mono" style="font-size:12px">${a.date}</td>
       <td style="font-weight:500">${emp.name}</td>
@@ -17961,9 +18006,11 @@ function renderAttendance(c, ta) {
   <tbody>
   ${emps.map(emp=>{
     const rec = dayRecords.find(a=>
-      a.empId===emp.id ||
-      a.empId===emp.name ||
-      (a.empName&&a.empName===emp.name)
+      String(a.empId)===String(emp.id) ||
+      String(a.empId)===String(emp.name) ||
+      (a.empName && a.empName.trim().toLowerCase()===emp.name.trim().toLowerCase()) ||
+      (a.empId && emp.id && String(a.empId).includes(String(emp.id))) ||
+      (a.empId && emp.name && a.empId.trim().toLowerCase()===emp.name.trim().toLowerCase())
     );
     if(!rec) return `<tr style="background:rgba(239,68,68,0.04)">
       <td style="font-weight:500">
