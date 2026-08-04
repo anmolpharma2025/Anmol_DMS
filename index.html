@@ -2294,7 +2294,12 @@ document.querySelectorAll('.nav-item').forEach(el => {
   });
 });
 
-function closeModal() { document.getElementById('modal').style.display = 'none'; }
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+  // Clear any pending journal edit state so closing without saving doesn't lose data
+  window._editingJournalGroupId = null;
+  window._jeEditGroupId = null;
+}
 function overlayClick(e) { if (e.target === document.getElementById('modal')) closeModal(); }
 // showModal is defined later with searchable-select support
 
@@ -3570,19 +3575,23 @@ function approveJournalEntry(groupId) {
 }
 
 function editJournalEntry(groupId, type) {
-  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
-  if(!lines.length) return;
+  const lines = (state.journal||[]).filter(j=>(j.group||j.id||j.groupId)===groupId);
+  if(!lines.length) { alert('Journal entry not found.'); return; }
   const isApproved = lines.some(l=>l.approved);
   if(isApproved && !isAdmin()) { alert('This entry has been approved and cannot be edited.\nOnly an Admin can edit approved entries.'); return; }
   if(isApproved && isAdmin()) {
     if(!confirm('⚠ This entry is APPROVED. Editing will un-approve it and require re-approval.\n\nProceed?')) return;
-    // Un-approve before editing
     lines.forEach(l => { l.approved = false; delete l.approvedBy; delete l.approvedAt; });
   }
   const first = lines[0];
-  state.journal = state.journal.filter(j=>(j.group||j.id)!==groupId);
-  save();
-  showAddJournal(type, { groupId, date:first.date, ref:first.ref, desc:first.desc, preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'', poRef:first.poRef||'', payee:first.payee||'', checkNo:first.checkNo||'', lines });
+  // Store the groupId being edited — saveJournal will update in-place instead of creating new
+  window._editingJournalGroupId = groupId;
+  showAddJournal(type, {
+    groupId, date:first.date, ref:first.ref, desc:first.desc,
+    preparedBy:first.preparedBy||'', approvedBy:first.approvedBy||'',
+    poRef:first.poRef||'', payee:first.payee||'', checkNo:first.checkNo||'',
+    lines
+  });
 }
 
 function cancelJournalEntry(groupId) {
@@ -4288,6 +4297,8 @@ function saveJournal() {
   const checkNo= document.getElementById('je-checkno')?.value || '';
   window._dvNewPayeePrompt = null;
 
+  const editGroupId = window._editingJournalGroupId || window._jeEditGroupId || null;
+
   if(isDisbursement && drawnFrom) {
     const debitLines  = jeLines.filter(l=>l.type==='debit' && l.debit && parseFloat(l.amount)>0);
     const creditLines = jeLines.filter(l=>l.type==='credit' && l.credit && parseFloat(l.amount)>0);
@@ -4296,27 +4307,28 @@ function saveJournal() {
     const totalOtherC = creditLines.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
     const netDrawn    = totalDebit - totalOtherC;
     if(netDrawn < 0) { alert('Other credits cannot exceed total debits.'); return; }
-    const groupId = window._jeEditGroupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
+    const groupId = editGroupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
+    // Remove old lines if editing
+    if(editGroupId) state.journal = state.journal.filter(j=>(j.group||j.id)!==editGroupId);
     let lineIdx = 0;
-    // Debit lines
     debitLines.forEach(l => {
       state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
       lineIdx++;
     });
-    // Other credit lines (withholding tax, VAT payable, etc.)
     creditLines.forEach(l => {
       state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
       lineIdx++;
     });
-    // Auto-calculated drawn-from credit line (net amount)
     if(netDrawn > 0) {
       state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
     }
+    auditLog(editGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${editGroupId?'Updated':'Posted'} Disbursement Voucher ${groupId} — ${desc}`});
+    window._editingJournalGroupId = null; window._jeEditGroupId = null;
     save(); closeModal(); render();
     return;
   }
 
-  // General journal mode — manual balance required
+  // General journal mode
   let totalD=0, totalC=0;
   jeLines.forEach(l => { const a=parseFloat(l.amount)||0; if(l.debit) totalD+=a; if(l.credit) totalC+=a; });
   if(jeLines.every(l=>!l.debit&&!l.credit)) { alert('Add at least one journal line.'); return; }
@@ -4325,15 +4337,17 @@ function saveJournal() {
   const hasCashCredit = jeLines.some(l=>l.credit && state.accounts.find(a=>String(a.id)===String(l.credit) && cashKeywords.some(k=>a.name.toLowerCase().includes(k))));
   const entryType = hasCashCredit ? 'disbursement' : 'general';
   const entryPrefix = entryType==='disbursement' ? 'DV' : 'JV';
-  const groupId = window._jeEditGroupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
+  const groupId = editGroupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
+  // Remove old lines if editing
+  if(editGroupId) state.journal = state.journal.filter(j=>(j.group||j.id)!==editGroupId);
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
     state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy, poRef:poRef||'' });
   });
-  auditLog(window._jeEditGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${window._jeEditGroupId?'Updated':'Posted'} ${isDisbursement?'Disbursement':'General'} Journal ${groupId} — ${desc}`});
-  window._dvNewPayeePrompt = null;
+  auditLog(editGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${editGroupId?'Updated':'Posted'} ${isDisbursement?'Disbursement':'General'} Journal ${groupId} — ${desc}`});
+  window._editingJournalGroupId = null; window._jeEditGroupId = null;
   save(); closeModal(); render();
 }
 
