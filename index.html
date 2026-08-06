@@ -18282,7 +18282,9 @@ function renderPayroll(c, ta) {
   ta.innerHTML = `
     <button class="btn" onclick="emailAllPayslips()"><i class="ti ti-mail"></i>Email Payslips</button>
     <button class="btn primary" onclick="showAutoGeneratePayroll()"><i class="ti ti-robot"></i>Auto from Attendance</button>
-    <button class="btn" onclick="showGeneratePayroll()"><i class="ti ti-plus"></i>Manual Entry</button>`;
+    <button class="btn" onclick="showGeneratePayroll()"><i class="ti ti-plus"></i>Manual Entry</button>
+    <button class="btn" onclick="printPayrollSummary()"><i class="ti ti-printer"></i>Print Summary</button>
+    <button class="btn" onclick="printPayrollReport()"><i class="ti ti-report"></i>Print Full Report</button>`;
   const payrolls = state.payrolls||[];
   const emps = state.employees||[];
   const totalGross = payrolls.reduce((s,p)=>s+(p.grossPay||0),0);
@@ -18324,7 +18326,6 @@ function renderPayroll(c, ta) {
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePayroll('${p.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
-  }).join('')}
   }).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-card);font-weight:600">
@@ -19205,6 +19206,371 @@ async function sendAllSOAEmails() {
   setTimeout(()=>{ const t=document.getElementById('soa-send-toast'); if(t) t.remove(); }, 6000);
 }
 
+
+// ── PAYROLL SUMMARY (1 PAGE OVERVIEW) ────────────────────────────────────────
+function printPayrollSummary() {
+  const payrolls = state.payrolls||[];
+  const emps     = state.employees||[];
+  const cp       = getCompanyProfile();
+  const logo     = localStorage.getItem(LOGO_KEY)||'';
+
+  // Group by period
+  const periods  = [...new Set(payrolls.map(p=>p.period))].sort().reverse();
+  const period   = periods[0] || '—';
+  const current  = payrolls.filter(p=>p.period===period);
+
+  const totalGross = current.reduce((s,p)=>s+(p.grossPay||0),0);
+  const totalSSS   = current.reduce((s,p)=>s+(p.sss||0),0);
+  const totalPH    = current.reduce((s,p)=>s+(p.philhealth||0),0);
+  const totalPI    = current.reduce((s,p)=>s+(p.pagibig||0),0);
+  const totalWT    = current.reduce((s,p)=>s+(p.withholdingTax||0),0);
+  const totalDed   = current.reduce((s,p)=>s+(p.totalDeductions||0),0);
+  const totalNet   = current.reduce((s,p)=>s+(p.netPay||0),0);
+
+  const rows = current.map(p=>{
+    const emp = emps.find(e=>e.id===p.empId)||{name:p.empId,position:'—',department:'—'};
+    const f=v=>`₱${(+(v||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+    return `<tr>
+      <td>${emp.name}</td>
+      <td>${emp.position||'—'}</td>
+      <td>${emp.department||'—'}</td>
+      <td class="r">${f(p.basicPay)}</td>
+      <td class="r">${f(p.overtime)}</td>
+      <td class="r">${f(p.allowance)}</td>
+      <td class="r b">${f(p.grossPay)}</td>
+      <td class="r">${f(p.sss)}</td>
+      <td class="r">${f(p.philhealth)}</td>
+      <td class="r">${f(p.pagibig)}</td>
+      <td class="r">${f(p.withholdingTax)}</td>
+      <td class="r b red">${f(p.totalDeductions)}</td>
+      <td class="r b grn">${f(p.netPay)}</td>
+      <td class="ctr"><span style="font-size:10px;font-weight:700;color:${p.status==='released'?'#16a34a':'#d97706'};border:1px solid ${p.status==='released'?'#16a34a':'#d97706'};border-radius:3px;padding:1px 5px">${(p.status||'pending').toUpperCase()}</span></td>
+    </tr>`;
+  }).join('');
+
+  const f=v=>`₱${(+(v||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+  const w = window.open('','_blank','width=1100,height=780');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payroll Summary</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:10px;color:#111;background:#fff;padding:16px 20px}
+  /* Header */
+  .doc-hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:14px}
+  .co{display:flex;align-items:center;gap:10px}
+  .co img{width:44px;height:44px;object-fit:contain}
+  .co-name{font-size:13px;font-weight:800}
+  .co-sub{font-size:10px;color:#555;margin-top:2px}
+  .rpt-title{text-align:right}
+  .rpt-title h1{font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px}
+  .rpt-title p{font-size:10px;color:#555;margin-top:2px}
+  /* KPI cards */
+  .kpi-row{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px}
+  .kpi{border:1px solid #ddd;border-radius:4px;padding:7px 9px}
+  .kpi-lbl{font-size:8px;text-transform:uppercase;letter-spacing:0.07em;color:#888;margin-bottom:3px}
+  .kpi-val{font-size:13px;font-weight:700}
+  .kpi-val.grn{color:#16a34a}.kpi-val.red{color:#dc2626}.kpi-val.blue{color:#2563eb}
+  /* Table */
+  table{width:100%;border-collapse:collapse}
+  thead tr{background:#1a3a8f;color:#fff}
+  th{padding:6px 7px;text-align:left;font-size:9px;font-weight:600;white-space:nowrap}
+  th.r{text-align:right}th.ctr{text-align:center}
+  tbody tr:nth-child(even){background:#f8f9ff}
+  tbody tr:hover{background:#eef1ff}
+  td{padding:5px 7px;font-size:9px;border-bottom:0.5px solid #e8e8e8;white-space:nowrap}
+  td.r{text-align:right}td.ctr{text-align:center}
+  td.b{font-weight:700}td.grn{color:#16a34a}td.red{color:#dc2626}
+  /* Totals */
+  tfoot tr{background:#e8ecf8;font-weight:700}
+  tfoot td{padding:7px 7px;font-size:10px;border-top:2px solid #1a3a8f}
+  tfoot td.r{text-align:right}
+  /* Sigs */
+  .sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:20px;padding-top:12px;border-top:1px solid #ccc}
+  .sig{text-align:center}
+  .sig-line{border-top:1.5px solid #333;margin-top:32px;padding-top:5px;font-size:9px;color:#555}
+  .doc-footer{margin-top:10px;padding-top:6px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:8px;color:#999}
+  .print-btn{position:fixed;bottom:16px;right:16px;padding:9px 20px;background:#1a3a8f;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer}
+  @media print{.print-btn{display:none}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+  @page{margin:8mm;size:A4 landscape}
+</style></head><body>
+
+<div class="doc-hdr">
+  <div class="co">
+    ${logo?`<img src="${logo}" alt="logo">`:''}
+    <div>
+      <div class="co-name">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+      <div class="co-sub">${cp.address||''}</div>
+      ${cp.tin?`<div class="co-sub">TIN: ${cp.tin}</div>`:''}
+    </div>
+  </div>
+  <div class="rpt-title">
+    <h1>Payroll Summary</h1>
+    <p>Period: <strong>${period}</strong> &nbsp;·&nbsp; ${current.length} employee${current.length!==1?'s':''} &nbsp;·&nbsp; Printed: ${today()}</p>
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-lbl">Employees</div><div class="kpi-val blue">${current.length}</div></div>
+  <div class="kpi"><div class="kpi-lbl">Gross Pay</div><div class="kpi-val">${f(totalGross)}</div></div>
+  <div class="kpi"><div class="kpi-lbl">SSS</div><div class="kpi-val">${f(totalSSS)}</div></div>
+  <div class="kpi"><div class="kpi-lbl">PhilHealth</div><div class="kpi-val">${f(totalPH)}</div></div>
+  <div class="kpi"><div class="kpi-lbl">Pag-IBIG</div><div class="kpi-val">${f(totalPI)}</div></div>
+  <div class="kpi"><div class="kpi-lbl">W/Tax</div><div class="kpi-val">${f(totalWT)}</div></div>
+  <div class="kpi" style="border-color:#dc2626"><div class="kpi-lbl">Total Deductions</div><div class="kpi-val red">${f(totalDed)}</div></div>
+  <div class="kpi" style="border-color:#16a34a;grid-column:span 2"><div class="kpi-lbl">Total Net Pay</div><div class="kpi-val grn" style="font-size:16px">${f(totalNet)}</div></div>
+</div>
+
+<table>
+  <thead><tr>
+    <th>Employee Name</th><th>Position</th><th>Department</th>
+    <th class="r">Basic Pay</th><th class="r">OT Pay</th><th class="r">Allowances</th><th class="r">Gross Pay</th>
+    <th class="r">SSS</th><th class="r">PhilHealth</th><th class="r">Pag-IBIG</th><th class="r">W/Tax</th><th class="r">Total Ded.</th>
+    <th class="r">Net Pay</th><th class="ctr">Status</th>
+  </tr></thead>
+  <tbody>${rows||'<tr><td colspan="14" style="text-align:center;padding:20px;color:#999">No payroll records for this period.</td></tr>'}</tbody>
+  <tfoot><tr>
+    <td colspan="3"><strong>TOTAL — ${current.length} Employees</strong></td>
+    <td class="r">${f(current.reduce((s,p)=>s+(p.basicPay||0),0))}</td>
+    <td class="r">${f(current.reduce((s,p)=>s+(p.overtime||0),0))}</td>
+    <td class="r">${f(current.reduce((s,p)=>s+(p.allowance||0),0))}</td>
+    <td class="r" style="color:#1a3a8f">${f(totalGross)}</td>
+    <td class="r">${f(totalSSS)}</td>
+    <td class="r">${f(totalPH)}</td>
+    <td class="r">${f(totalPI)}</td>
+    <td class="r">${f(totalWT)}</td>
+    <td class="r" style="color:#dc2626">${f(totalDed)}</td>
+    <td class="r" style="color:#16a34a;font-size:11px">${f(totalNet)}</td>
+    <td></td>
+  </tr></tfoot>
+</table>
+
+<div class="sigs">
+  <div class="sig"><div class="sig-line">________________________<br>Prepared by / HR Officer</div></div>
+  <div class="sig"><div class="sig-line">________________________<br>Reviewed by / Accountant</div></div>
+  <div class="sig"><div class="sig-line">________________________<br>Approved by / Management</div></div>
+</div>
+<div class="doc-footer">
+  <span>${cp.name||''} · Payroll Summary · Period: ${period}</span>
+  <span>Printed: ${today()} · Page <span class="pagenum"></span></span>
+</div>
+<button class="print-btn" onclick="window.print()">🖨 Print</button>
+<script>window.onload=()=>{window.print()}<\/script>
+</body></html>`);
+  w.document.close();
+}
+
+// ── PAYROLL FULL REPORT (ALL PERIODS, DEPARTMENT BREAKDOWN) ──────────────────
+function printPayrollReport() {
+  const payrolls = state.payrolls||[];
+  const emps     = state.employees||[];
+  const cp       = getCompanyProfile();
+  const logo     = localStorage.getItem(LOGO_KEY)||'';
+
+  if(!payrolls.length) { alert('No payroll records to print.'); return; }
+
+  const f=v=>`₱${(+(v||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+
+  // Group by period
+  const byPeriod = {};
+  payrolls.forEach(p=>{
+    const per = p.period||'Unknown';
+    if(!byPeriod[per]) byPeriod[per]=[];
+    byPeriod[per].push(p);
+  });
+  const periods = Object.keys(byPeriod).sort().reverse();
+
+  // Group by department for current period
+  const currentPeriod = periods[0]||'';
+  const currentPayrolls = byPeriod[currentPeriod]||[];
+  const depts = [...new Set(currentPayrolls.map(p=>emps.find(e=>e.id===p.empId)?.department||'Other'))].sort();
+
+  // Period summary table
+  const periodRows = periods.map(per=>{
+    const pp = byPeriod[per];
+    return `<tr>
+      <td class="b">${per}</td>
+      <td class="ctr">${pp.length}</td>
+      <td class="r">${f(pp.reduce((s,p)=>s+(p.grossPay||0),0))}</td>
+      <td class="r">${f(pp.reduce((s,p)=>s+(p.sss||0),0))}</td>
+      <td class="r">${f(pp.reduce((s,p)=>s+(p.philhealth||0),0))}</td>
+      <td class="r">${f(pp.reduce((s,p)=>s+(p.pagibig||0),0))}</td>
+      <td class="r">${f(pp.reduce((s,p)=>s+(p.withholdingTax||0),0))}</td>
+      <td class="r red">${f(pp.reduce((s,p)=>s+(p.totalDeductions||0),0))}</td>
+      <td class="r grn b">${f(pp.reduce((s,p)=>s+(p.netPay||0),0))}</td>
+      <td class="ctr">${pp.filter(p=>p.status==='released').length}/${pp.length}</td>
+    </tr>`;
+  }).join('');
+
+  // Department breakdown for current period
+  const deptRows = depts.map(dept=>{
+    const dp = currentPayrolls.filter(p=>
+      (emps.find(e=>e.id===p.empId)?.department||'Other')===dept
+    );
+    return `<tr>
+      <td class="b">${dept}</td>
+      <td class="ctr">${dp.length}</td>
+      <td class="r">${f(dp.reduce((s,p)=>s+(p.basicPay||0),0))}</td>
+      <td class="r">${f(dp.reduce((s,p)=>s+(p.overtime||0),0))}</td>
+      <td class="r">${f(dp.reduce((s,p)=>s+(p.grossPay||0),0))}</td>
+      <td class="r red">${f(dp.reduce((s,p)=>s+(p.totalDeductions||0),0))}</td>
+      <td class="r grn b">${f(dp.reduce((s,p)=>s+(p.netPay||0),0))}</td>
+    </tr>`;
+  }).join('');
+
+  // Full detail for current period
+  const detailRows = currentPayrolls.map(p=>{
+    const emp = emps.find(e=>e.id===p.empId)||{name:p.empId,position:'—',department:'—',sssNo:'—',tinNo:'—',philhealthNo:'—',pagibigNo:'—'};
+    return `<tr>
+      <td>${emp.name}</td><td>${emp.position||'—'}</td><td>${emp.department||'—'}</td>
+      <td class="mono" style="font-size:8px">${emp.sssNo||'—'}</td>
+      <td class="mono" style="font-size:8px">${emp.tinNo||'—'}</td>
+      <td class="r">${p.daysWorked||0}</td>
+      <td class="r">${f(p.basicPay)}</td>
+      <td class="r">${f(p.overtime)}</td>
+      <td class="r">${f(p.allowance)}</td>
+      <td class="r b">${f(p.grossPay)}</td>
+      <td class="r">${f(p.sss)}</td>
+      <td class="r">${f(p.philhealth)}</td>
+      <td class="r">${f(p.pagibig)}</td>
+      <td class="r">${f(p.withholdingTax)}</td>
+      <td class="r b red">${f(p.totalDeductions)}</td>
+      <td class="r b grn">${f(p.netPay)}</td>
+      <td class="ctr"><span style="font-size:8px;font-weight:700;color:${p.status==='released'?'#16a34a':'#d97706'}">${(p.status||'pending').toUpperCase()}</span></td>
+    </tr>`;
+  }).join('');
+
+  const totalGross=currentPayrolls.reduce((s,p)=>s+(p.grossPay||0),0);
+  const totalDed=currentPayrolls.reduce((s,p)=>s+(p.totalDeductions||0),0);
+  const totalNet=currentPayrolls.reduce((s,p)=>s+(p.netPay||0),0);
+
+  const w = window.open('','_blank','width=1200,height=900');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payroll Report</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:9.5px;color:#111;background:#fff;padding:16px 20px}
+  .doc-hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:16px}
+  .co{display:flex;align-items:center;gap:10px}
+  .co img{width:44px;height:44px;object-fit:contain}
+  .co-name{font-size:13px;font-weight:800}
+  .co-sub{font-size:9px;color:#555;margin-top:2px}
+  .rpt-title{text-align:right}
+  .rpt-title h1{font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px}
+  .rpt-title p{font-size:10px;color:#555;margin-top:2px}
+  .section-hdr{background:#1a3a8f;color:#fff;padding:7px 10px;font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;margin:14px 0 4px;border-radius:3px}
+  table{width:100%;border-collapse:collapse;margin-bottom:8px}
+  thead tr{background:#2a4fa0;color:#fff}
+  th{padding:5px 7px;text-align:left;font-size:8.5px;font-weight:600;white-space:nowrap}
+  th.r{text-align:right}th.ctr{text-align:center}
+  tbody tr:nth-child(even){background:#f8f9ff}
+  td{padding:4px 7px;font-size:8.5px;border-bottom:0.5px solid #e8e8e8;white-space:nowrap}
+  td.r{text-align:right}td.ctr{text-align:center}
+  td.b{font-weight:700}td.grn{color:#16a34a}td.red{color:#dc2626}
+  td.mono{font-family:monospace}
+  tfoot tr{background:#e8ecf8;font-weight:700}
+  tfoot td{padding:6px 7px;font-size:9.5px;border-top:2px solid #1a3a8f}
+  tfoot td.r{text-align:right}
+  .sigs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:20px;padding-top:12px;border-top:1px solid #ccc}
+  .sig{text-align:center}
+  .sig-line{border-top:1.5px solid #333;margin-top:32px;padding-top:5px;font-size:9px;color:#555}
+  .doc-footer{margin-top:10px;padding-top:6px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:8px;color:#999}
+  .print-btn{position:fixed;bottom:16px;right:16px;padding:9px 20px;background:#1a3a8f;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer}
+  @page{margin:8mm;size:A4 landscape}
+  @media print{.print-btn{display:none}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+</style></head><body>
+
+<div class="doc-hdr">
+  <div class="co">
+    ${logo?`<img src="${logo}" alt="logo">`:''}
+    <div>
+      <div class="co-name">${cp.name||'ANMOL PHARMACEUTICALS US CORP.'}</div>
+      <div class="co-sub">${cp.address||''} ${cp.tin?'· TIN: '+cp.tin:''}</div>
+    </div>
+  </div>
+  <div class="rpt-title">
+    <h1>Payroll Report</h1>
+    <p>As of ${today()} &nbsp;·&nbsp; All periods: ${periods.length} &nbsp;·&nbsp; Current: <strong>${currentPeriod}</strong></p>
+  </div>
+</div>
+
+<!-- SECTION 1: PERIOD SUMMARY -->
+<div class="section-hdr">Section 1 — Payroll by Period</div>
+<table>
+  <thead><tr>
+    <th>Period</th><th class="ctr">Headcount</th><th class="r">Gross Pay</th><th class="r">SSS</th>
+    <th class="r">PhilHealth</th><th class="r">Pag-IBIG</th><th class="r">W/Tax</th><th class="r">Total Ded.</th><th class="r">Net Pay</th><th class="ctr">Released</th>
+  </tr></thead>
+  <tbody>${periodRows}</tbody>
+  <tfoot><tr>
+    <td><strong>ALL PERIODS TOTAL</strong></td>
+    <td class="ctr">${payrolls.length}</td>
+    <td class="r">${f(payrolls.reduce((s,p)=>s+(p.grossPay||0),0))}</td>
+    <td class="r">${f(payrolls.reduce((s,p)=>s+(p.sss||0),0))}</td>
+    <td class="r">${f(payrolls.reduce((s,p)=>s+(p.philhealth||0),0))}</td>
+    <td class="r">${f(payrolls.reduce((s,p)=>s+(p.pagibig||0),0))}</td>
+    <td class="r">${f(payrolls.reduce((s,p)=>s+(p.withholdingTax||0),0))}</td>
+    <td class="r red">${f(payrolls.reduce((s,p)=>s+(p.totalDeductions||0),0))}</td>
+    <td class="r grn">${f(payrolls.reduce((s,p)=>s+(p.netPay||0),0))}</td>
+    <td class="ctr">${payrolls.filter(p=>p.status==='released').length}/${payrolls.length}</td>
+  </tr></tfoot>
+</table>
+
+<!-- SECTION 2: DEPARTMENT BREAKDOWN (current period) -->
+<div class="section-hdr">Section 2 — Department Breakdown (${currentPeriod})</div>
+<table>
+  <thead><tr>
+    <th>Department</th><th class="ctr">Headcount</th><th class="r">Basic Pay</th>
+    <th class="r">OT Pay</th><th class="r">Gross Pay</th><th class="r">Deductions</th><th class="r">Net Pay</th>
+  </tr></thead>
+  <tbody>${deptRows||'<tr><td colspan="7" style="text-align:center;color:#999;padding:12px">No records</td></tr>'}</tbody>
+  <tfoot><tr>
+    <td><strong>TOTAL</strong></td><td class="ctr">${currentPayrolls.length}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.basicPay||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.overtime||0),0))}</td>
+    <td class="r">${f(totalGross)}</td>
+    <td class="r red">${f(totalDed)}</td>
+    <td class="r grn">${f(totalNet)}</td>
+  </tr></tfoot>
+</table>
+
+<!-- SECTION 3: FULL DETAIL (current period) -->
+<div class="section-hdr">Section 3 — Employee Detail (${currentPeriod})</div>
+<table>
+  <thead><tr>
+    <th>Employee</th><th>Position</th><th>Dept</th><th>SSS No.</th><th>TIN</th>
+    <th class="r">Days</th><th class="r">Basic</th><th class="r">OT</th><th class="r">Allow.</th><th class="r">Gross</th>
+    <th class="r">SSS</th><th class="r">PhilHealth</th><th class="r">Pag-IBIG</th><th class="r">W/Tax</th><th class="r">Total Ded.</th><th class="r">Net Pay</th><th class="ctr">Status</th>
+  </tr></thead>
+  <tbody>${detailRows||'<tr><td colspan="17" style="text-align:center;color:#999;padding:12px">No records for this period</td></tr>'}</tbody>
+  <tfoot><tr>
+    <td colspan="6"><strong>TOTAL — ${currentPayrolls.length} Employees</strong></td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.basicPay||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.overtime||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.allowance||0),0))}</td>
+    <td class="r" style="color:#1a3a8f">${f(totalGross)}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.sss||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.philhealth||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.pagibig||0),0))}</td>
+    <td class="r">${f(currentPayrolls.reduce((s,p)=>s+(p.withholdingTax||0),0))}</td>
+    <td class="r red">${f(totalDed)}</td>
+    <td class="r grn" style="font-size:11px">${f(totalNet)}</td>
+    <td></td>
+  </tr></tfoot>
+</table>
+
+<div class="sigs">
+  <div class="sig"><div class="sig-line">________________________<br>Prepared by / HR Officer</div></div>
+  <div class="sig"><div class="sig-line">________________________<br>Checked by / Accountant</div></div>
+  <div class="sig"><div class="sig-line">________________________<br>Approved by / GM / CEO</div></div>
+  <div class="sig"><div class="sig-line">________________________<br>Date Approved</div></div>
+</div>
+<div class="doc-footer">
+  <span>${cp.name||''} · Payroll Report · Confidential</span>
+  <span>Printed: ${today()}</span>
+</div>
+<button class="print-btn" onclick="window.print()">🖨 Print</button>
+<script>window.onload=()=>{window.print()}<\/script>
+</body></html>`);
+  w.document.close();
+}
 
 function printPayslip(id) {
   const p = (state.payrolls||[]).find(p=>p.id===id);
