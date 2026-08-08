@@ -1631,16 +1631,45 @@ async function loadTodayStatus() {
   btnOut.classList[done?'add':'remove']('disabled');
 }
 
-async function loadHistory() {
+async function loadAttendanceRecords() {
   const listEl = document.getElementById('rec-list');
+  if(!listEl) return;
   listEl.innerHTML = '<div class="rec-empty">Loading…</div>';
   try {
+    // Query by empId (mobile app primary)
+    let records = [];
     const snap = await db.collection('companies/anmol/attendance_mobile')
-      .where('empId','==',selectedEmp.id).get();
-    const records = snap.docs.map(d=>({id:d.id,...d.data()}))
-      .sort((a,b)=>b.date.localeCompare(a.date));
+      .where('empId','==',selectedEmp.id||selectedEmp.name).get();
+    records = snap.docs.map(d=>({id:d.id,...d.data()}));
 
-    document.getElementById('rec-count').textContent = records.length + ' record' + (records.length!==1?'s':'');
+    // Also check by empName in case empId differs
+    if(!records.length || records.length < 3) {
+      const snap2 = await db.collection('companies/anmol/attendance_mobile')
+        .where('empName','==',selectedEmp.name).get();
+      snap2.docs.forEach(d=>{
+        const r={id:d.id,...d.data()};
+        if(!records.find(x=>x.id===r.id)) records.push(r);
+      });
+    }
+
+    // Also pull from main ERP state.attendance
+    try {
+      const erpDoc = await db.doc('companies/anmol').get();
+      const erpState = JSON.parse(erpDoc.data()?.data||'{}');
+      (erpState.attendance||[]).forEach(r=>{
+        const match = r.empId===selectedEmp.id ||
+          r.empId===selectedEmp.name ||
+          (r.empName&&r.empName.trim().toLowerCase()===selectedEmp.name.trim().toLowerCase());
+        if(match && !records.find(x=>x.id===r.id || (x.date===r.date&&x.timeIn===r.timeIn))) {
+          records.push(r);
+        }
+      });
+    } catch(e) { /* ERP state fallback optional */ }
+
+    records.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
+    const cntEl = document.getElementById('rec-count');
+    if(cntEl) cntEl.textContent = records.length + ' record' + (records.length!==1?'s':'');
 
     if(!records.length) {
       listEl.innerHTML = '<div class="rec-empty">No attendance records yet.<br>Clock in to get started.</div>';
@@ -1648,21 +1677,20 @@ async function loadHistory() {
     }
 
     listEl.innerHTML = records.map(r=>{
-      const d    = new Date(r.date+'T00:00');
-      const day  = d.getDate();
-      const mon  = d.toLocaleString('en',{month:'short'});
+      const d    = new Date((r.date||'')+'T00:00');
+      const day  = isNaN(d)?'—':String(d.getDate()).padStart(2,'0');
+      const mon  = isNaN(d)?'—':d.toLocaleString('en',{month:'short'});
       const hrs  = r.hoursWorked ? (+r.hoursWorked).toFixed(2)+'h' : '—';
       const inOffice = r.inOffice===true ? '🏢 Office' : r.inOffice===false ? '⚠ Outside' : '';
-      const locOut   = r.locTagOut==='outside' ? ' · Out: ⚠ Outside' : r.locTagOut==='office'?' · Out: 🏢':'';
       return `<div class="rec-item">
         <div class="rec-date-col">
-          <div class="rec-day">${String(day).padStart(2,'0')}</div>
+          <div class="rec-day">${day}</div>
           <div class="rec-month">${mon}</div>
         </div>
         <div class="rec-divider"></div>
         <div class="rec-details">
           <div class="rec-name-row">
-            <span style="font-size:13px;font-weight:600">${r.date}</span>
+            <span style="font-size:13px;font-weight:600">${r.date||'—'}</span>
             <span class="rec-badge ${r.status||'present'}">${(r.status||'present').toUpperCase()}</span>
           </div>
           <div class="rec-times">
@@ -1670,8 +1698,9 @@ async function loadHistory() {
             <span><i class="ti ti-clock-stop" style="font-size:11px;margin-right:3px;color:var(--red)"></i>${r.timeOut||'—'}</span>
             <span style="color:var(--accent2)">${hrs}</span>
           </div>
-          ${inOffice||locOut?`<div class="rec-loc"><i class="ti ti-map-pin" style="font-size:10px"></i>${inOffice}${locOut}</div>`:''}
+          ${inOffice?`<div class="rec-loc"><i class="ti ti-map-pin" style="font-size:10px"></i>${inOffice}</div>`:''}
           ${r.verifiedFace?'<div class="rec-verified"><i class="ti ti-shield-check" style="font-size:10px"></i>Face verified '+(r.faceConfidence?r.faceConfidence+'%':'')+'</div>':''}
+          ${r.source==='mobile_app'?'':'<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px">📋 Recorded from ERP</div>'}
         </div>
       </div>`;
     }).join('');
@@ -1679,6 +1708,9 @@ async function loadHistory() {
     listEl.innerHTML = `<div class="rec-empty">Could not load records.<br>${e.message}</div>`;
   }
 }
+
+// Keep old name as alias for backward compatibility
+const loadHistory = loadAttendanceRecords;
 
 // ══════════════════════════════════════════════════════════════════════
 // LOGOUT — back to login
