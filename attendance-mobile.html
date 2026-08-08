@@ -480,6 +480,13 @@ body{display:flex;flex-direction:column;height:100dvh}
       </div>
 
       <div style="display:flex;flex-direction:column;gap:14px">
+        <!-- Employee selector (shown from login screen when not yet selected) -->
+        <div>
+          <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Your Name <span style="color:#f87171">*</span></label>
+          <select id="leave-emp-select" style="width:100%;padding:13px 14px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(167,139,250,0.5);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;-webkit-appearance:none">
+            <option value="">— Select your name —</option>
+          </select>
+        </div>
         <div>
           <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Leave Type</label>
           <select id="leave-type" style="width:100%;padding:13px 14px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;-webkit-appearance:none">
@@ -728,39 +735,51 @@ let selectedAction = null;
 
 function selectAction(action) {
   selectedAction = action;
-  // Update button styles
+
+  // Update button highlight styles
   ['in','out','leave'].forEach(a => {
     const btn = document.getElementById('choice-'+a);
     if(btn) btn.classList.toggle('selected', a===action);
   });
 
-  const empVal = document.getElementById('emp-select')?.value;
-  const errEl  = document.getElementById('login-err');
-  errEl.textContent = '';
-
-  if(!empVal) {
-    errEl.textContent = 'Please select your name first.';
-    // Deselect
-    selectedAction = null;
-    document.getElementById('choice-'+action)?.classList.remove('selected');
-    return;
-  }
+  const errEl = document.getElementById('login-err');
+  if(errEl) errEl.textContent = '';
 
   if(action === 'leave') {
-    // Show leave modal directly from login screen
-    const emp = employees.find(e=>(e.id||e.name)===empVal);
-    if(emp) selectedEmp = emp;
+    // For leave — set selectedEmp from dropdown if selected, but don't require it
+    // The leave modal has its own employee selector
+    const empVal = document.getElementById('emp-select')?.value;
+    if(empVal) {
+      const emp = employees.find(e=>(e.id||e.name)===empVal||e.id===empVal||e.name===empVal);
+      if(emp) selectedEmp = emp;
+    }
+    // Reset button highlight — leave doesn't need camera
+    setTimeout(()=>{
+      const lBtn=document.getElementById('choice-leave');
+      if(lBtn) lBtn.classList.remove('selected');
+      selectedAction = null;
+    }, 200);
     showLeaveModal();
     return;
   }
 
-  // Clock in/out — update hidden select and show camera button
-  document.getElementById('action-select').value = action;
+  // Clock in/out — require employee selection
+  const empVal = document.getElementById('emp-select')?.value;
+  if(!empVal) {
+    if(errEl) errEl.textContent = 'Please select your name first.';
+    document.getElementById('choice-'+action)?.classList.remove('selected');
+    selectedAction = null;
+    return;
+  }
+
+  // Show camera button
   const btn = document.getElementById('login-btn');
-  btn.style.display = 'block';
-  btn.innerHTML = action==='in'
-    ? '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock In'
-    : '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock Out';
+  if(btn) {
+    btn.style.display = 'block';
+    btn.innerHTML = action==='in'
+      ? '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock In'
+      : '<i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Clock Out';
+  }
 }
 
 function handleActionBtn() {
@@ -1300,6 +1319,7 @@ async function loadHistory() {
 // ══════════════════════════════════════════════════════════════════════
 function showLeaveModal() {
   const overlay = document.getElementById('leave-overlay');
+  if(!overlay) return;
   overlay.style.display = 'flex';
   const t = today();
   document.getElementById('leave-from').value = t;
@@ -1308,6 +1328,13 @@ function showLeaveModal() {
   document.getElementById('leave-err').style.display = 'none';
   document.getElementById('leave-submit-btn').disabled = false;
   document.getElementById('leave-submit-btn').innerHTML = '<i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application';
+
+  // Pre-fill employee selector if already selected
+  const leaveEmpSel = document.getElementById('leave-emp-select');
+  if(leaveEmpSel) {
+    leaveEmpSel.innerHTML = '<option value="">— Select your name —</option>' +
+      employees.map(e=>`<option value="${e.id||e.name}" ${selectedEmp&&(e.id===selectedEmp.id||e.name===selectedEmp.name)?'selected':''}>${e.name}${e.department?' — '+e.department:''}</option>`).join('');
+  }
 }
 
 function hideLeaveModal() {
@@ -1321,7 +1348,17 @@ function hideLeaveModal() {
 }
 
 async function submitLeave() {
-  if(!selectedEmp) { alert('Please select an employee first.'); return; }
+  // Get employee — from leave modal selector first, then selectedEmp fallback
+  const leaveEmpVal = document.getElementById('leave-emp-select')?.value;
+  let leaveEmp = null;
+  if(leaveEmpVal) {
+    leaveEmp = employees.find(e=>(e.id||e.name)===leaveEmpVal||e.id===leaveEmpVal||e.name===leaveEmpVal);
+  }
+  if(!leaveEmp && selectedEmp) leaveEmp = selectedEmp;
+  if(!leaveEmp) {
+    const errEl=document.getElementById('leave-err');
+    errEl.textContent='Please select your name.'; errEl.style.display='block'; return;
+  }
 
   const leaveType = document.getElementById('leave-type').value;
   const from      = document.getElementById('leave-from').value;
@@ -1353,8 +1390,8 @@ async function submitLeave() {
 
     const id = 'LV-'+String(erpState.leaves.length+1).padStart(4,'0');
     const leave = {
-      id, empId:selectedEmp.id||selectedEmp.name, empName:selectedEmp.name,
-      department:selectedEmp.department||'',
+      id, empId:leaveEmp.id||leaveEmp.name, empName:leaveEmp.name,
+      department:leaveEmp.department||'',
       leaveType, leaveTypeLabel:leaveTypeLabels[leaveType]||leaveType,
       from, to, days, reason, withPay,
       status:'pending',
@@ -1368,7 +1405,7 @@ async function submitLeave() {
     await db.doc('companies/anmol').set({
       data: JSON.stringify(erpState),
       updatedAt: new Date().toISOString(),
-      updatedBy: selectedEmp.name
+      updatedBy: leaveEmp.name
     });
 
     hideLeaveModal();
