@@ -362,9 +362,6 @@
     <div class="form-group"><label>Password</label><input type="password" id="login-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="login-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:18px"></div>
     <button class="btn primary" id="login-btn" style="width:100%;justify-content:center;padding:10px" onclick="doLogin()"><i class="ti ti-login"></i>Sign In</button>
-    <div style="text-align:center;margin-top:12px">
-      <span onclick="resetUsersToDefault()" style="font-size:10px;color:var(--text-tertiary);cursor:pointer;text-decoration:underline">Can't log in? Reset to default</span>
-    </div>
   </div>
 </div>
 
@@ -1179,7 +1176,24 @@ function canAccess(page) {
 }
 
 function resetUsersToDefault() {
-  if(!confirm('Reset users to default?\n\nThis will restore the default admin account (admin / admin123) and remove any PIN.\n\nAll other user accounts will be lost.\n\nContinue?')) return;
+  // Require admin password before resetting — prevents unauthorized reset
+  const entered = prompt('⚠ ADMIN VERIFICATION REQUIRED\n\nEnter the current admin password to reset accounts:');
+  if(entered === null) return; // cancelled
+
+  // Check against stored users
+  const users = getUsers();
+  const adminUser = users.find(u => u.role === 'admin' && u.active !== false);
+  if(!adminUser) {
+    // No admin exists — allow reset only with master key
+    const master = prompt('No admin account found.\nEnter master key to proceed:');
+    if(master !== 'PHARMAHUB-RESET-2026') { alert('Incorrect master key. Reset cancelled.'); return; }
+  } else if(entered !== adminUser.password) {
+    alert('❌ Incorrect admin password. Reset cancelled.\n\nOnly an administrator can reset accounts.');
+    return;
+  }
+
+  if(!confirm('Reset users to default?\n\nThis will restore the default admin account (admin / admin123).\n\nAll other user accounts will be lost.\n\nContinue?')) return;
+
   const defaultUsers = [{ id:'U001', username:'admin', password:'admin123', name:'System Administrator', role:'admin', active:true }];
   try {
     localStorage.setItem('anmolpharma_users', JSON.stringify(defaultUsers));
