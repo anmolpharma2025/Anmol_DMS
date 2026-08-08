@@ -470,8 +470,8 @@ body{display:flex;flex-direction:column;height:100dvh}
     </div>
   </div>
 
-  <!-- Leave Application Modal -->
-  <div id="leave-overlay" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center">
+</div>
+  <div id="leave-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center">
     <div style="background:#0d1b2a;border-radius:24px 24px 0 0;padding:24px 20px 40px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
       <div style="width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 20px"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -537,7 +537,8 @@ body{display:flex;flex-direction:column;height:100dvh}
       </div>
     </div>
   </div>
-</div>
+  <!-- Leave Application Modal -->
+
 
 <script>
 // ══════════════════════════════════════════════════════════════════════
@@ -1319,8 +1320,9 @@ async function loadHistory() {
 // ══════════════════════════════════════════════════════════════════════
 function showLeaveModal() {
   const overlay = document.getElementById('leave-overlay');
-  if(!overlay) return;
+  if(!overlay) { console.error('leave-overlay not found'); return; }
   overlay.style.display = 'flex';
+  overlay.style.zIndex  = '9999';
   const t = today();
   document.getElementById('leave-from').value = t;
   document.getElementById('leave-to').value   = t;
