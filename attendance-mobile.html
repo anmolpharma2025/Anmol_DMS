@@ -32,7 +32,41 @@ body{display:flex;flex-direction:column;height:100dvh}
 .screen{display:none;flex-direction:column;height:100dvh;overflow:hidden}
 .screen.active{display:flex}
 
-/* ── LOGIN ── */
+/* ── PIN ── */
+.pin-dot{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,0.3);background:transparent;transition:all 0.15s}
+.pin-dot.filled{background:#fff;border-color:#fff;transform:scale(1.1)}
+.pin-dot.error{border-color:#f87171;background:#f87171}
+.pin-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:280px;margin:0 auto}
+.pin-key{padding:18px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.1);border-radius:14px;color:#fff;font-size:22px;font-weight:600;font-family:var(--font);cursor:pointer;transition:all 0.12s;-webkit-tap-highlight-color:transparent}
+.pin-key:active{background:rgba(255,255,255,0.2);transform:scale(0.94)}
+/* ── TABS ── */
+.home-tabs{display:flex;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.2);flex-shrink:0}
+.home-tab{flex:1;padding:12px 6px;text-align:center;font-size:11px;font-weight:600;color:rgba(255,255,255,0.4);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s}
+.home-tab.active{color:#fff;border-bottom-color:var(--blue)}
+.home-tab i{display:block;font-size:18px;margin-bottom:3px}
+/* ── PAYSLIP CARD ── */
+.payslip-card{margin:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:18px;overflow:hidden}
+.payslip-card-hdr{padding:14px 16px;background:rgba(79,142,247,0.15);display:flex;justify-content:space-between;align-items:center}
+.payslip-period{font-size:13px;font-weight:700;color:#fff}
+.payslip-status{font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px}
+.payslip-status.released{background:rgba(52,201,138,0.25);color:#34c98a}
+.payslip-status.pending{background:rgba(245,166,35,0.25);color:#f5a623}
+.payslip-body{padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.payslip-item label{font-size:9px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px}
+.payslip-item .val{font-size:14px;font-weight:700;color:#fff}
+.payslip-item .val.grn{color:#34c98a}
+.payslip-item .val.red{color:#f05c6e}
+.payslip-net{padding:12px 16px;background:rgba(52,201,138,0.1);border-top:1px solid rgba(52,201,138,0.2);display:flex;justify-content:space-between;align-items:center}
+.payslip-print{padding:6px 14px;background:rgba(79,142,247,0.2);border:1px solid rgba(79,142,247,0.4);border-radius:99px;color:var(--blue);font-size:11px;font-weight:600;font-family:var(--font);cursor:pointer}
+/* ── LEAVE CARDS ── */
+.leave-card{margin:8px 16px;padding:14px 16px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px}
+.leave-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.leave-type{font-size:13px;font-weight:700;color:#fff}
+.leave-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px}
+.leave-badge.pending{background:rgba(245,166,35,0.2);color:#f5a623}
+.leave-badge.approved{background:rgba(52,201,138,0.2);color:#34c98a}
+.leave-badge.rejected{background:rgba(240,92,110,0.2);color:#f05c6e}
+.leave-dates{font-size:12px;color:rgba(255,255,255,0.5)}
 #login-screen{
   background:linear-gradient(160deg,#0a0f1e 0%,#0d1630 50%,#0a1525 100%);
   align-items:stretch;justify-content:flex-end;padding-bottom:env(safe-area-inset-bottom)
@@ -316,45 +350,56 @@ body{display:flex;flex-direction:column;height:100dvh}
   <div class="login-logo-wrap">
     <div class="login-logo"><i class="ti ti-pill"></i></div>
     <div class="login-company">Anmol Pharmaceuticals</div>
-    <div class="login-tagline">Attendance Portal</div>
+    <div class="login-tagline">Employee Portal</div>
   </div>
   <div class="login-sheet">
     <div class="login-sheet-handle"></div>
-    <div class="sheet-title">Attendance Portal</div>
-    <div class="sheet-sub">Select your name then choose an action</div>
-    <div class="field">
-      <label>Select Employee</label>
-      <div class="select-wrap">
-        <select id="emp-select">
-          <option value="">— Loading employees… —</option>
-        </select>
+
+    <!-- STEP 1: Select employee -->
+    <div id="login-step1">
+      <div class="sheet-title">Welcome</div>
+      <div class="sheet-sub">Select your name to continue</div>
+      <div class="field">
+        <label>Select Your Name</label>
+        <div class="select-wrap">
+          <select id="emp-select" onchange="onEmpSelected()">
+            <option value="">— Loading employees… —</option>
+          </select>
+        </div>
       </div>
-    </div>
-    <!-- Hidden action select kept for compatibility -->
-    <select id="action-select" style="display:none">
-      <option value="in">Clock In</option>
-      <option value="out">Clock Out</option>
-      <option value="leave">File Leave</option>
-    </select>
-    <!-- Action buttons -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-      <button class="action-choice-btn" id="choice-in" onclick="selectAction('in')">
-        <i class="ti ti-clock-play" style="font-size:22px;display:block;margin-bottom:6px;color:#34c98a"></i>
-        <span>Clock In</span>
+      <button class="btn-main" onclick="proceedToPin()" style="margin-top:8px">
+        <i class="ti ti-arrow-right" style="margin-right:8px"></i>Continue
       </button>
-      <button class="action-choice-btn" id="choice-out" onclick="selectAction('out')">
-        <i class="ti ti-clock-stop" style="font-size:22px;display:block;margin-bottom:6px;color:#f05c6e"></i>
-        <span>Clock Out</span>
-      </button>
+      <div class="login-err" id="login-err"></div>
     </div>
-    <button class="action-choice-btn leave-btn" id="choice-leave" onclick="selectAction('leave')" style="width:100%;margin-bottom:10px">
-      <i class="ti ti-calendar-plus" style="font-size:20px;margin-right:8px;color:#a78bfa"></i>
-      <span>File Leave Application</span>
-    </button>
-    <button class="btn-main" id="login-btn" onclick="handleActionBtn()" style="display:none">
-      <i class="ti ti-camera" style="margin-right:8px"></i>Open Camera to Verify
-    </button>
-    <div class="login-err" id="login-err"></div>
+
+    <!-- STEP 2: PIN entry -->
+    <div id="login-step2" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <button onclick="backToStep1()" style="background:none;border:none;color:var(--text2);cursor:pointer;padding:4px"><i class="ti ti-arrow-left" style="font-size:18px"></i></button>
+        <div>
+          <div class="sheet-title" style="margin-bottom:0" id="pin-emp-name">—</div>
+          <div class="sheet-sub" style="margin-top:2px">Enter your 4-digit PIN</div>
+        </div>
+      </div>
+
+      <!-- PIN dots display -->
+      <div style="display:flex;gap:14px;justify-content:center;margin-bottom:24px">
+        <div class="pin-dot" id="pd0"></div>
+        <div class="pin-dot" id="pd1"></div>
+        <div class="pin-dot" id="pd2"></div>
+        <div class="pin-dot" id="pd3"></div>
+      </div>
+
+      <!-- PIN keypad -->
+      <div class="pin-keypad">
+        ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>
+          k===''?`<div></div>`:`<button class="pin-key" onclick="pinKey('${k}')">${k}</button>`
+        ).join('')}
+      </div>
+
+      <div id="pin-err" style="text-align:center;font-size:12px;color:#f87171;margin-top:12px;min-height:20px"></div>
+    </div>
   </div>
 </div>
 
@@ -406,70 +451,102 @@ body{display:flex;flex-direction:column;height:100dvh}
     </div>
   </div>
 
-  <div style="overflow-y:auto;flex:1">
-    <!-- Today status -->
-    <div class="status-card">
-      <div class="status-top">
-        <div class="status-label">Today's Attendance</div>
-        <span class="status-badge absent" id="today-badge">Not Recorded</span>
-      </div>
-      <div class="status-time muted" id="today-timein-big">—</div>
-      <div class="time-row">
-        <div class="time-box">
-          <div class="time-box-label">Time In</div>
-          <div class="time-box-val muted" id="today-in">—</div>
-        </div>
-        <div class="time-box">
-          <div class="time-box-label">Time Out</div>
-          <div class="time-box-val muted" id="today-out">—</div>
-        </div>
-        <div class="time-box">
-          <div class="time-box-label">Hours</div>
-          <div class="time-box-val muted" id="today-hours">—</div>
-        </div>
-      </div>
+  <!-- Tabs -->
+  <div class="home-tabs">
+    <div class="home-tab active" id="tab-attendance" onclick="switchHomeTab('attendance')">
+      <i class="ti ti-clock"></i>Attendance
     </div>
-
-    <!-- Location status -->
-    <div class="loc-card" id="loc-card">
-      <div class="loc-icon unknown" id="home-loc-icon"><i class="ti ti-map-pin"></i></div>
-      <div class="loc-info">
-        <div class="loc-status" id="home-loc-status">Checking location…</div>
-        <div class="loc-detail" id="home-loc-detail">Please allow location access</div>
-      </div>
+    <div class="home-tab" id="tab-payslips" onclick="switchHomeTab('payslips')">
+      <i class="ti ti-cash"></i>Payslips
     </div>
-
-    <!-- Clock In / Out buttons -->
-    <div class="action-row">
-      <div class="action-btn in" id="btn-in" onclick="goClockIn()">
-        <div class="icon"><i class="ti ti-clock-play"></i></div>
-        <div class="label">Clock In</div>
-        <div class="sub">Face verification</div>
-      </div>
-      <div class="action-btn out" id="btn-out" onclick="goClockOut()">
-        <div class="icon"><i class="ti ti-clock-stop"></i></div>
-        <div class="label">Clock Out</div>
-        <div class="sub">End your shift</div>
-      </div>
-    </div>
-
-    <!-- Leave Application button -->
-    <div style="padding:0 16px 12px">
-      <button onclick="showLeaveModal()" style="width:100%;padding:14px;background:linear-gradient(135deg,rgba(167,139,250,0.15),rgba(167,139,250,0.05));border:1.5px solid rgba(167,139,250,0.4);border-radius:16px;color:#a78bfa;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
-        <i class="ti ti-calendar-plus" style="font-size:18px"></i>File Leave Application
-      </button>
-    </div>
-
-    <!-- Attendance records -->
-    <div class="section-head">
-      <h3>Attendance History</h3>
-      <span id="rec-count">—</span>
-    </div>
-    <div class="rec-list" id="rec-list">
-      <div class="rec-empty">Loading records…</div>
+    <div class="home-tab" id="tab-leaves" onclick="switchHomeTab('leaves')">
+      <i class="ti ti-beach"></i>Leave
     </div>
   </div>
 
+  <!-- Tab contents -->
+  <div style="overflow-y:auto;flex:1">
+
+    <!-- ATTENDANCE TAB -->
+    <div id="home-tab-attendance">
+      <!-- Today status -->
+      <div class="status-card">
+        <div class="status-top">
+          <div class="status-label">Today's Attendance</div>
+          <span class="status-badge absent" id="today-badge">Not Recorded</span>
+        </div>
+        <div class="status-time muted" id="today-timein-big">—</div>
+        <div class="time-row">
+          <div class="time-box">
+            <div class="time-box-label">Time In</div>
+            <div class="time-box-val muted" id="today-in">—</div>
+          </div>
+          <div class="time-box">
+            <div class="time-box-label">Time Out</div>
+            <div class="time-box-val muted" id="today-out">—</div>
+          </div>
+          <div class="time-box">
+            <div class="time-box-label">Hours</div>
+            <div class="time-box-val muted" id="today-hours">—</div>
+          </div>
+        </div>
+      </div>
+      <!-- Location -->
+      <div class="loc-card" id="loc-card">
+        <div class="loc-icon unknown" id="home-loc-icon"><i class="ti ti-map-pin"></i></div>
+        <div class="loc-info">
+          <div class="loc-status" id="home-loc-status">Checking location…</div>
+          <div class="loc-detail" id="home-loc-detail">Please allow location access</div>
+        </div>
+      </div>
+      <!-- Clock In / Out -->
+      <div class="action-row">
+        <div class="action-btn in" id="btn-in" onclick="goClockIn()">
+          <div class="icon"><i class="ti ti-clock-play"></i></div>
+          <div class="label">Clock In</div>
+          <div class="sub">Face verification</div>
+        </div>
+        <div class="action-btn out" id="btn-out" onclick="goClockOut()">
+          <div class="icon"><i class="ti ti-clock-stop"></i></div>
+          <div class="label">Clock Out</div>
+          <div class="sub">End your shift</div>
+        </div>
+      </div>
+      <!-- Attendance History -->
+      <div class="section-head">
+        <h3>Attendance History</h3>
+        <span id="rec-count">—</span>
+      </div>
+      <div class="rec-list" id="rec-list">
+        <div class="rec-empty">Loading records…</div>
+      </div>
+    </div>
+
+    <!-- PAYSLIPS TAB -->
+    <div id="home-tab-payslips" style="display:none">
+      <div style="padding:16px 16px 8px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:700;color:#fff">My Payslips</div>
+        <div id="payslip-count" style="font-size:12px;color:rgba(255,255,255,0.4)"></div>
+      </div>
+      <div id="payslip-list">
+        <div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)">Loading payslips…</div>
+      </div>
+    </div>
+
+    <!-- LEAVE TAB -->
+    <div id="home-tab-leaves" style="display:none">
+      <div style="padding:16px 16px 8px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:15px;font-weight:700;color:#fff">My Leaves</div>
+        <button onclick="showLeaveModal()" style="padding:8px 16px;background:rgba(167,139,250,0.2);border:1px solid rgba(167,139,250,0.4);border-radius:99px;color:#a78bfa;font-size:12px;font-weight:700;font-family:var(--font);cursor:pointer">
+          <i class="ti ti-plus" style="margin-right:4px"></i>File Leave
+        </button>
+      </div>
+      <div id="leave-list">
+        <div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)">Loading leave records…</div>
+      </div>
+    </div>
+
+  </div>
 </div>
   <div id="leave-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center">
     <div style="background:#0d1b2a;border-radius:24px 24px 0 0;padding:24px 20px 40px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto">
@@ -504,11 +581,11 @@ body{display:flex;flex-direction:column;height:100dvh}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
             <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Date From</label>
-            <input type="date" id="leave-from" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box">
+            <input type="date" id="leave-from" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.12);border:1.5px solid rgba(255,255,255,0.25);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box;color-scheme:dark;-webkit-text-fill-color:#fff">
           </div>
           <div>
             <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.07em;display:block;margin-bottom:6px">Date To</label>
-            <input type="date" id="leave-to" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.07);border:1.5px solid rgba(255,255,255,0.12);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box">
+            <input type="date" id="leave-to" style="width:100%;padding:13px 10px;background:rgba(255,255,255,0.12);border:1.5px solid rgba(255,255,255,0.25);border-radius:12px;color:#fff;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box;color-scheme:dark;-webkit-text-fill-color:#fff">
           </div>
         </div>
 
@@ -789,6 +866,288 @@ function handleActionBtn() {
   if(!empVal) { document.getElementById('login-err').textContent='Please select your name.'; return; }
   if(!selectedAction || selectedAction==='leave') return;
   startVerification();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// PIN LOGIN
+// ══════════════════════════════════════════════════════════════════════
+let pinBuffer = '';
+
+function onEmpSelected() {
+  document.getElementById('login-err').textContent = '';
+}
+
+function proceedToPin() {
+  const empVal = document.getElementById('emp-select')?.value;
+  if(!empVal) {
+    document.getElementById('login-err').textContent = 'Please select your name.';
+    return;
+  }
+  const emp = employees.find(e=>(e.id||e.name)===empVal||e.id===empVal||e.name===empVal);
+  if(!emp) { document.getElementById('login-err').textContent = 'Employee not found.'; return; }
+  if(!emp.pin) {
+    document.getElementById('login-err').textContent = '⚠ No PIN set. Ask your admin to set your PIN in the ERP.';
+    return;
+  }
+  selectedEmp = emp;
+  pinBuffer = '';
+  updatePinDots();
+  document.getElementById('pin-emp-name').textContent = emp.name;
+  document.getElementById('login-step1').style.display = 'none';
+  document.getElementById('login-step2').style.display = 'block';
+  document.getElementById('pin-err').textContent = '';
+}
+
+function backToStep1() {
+  pinBuffer = '';
+  updatePinDots();
+  document.getElementById('login-step1').style.display = 'block';
+  document.getElementById('login-step2').style.display = 'none';
+  selectedEmp = null;
+}
+
+function pinKey(k) {
+  if(k === '⌫') {
+    pinBuffer = pinBuffer.slice(0,-1);
+    updatePinDots();
+    return;
+  }
+  if(pinBuffer.length >= 4) return;
+  pinBuffer += k;
+  updatePinDots();
+  if(pinBuffer.length === 4) {
+    setTimeout(checkPin, 150);
+  }
+}
+
+function updatePinDots() {
+  for(let i=0;i<4;i++) {
+    const dot = document.getElementById('pd'+i);
+    if(dot) {
+      dot.classList.toggle('filled', i < pinBuffer.length);
+      dot.classList.remove('error');
+    }
+  }
+}
+
+function checkPin() {
+  if(!selectedEmp) return;
+  if(pinBuffer === String(selectedEmp.pin)) {
+    // Correct — proceed to home screen
+    showScreen('home-screen');
+    initHomeScreen();
+  } else {
+    // Wrong PIN — shake dots red
+    for(let i=0;i<4;i++) {
+      const dot = document.getElementById('pd'+i);
+      if(dot) dot.classList.add('error');
+    }
+    document.getElementById('pin-err').textContent = 'Incorrect PIN. Try again.';
+    setTimeout(()=>{
+      pinBuffer = '';
+      updatePinDots();
+      document.getElementById('pin-err').textContent = '';
+    }, 1000);
+  }
+}
+
+// Override doLogout to go back to step 1
+function doLogout() {
+  pinBuffer = '';
+  selectedEmp = null;
+  todayRecord = null;
+  backToStep1();
+  showScreen('login-screen');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// HOME SCREEN TABS
+// ══════════════════════════════════════════════════════════════════════
+function switchHomeTab(tab) {
+  ['attendance','payslips','leaves'].forEach(t=>{
+    document.getElementById('home-tab-'+t).style.display = t===tab?'block':'none';
+    document.getElementById('tab-'+t).classList.toggle('active', t===tab);
+  });
+  if(tab==='payslips') renderMyPayslips();
+  if(tab==='leaves')   renderMyLeaves();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MY PAYSLIPS
+// ══════════════════════════════════════════════════════════════════════
+async function renderMyPayslips() {
+  const list = document.getElementById('payslip-list');
+  const cnt  = document.getElementById('payslip-count');
+  list.innerHTML = '<div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)"><i class="ti ti-loader" style="font-size:24px;display:block;margin-bottom:8px"></i>Loading…</div>';
+
+  try {
+    const snap = await db.doc('companies/anmol').get();
+    const erpState = JSON.parse(snap.data()?.data||'{}');
+    const payrolls = (erpState.payrolls||[]).filter(p=>
+      p.empId===selectedEmp?.id ||
+      p.empId===selectedEmp?.name ||
+      (p.empName&&p.empName===selectedEmp?.name)
+    ).sort((a,b)=>(b.period||'').localeCompare(a.period||''));
+
+    if(cnt) cnt.textContent = payrolls.length+' payslip'+(payrolls.length!==1?'s':'');
+
+    if(!payrolls.length) {
+      list.innerHTML = '<div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)"><i class="ti ti-cash" style="font-size:32px;display:block;margin-bottom:8px"></i>No payslips yet</div>';
+      return;
+    }
+
+    const f=v=>`₱${(+(v||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+    list.innerHTML = payrolls.map(p=>`
+      <div class="payslip-card">
+        <div class="payslip-card-hdr">
+          <div>
+            <div class="payslip-period">${p.period||'—'}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">Pay Date: ${p.payDate||'—'} · ${p.id}</div>
+          </div>
+          <span class="payslip-status ${p.status||'pending'}">${(p.status||'pending').toUpperCase()}</span>
+        </div>
+        <div class="payslip-body">
+          <div class="payslip-item"><label>Basic Pay</label><div class="val">${f(p.basicPay)}</div></div>
+          <div class="payslip-item"><label>OT Pay</label><div class="val">${f(p.overtime)}</div></div>
+          <div class="payslip-item"><label>Allowance</label><div class="val">${f(p.allowance)}</div></div>
+          <div class="payslip-item"><label>SSS</label><div class="val red">-${f(p.sss)}</div></div>
+          <div class="payslip-item"><label>PhilHealth</label><div class="val red">-${f(p.philhealth)}</div></div>
+          <div class="payslip-item"><label>W/Tax</label><div class="val red">-${f(p.withholdingTax)}</div></div>
+        </div>
+        <div class="payslip-net">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.07em;color:rgba(255,255,255,0.4)">Net Pay</div>
+            <div style="font-size:22px;font-weight:800;color:#34c98a">${f(p.netPay)}</div>
+          </div>
+          <button class="payslip-print" onclick="printMyPayslip('${p.id}',${JSON.stringify(erpState).replace(/'/g,'\\\'').slice(0,0)+'__STATE__'})">
+            <i class="ti ti-printer" style="margin-right:4px"></i>Print
+          </button>
+        </div>
+      </div>`).join('');
+
+    // Store payrolls for printing
+    window._myPayrollData = payrolls;
+    window._myEmpData = erpState.employees||[];
+
+    // Update print buttons
+    list.querySelectorAll('.payslip-print').forEach((btn,i)=>{
+      btn.onclick = ()=>printMyPayslip(payrolls[i]);
+    });
+
+  } catch(e) {
+    list.innerHTML = `<div class="rec-empty" style="padding:40px;text-align:center;color:#f87171">Error: ${e.message}</div>`;
+  }
+}
+
+function printMyPayslip(p) {
+  const cp = { name:'ANMOL PHARMACEUTICALS US CORP.' };
+  const emp = selectedEmp||{};
+  const f=v=>`₱${(+(v||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+  const w = window.open('','_blank','width=760,height=660');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payslip</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:28px 36px;background:#fff}
+  .hdr{display:flex;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:12px;margin-bottom:16px}
+  .co-name{font-size:15px;font-weight:800}
+  .slip-title{text-align:right}.slip-title h1{font-size:20px;font-weight:700}
+  .emp-block{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;background:#f7f7f5;padding:12px 14px;border-radius:6px;margin-bottom:16px;font-size:12px}
+  .lbl{color:#888;font-size:10px;text-transform:uppercase;letter-spacing:0.06em}
+  .val{font-weight:600;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:12px}
+  th{padding:6px 8px;background:#f0f0f0;border-bottom:1.5px solid #333;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;text-align:left}
+  td{padding:6px 8px;border-bottom:0.5px solid #ddd}td:last-child{text-align:right;font-weight:500}
+  .total-row td{font-weight:700;border-top:1.5px solid #333;border-bottom:none}
+  .net-box{background:#111;color:#fff;padding:12px 14px;border-radius:6px;display:flex;justify-content:space-between;align-items:center;margin:16px 0}
+  .net-box .lbl{color:#aaa;font-size:10px}.net-box .val{font-size:22px;font-weight:700}
+  .sigs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;margin-top:28px}
+  .sig{text-align:center;border-top:1px solid #333;padding-top:6px;font-size:10px}
+  @page{margin:12mm}@media print{body{padding:0}}
+</style></head><body>
+<div class="hdr">
+  <div><div class="co-name">${cp.name}</div><div style="font-size:11px;color:#555">Payslip · ${p.period||'—'}</div></div>
+  <div class="slip-title"><h1>PAYSLIP</h1><p style="font-size:12px;color:#555">${p.id} · Paid: ${p.payDate||'—'}</p></div>
+</div>
+<div class="emp-block">
+  <div><div class="lbl">Employee</div><div class="val">${emp.name||p.empName||'—'}</div></div>
+  <div><div class="lbl">Department</div><div class="val">${emp.department||'—'}</div></div>
+  <div><div class="lbl">Position</div><div class="val">${emp.position||'—'}</div></div>
+  <div><div class="lbl">SSS No.</div><div class="val">${emp.sssNo||'—'}</div></div>
+  <div><div class="lbl">PhilHealth No.</div><div class="val">${emp.philhealthNo||'—'}</div></div>
+  <div><div class="lbl">TIN</div><div class="val">${emp.tinNo||'—'}</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<table><thead><tr><th colspan="2">Earnings</th></tr></thead><tbody>
+  <tr><td>Basic Pay</td><td>${f(p.basicPay)}</td></tr>
+  <tr><td>Overtime Pay</td><td>${f(p.overtime)}</td></tr>
+  <tr><td>Allowances</td><td>${f(p.allowance)}</td></tr>
+  <tr class="total-row"><td>Gross Pay</td><td>${f(p.grossPay)}</td></tr>
+</tbody></table>
+<table><thead><tr><th colspan="2">Deductions</th></tr></thead><tbody>
+  <tr><td>SSS</td><td>${f(p.sss)}</td></tr>
+  <tr><td>PhilHealth</td><td>${f(p.philhealth)}</td></tr>
+  <tr><td>Pag-IBIG</td><td>${f(p.pagibig)}</td></tr>
+  <tr><td>Withholding Tax</td><td>${f(p.withholdingTax)}</td></tr>
+  <tr class="total-row"><td>Total Deductions</td><td>${f(p.totalDeductions)}</td></tr>
+</tbody></table>
+</div>
+<div class="net-box">
+  <div><div class="lbl">Net Pay</div><div class="val">${f(p.netPay)}</div></div>
+  <div style="text-align:right"><div class="lbl">Status</div><div style="font-size:14px;font-weight:700;color:${p.status==='released'?'#34c98a':'#f5a623'}">${(p.status||'pending').toUpperCase()}</div></div>
+</div>
+<div class="sigs">
+  <div class="sig"><strong>${emp.name||'—'}</strong><br>Employee / Received by</div>
+  <div class="sig"><strong>__________________</strong><br>Prepared by</div>
+  <div class="sig"><strong>__________________</strong><br>Approved by</div>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+  w.document.close();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// MY LEAVES
+// ══════════════════════════════════════════════════════════════════════
+async function renderMyLeaves() {
+  const list = document.getElementById('leave-list');
+  list.innerHTML = '<div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)"><i class="ti ti-loader" style="font-size:24px;display:block;margin-bottom:8px"></i>Loading…</div>';
+
+  try {
+    const snap = await db.doc('companies/anmol').get();
+    const erpState = JSON.parse(snap.data()?.data||'{}');
+    const leaves = (erpState.leaves||[]).filter(l=>
+      l.empId===selectedEmp?.id ||
+      l.empId===selectedEmp?.name ||
+      (l.empName&&l.empName===selectedEmp?.name)
+    ).sort((a,b)=>(b.appliedOn||b.filedOn||'').localeCompare(a.appliedOn||a.filedOn||''));
+
+    if(!leaves.length) {
+      list.innerHTML = '<div class="rec-empty" style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.3)"><i class="ti ti-beach" style="font-size:32px;display:block;margin-bottom:8px"></i>No leave applications yet</div>';
+      return;
+    }
+
+    list.innerHTML = leaves.map(l=>{
+      const startDate = l.startDate||l.from||'—';
+      const endDate   = l.endDate||l.to||'—';
+      const leaveType = l.leaveTypeLabel||l.type||l.leaveType||'Leave';
+      const days      = l.days||(startDate!=='—'&&endDate!=='—'?Math.ceil((new Date(endDate)-new Date(startDate))/864e5)+1:'—');
+      const status    = l.status||'pending';
+      return `<div class="leave-card">
+        <div class="leave-card-top">
+          <div>
+            <div class="leave-type">${leaveType}</div>
+            <div class="leave-dates">${startDate} → ${endDate} · ${days} day${days!==1?'s':''}</div>
+          </div>
+          <span class="leave-badge ${status}">${status.toUpperCase()}</span>
+        </div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.5)">${l.reason||'—'}</div>
+        ${l.withPay===false?'<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px">Without Pay</div>':''}
+      </div>`;
+    }).join('');
+
+  } catch(e) {
+    list.innerHTML = `<div class="rec-empty" style="padding:40px;text-align:center;color:#f87171">Error: ${e.message}</div>`;
+  }
 }
 
 function startVerification() {
@@ -1323,20 +1682,34 @@ function showLeaveModal() {
   if(!overlay) { console.error('leave-overlay not found'); return; }
   overlay.style.display = 'flex';
   overlay.style.zIndex  = '9999';
-  const t = today();
-  document.getElementById('leave-from').value = t;
-  document.getElementById('leave-to').value   = t;
-  document.getElementById('leave-reason').value = '';
-  document.getElementById('leave-err').style.display = 'none';
-  document.getElementById('leave-submit-btn').disabled = false;
-  document.getElementById('leave-submit-btn').innerHTML = '<i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application';
 
-  // Pre-fill employee selector if already selected
-  const leaveEmpSel = document.getElementById('leave-emp-select');
-  if(leaveEmpSel) {
-    leaveEmpSel.innerHTML = '<option value="">— Select your name —</option>' +
-      employees.map(e=>`<option value="${e.id||e.name}" ${selectedEmp&&(e.id===selectedEmp.id||e.name===selectedEmp.name)?'selected':''}>${e.name}${e.department?' — '+e.department:''}</option>`).join('');
-  }
+  // Set dates after overlay is visible (rAF ensures DOM is painted first)
+  requestAnimationFrame(()=>{
+    const t = today();
+    const fromEl = document.getElementById('leave-from');
+    const toEl   = document.getElementById('leave-to');
+    if(fromEl) fromEl.value = t;
+    if(toEl)   toEl.value   = t;
+
+    const errEl = document.getElementById('leave-err');
+    if(errEl) errEl.style.display = 'none';
+
+    const reasonEl = document.getElementById('leave-reason');
+    if(reasonEl) reasonEl.value = '';
+
+    const btn = document.getElementById('leave-submit-btn');
+    if(btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-send" style="margin-right:8px"></i>Submit Leave Application';
+    }
+
+    // Pre-fill employee selector
+    const leaveEmpSel = document.getElementById('leave-emp-select');
+    if(leaveEmpSel) {
+      leaveEmpSel.innerHTML = '<option value="">— Select your name —</option>' +
+        employees.map(e=>`<option value="${e.id||e.name}" ${selectedEmp&&(e.id===selectedEmp.id||e.name===selectedEmp.name)?'selected':''}>${e.name}${e.department?' — '+e.department:''}</option>`).join('');
+    }
+  });
 }
 
 function hideLeaveModal() {
@@ -1362,19 +1735,20 @@ async function submitLeave() {
     errEl.textContent='Please select your name.'; errEl.style.display='block'; return;
   }
 
-  const leaveType = document.getElementById('leave-type').value;
-  const from      = document.getElementById('leave-from').value;
-  const to        = document.getElementById('leave-to').value;
-  const reason    = document.getElementById('leave-reason').value.trim();
+  const leaveType = document.getElementById('leave-type')?.value||'sick';
+  const from      = (document.getElementById('leave-from')?.value||'').trim();
+  const to        = (document.getElementById('leave-to')?.value||'').trim();
+  const reason    = (document.getElementById('leave-reason')?.value||'').trim();
   const withPay   = document.querySelector('input[name="leave-pay"]:checked')?.value === 'yes';
   const errEl     = document.getElementById('leave-err');
   const btn       = document.getElementById('leave-submit-btn');
 
   errEl.style.display = 'none';
 
-  if(!from || !to) { errEl.textContent='Please select leave dates.'; errEl.style.display='block'; return; }
-  if(from > to)    { errEl.textContent='Start date must be before end date.'; errEl.style.display='block'; return; }
-  if(!reason)      { errEl.textContent='Please provide a reason for the leave.'; errEl.style.display='block'; return; }
+  if(!from) { errEl.textContent='Please select a start date.'; errEl.style.display='block'; return; }
+  if(!to)   { errEl.textContent='Please select an end date.'; errEl.style.display='block'; return; }
+  if(from > to) { errEl.textContent='Start date must be on or before end date.'; errEl.style.display='block'; return; }
+  if(!reason)   { errEl.textContent='Please provide a reason for the leave.'; errEl.style.display='block'; return; }
 
   btn.disabled = true;
   btn.innerHTML = '<span style="display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:8px"></span>Submitting…';
@@ -1384,8 +1758,11 @@ async function submitLeave() {
     const erpState = JSON.parse(erpDoc.data()?.data||'{}');
     if(!erpState.leaves) erpState.leaves = [];
 
-    // Calculate days
-    const d1=new Date(from), d2=new Date(to);
+    // Calculate days — use date-only strings to avoid timezone issues
+    const [fy,fm,fd] = from.split('-').map(Number);
+    const [ty,tm,td] = to.split('-').map(Number);
+    const d1 = new Date(fy,fm-1,fd);
+    const d2 = new Date(ty,tm-1,td);
     const days = Math.round((d2-d1)/864e5)+1;
 
     const leaveTypeLabels = { sick:'Sick Leave', vacation:'Vacation Leave', emergency:'Emergency Leave', maternity:'Maternity Leave', paternity:'Paternity Leave', solo_parent:'Solo Parent Leave', unpaid:'Unpaid Leave', other:'Other' };
