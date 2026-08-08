@@ -17211,8 +17211,8 @@ function renderLeaves(c, ta) {
   c.innerHTML = `
 <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
   <div class="kpi"><div class="kpi-label"><i class="ti ti-clock"></i>Pending</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Approved This Year</div><div class="kpi-value pos">${(state.leaves||[]).filter(l=>l.status==='approved'&&l.startDate?.startsWith(today2.slice(0,4))).length}</div></div>
-  <div class="kpi"><div class="kpi-label"><i class="ti ti-users"></i>On Leave Today</div><div class="kpi-value" style="color:var(--accent)">${(state.leaves||[]).filter(l=>l.status==='approved'&&l.startDate<=today2&&l.endDate>=today2).length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Approved This Year</div><div class="kpi-value pos">${(state.leaves||[]).filter(l=>l.status==='approved'&&(l.startDate||l.from||'').startsWith(today2.slice(0,4))).length}</div></div>
+  <div class="kpi"><div class="kpi-label"><i class="ti ti-users"></i>On Leave Today</div><div class="kpi-value" style="color:var(--accent)">${(state.leaves||[]).filter(l=>{const s=l.startDate||l.from||'';const e=l.endDate||l.to||'';return l.status==='approved'&&s<=today2&&e>=today2;}).length}</div></div>
   <div class="kpi"><div class="kpi-label"><i class="ti ti-calendar"></i>Total Filed</div><div class="kpi-value">${(state.leaves||[]).length}</div></div>
 </div>
 <table>
@@ -17220,18 +17220,25 @@ function renderLeaves(c, ta) {
   <tbody>
   ${!leaves.length?`<tr><td colspan="10">${emptyState('ti-beach','No Leave Records','All leave applications will appear here.','File Leave','showAddLeave()')}</td></tr>`:''}
   ${leaves.map(l=>{
-    const emp=(state.employees||[]).find(e=>e.id===l.empId)||{name:l.empName||'—'};
-    const days=Math.ceil((new Date(l.endDate)-new Date(l.startDate))/(1000*60*60*24))+1;
+    // Normalize field names — mobile uses from/to/leaveType/appliedOn, ERP uses startDate/endDate/type/filedOn
+    const startDate = l.startDate || l.from || '—';
+    const endDate   = l.endDate   || l.to   || '—';
+    const leaveType = l.type      || l.leaveTypeLabel || l.leaveType || 'Leave';
+    const filedOn   = l.filedOn   || l.appliedOn      || '—';
+    const days      = l.days || (startDate!=='—'&&endDate!=='—' ? Math.ceil((new Date(endDate)-new Date(startDate))/(864e5))+1 : '—');
+    const emp=(state.employees||[]).find(e=>e.id===l.empId||e.name===l.empName)||{name:l.empName||l.empId||'—'};
     const clr=l.status==='approved'?'var(--green)':l.status==='rejected'?'var(--red)':'var(--amber)';
+    const isMobile = l.source==='mobile_app';
     return `<tr>
-      <td class="mono" style="font-size:11px">${l.id}</td>
+      <td class="mono" style="font-size:11px">${l.id}${isMobile?` <span style="font-size:9px;background:rgba(79,142,247,0.15);color:var(--accent);border-radius:99px;padding:1px 5px">📱 Mobile</span>`:''}</td>
       <td style="font-weight:500">${emp.name}</td>
-      <td style="font-size:12px">${l.type||'Vacation Leave'}</td>
-      <td>${l.startDate}</td><td>${l.endDate}</td>
+      <td style="font-size:12px">${leaveType}</td>
+      <td>${startDate}</td><td>${endDate}</td>
       <td style="text-align:right;font-weight:600">${days}</td>
       <td style="font-size:12px;color:var(--text-secondary);max-width:160px">${l.reason||'—'}</td>
-      <td style="font-size:11px;color:var(--text-tertiary)">${l.filedOn||'—'}</td>
-      <td><span class="badge" style="background:${clr}22;color:${clr};font-weight:600">${(l.status||'pending').toUpperCase()}</span></td>
+      <td style="font-size:11px;color:var(--text-tertiary)">${filedOn}</td>
+      <td><span class="badge" style="background:${clr}22;color:${clr};font-weight:600">${(l.status||'pending').toUpperCase()}</span>
+        ${l.withPay===false?`<div style="font-size:9px;color:var(--text-tertiary);margin-top:1px">Without Pay</div>`:''}</td>
       <td><div class="action-btns">
         ${isAdm&&l.status==='pending'?`<button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approveLeave('${l.id}','approved')">Approve</button><button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="approveLeave('${l.id}','rejected')">Reject</button>`:''}
         <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deleteLeave('${l.id}')"><i class="ti ti-trash"></i></button>
@@ -17285,7 +17292,24 @@ function saveLeave() {
   if(!start||!end||end<start) { alert('Please enter valid start and end dates.'); return; }
   if(!state.leaves) state.leaves=[];
   const id = 'LV-'+String(state.leaves.length+1).padStart(4,'0');
-  state.leaves.push({ id, empId, empName, type:document.getElementById('leave-type').value, startDate:start, endDate:end, reason:document.getElementById('leave-reason').value.trim(), pay:document.getElementById('leave-pay').value, status:'pending', filedOn:today(), filedBy:currentUser?.name||'' });
+  const [sy,sm,sd]=start.split('-').map(Number);
+  const [ey,em,ed]=end.split('-').map(Number);
+  const days=Math.ceil((new Date(ey,em-1,ed)-new Date(sy,sm-1,sd))/864e5)+1;
+  state.leaves.push({
+    id, empId, empName,
+    type:document.getElementById('leave-type').value,
+    leaveType:document.getElementById('leave-type').value,
+    leaveTypeLabel:document.getElementById('leave-type').value,
+    startDate:start, endDate:end,
+    from:start, to:end,
+    days,
+    reason:document.getElementById('leave-reason').value.trim(),
+    pay:document.getElementById('leave-pay').value,
+    withPay:document.getElementById('leave-pay').value==='yes',
+    status:'pending',
+    filedOn:today(), appliedOn:today(),
+    filedBy:currentUser?.name||''
+  });
   auditLog('CREATE','Leave',id,{description:`${empName} filed ${document.getElementById('leave-type').value} from ${start} to ${end}`});
   save(); closeModal(); render();
 }
