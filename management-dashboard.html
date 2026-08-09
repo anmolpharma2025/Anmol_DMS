@@ -12,6 +12,8 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-font-smoothing:antialiased}
 :root{
@@ -409,6 +411,14 @@ function initFirebase() {
   if(typeof firebase==='undefined'){setTimeout(initFirebase,100);return;}
   if(!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
   db = firebase.firestore();
+  // Silent anonymous auth — secures Firestore rules
+  try {
+    const auth = firebase.auth();
+    auth.onAuthStateChanged(user => {
+      if(!user) auth.signInAnonymously().catch(e=>console.warn('Anon auth:', e));
+    });
+  } catch(e) {}
+
   // Check for existing session
   const session = getSession();
   if(session) {

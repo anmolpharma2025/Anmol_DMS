@@ -331,10 +331,89 @@
     .form-row { grid-template-columns: 1fr; }
   }
 </style>
+<!-- TOTP for Google Authenticator 2FA -->
+<script>
+const TOTP = {
+  b32decode(s) {
+    const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    s = s.toUpperCase().replace(/=+$/,'');
+    let bits=0,val=0; const out=[];
+    for(const c of s){ val=(val<<5)|alpha.indexOf(c); bits+=5; if(bits>=8){bits-=8;out.push((val>>bits)&0xff);} }
+    return new Uint8Array(out);
+  },
+  async hmac(key,data){
+    const k=await crypto.subtle.importKey('raw',key,{name:'HMAC',hash:'SHA-1'},false,['sign']);
+    return new Uint8Array(await crypto.subtle.sign('HMAC',k,data));
+  },
+  async generate(secret,time){
+    const t=Math.floor((time||Date.now()/1000)/30);
+    const tb=new Uint8Array(8); let tmp=t;
+    for(let i=7;i>=0;i--){tb[i]=tmp&0xff;tmp>>=8;}
+    const hmac=await this.hmac(this.b32decode(secret),tb);
+    const off=hmac[19]&0xf;
+    const code=((hmac[off]&0x7f)<<24|(hmac[off+1]&0xff)<<16|(hmac[off+2]&0xff)<<8|(hmac[off+3]&0xff))%1000000;
+    return String(code).padStart(6,'0');
+  },
+  async verify(secret,code){
+    const t=Math.floor(Date.now()/1000/30);
+    for(const offset of [-1,0,1]){
+      if(await this.generate(secret,(t+offset)*30)===String(code).padStart(6,'0')) return true;
+    }
+    return false;
+  },
+  randomSecret(){
+    const alpha='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    return Array.from(crypto.getRandomValues(new Uint8Array(20))).map(b=>alpha[b%32]).join('');
+  }
+};
+</script>
 </head>
 <body>
 
-<div id="login-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;position:relative;overflow:hidden;background:var(--bg-tertiary)">
+<!-- 2FA VERIFICATION OVERLAY -->
+<div id="twofa-overlay" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:24px;padding:36px 32px;width:100%;max-width:380px;text-align:center">
+    <div style="width:64px;height:64px;background:linear-gradient(135deg,#4f8ef7,#a78bfa);border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px">
+      <i class="ti ti-shield-lock" style="font-size:32px;color:#fff"></i>
+    </div>
+    <div style="font-size:20px;font-weight:800;margin-bottom:6px">Two-Factor Authentication</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:24px">Open Google Authenticator and enter the 6-digit code for <strong id="twofa-username">—</strong></div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-bottom:20px" id="twofa-digits">
+      <input type="text" inputmode="numeric" maxlength="1" id="td0" oninput="tfaInput(0,this)" onkeydown="tfaKey(0,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+      <input type="text" inputmode="numeric" maxlength="1" id="td1" oninput="tfaInput(1,this)" onkeydown="tfaKey(1,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+      <input type="text" inputmode="numeric" maxlength="1" id="td2" oninput="tfaInput(2,this)" onkeydown="tfaKey(2,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+      <input type="text" inputmode="numeric" maxlength="1" id="td3" oninput="tfaInput(3,this)" onkeydown="tfaKey(3,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+      <input type="text" inputmode="numeric" maxlength="1" id="td4" oninput="tfaInput(4,this)" onkeydown="tfaKey(4,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+      <input type="text" inputmode="numeric" maxlength="1" id="td5" oninput="tfaInput(5,this)" onkeydown="tfaKey(5,event)" style="width:48px;height:56px;text-align:center;font-size:24px;font-weight:700;font-family:monospace;border:2px solid var(--border-mid);border-radius:12px;background:var(--bg-primary);color:var(--text-primary);outline:none;transition:border-color 0.15s">
+    </div>
+    <div id="twofa-err" style="font-size:12px;color:var(--red);min-height:18px;margin-bottom:12px"></div>
+    <button id="twofa-btn" onclick="verifyTOTP()" style="width:100%;padding:14px;background:var(--accent);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font)">
+      <i class="ti ti-shield-check" style="margin-right:8px"></i>Verify
+    </button>
+    <div style="margin-top:14px">
+      <span onclick="cancelTwoFA()" style="font-size:12px;color:var(--text-secondary);cursor:pointer;text-decoration:underline">← Back to login</span>
+    </div>
+  </div>
+</div>
+
+<!-- SESSION TIMEOUT WARNING -->
+<div id="session-warning" style="display:none;position:fixed;inset:0;z-index:9997;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+  <div style="background:var(--bg-secondary);border:2px solid var(--amber);border-radius:20px;padding:32px;width:100%;max-width:360px;text-align:center">
+    <i class="ti ti-clock-exclamation" style="font-size:48px;color:var(--amber);display:block;margin-bottom:16px"></i>
+    <div style="font-size:18px;font-weight:800;margin-bottom:8px">Session Expiring Soon</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">
+      Your session will expire in <strong id="session-countdown" style="color:var(--amber);font-size:16px">5:00</strong> due to inactivity.
+    </div>
+    <div style="display:flex;gap:10px">
+      <button onclick="extendSession()" style="flex:1;padding:12px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--font)">
+        <i class="ti ti-refresh" style="margin-right:6px"></i>Stay Logged In
+      </button>
+      <button onclick="logout()" style="flex:1;padding:12px;background:transparent;border:1.5px solid var(--border-mid);border-radius:10px;color:var(--text-secondary);font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)">
+        Log Out
+      </button>
+    </div>
+  </div>
+</div> style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;position:relative;overflow:hidden;background:var(--bg-tertiary)">
 
   <!-- Logo background layer (shown when logo is uploaded) -->
   <div id="login-bg" style="position:absolute;inset:0;background-size:cover;background-position:center;background-repeat:no-repeat;opacity:0;transition:opacity 0.6s ease;z-index:0"></div>
@@ -544,6 +623,7 @@
 
 <!-- Firebase SDK (CDN compat mode — works in plain HTML, no build tools) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"
   onerror="console.warn('Firebase SDK failed to load — sync disabled. Check internet connection.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"
@@ -571,6 +651,19 @@ if(typeof firebase !== 'undefined') {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
+  // Initialize Firebase Storage
+  try {
+    window.fbStorage = firebase.storage();
+  } catch(e) { console.warn('Firebase Storage not available:', e); }
+  // Silent anonymous auth — secures Firestore/Storage rules (request.auth != null)
+  try {
+    const auth = firebase.auth();
+    auth.onAuthStateChanged(user => {
+      if(!user) {
+        auth.signInAnonymously().catch(e=>console.warn('Anon auth failed:', e));
+      }
+    });
+  } catch(e) { console.warn('Firebase Auth not available:', e); }
   } catch(e) {
     // Already initialized (e.g. hot reload) — get existing instance
     try { db = firebase.firestore(); } catch(e2) {}
@@ -632,6 +725,19 @@ async function _fbDoSave(stateData) {
 <script>
 // ── FIREBASE FUNCTIONS ───────────────────────────────────────────────────────
 // ── LOAD from Firestore once on login ────────────────────────────────────────
+// ── FIREBASE STORAGE UPLOAD ───────────────────────────────────────────────────
+async function uploadToStorage(file, path) {
+  if(!window.fbStorage) throw new Error('Firebase Storage not initialized');
+  const ref = window.fbStorage.ref(path);
+  const snap = await ref.put(file);
+  return await snap.ref.getDownloadURL();
+}
+
+async function uploadAttachment(file, siId) {
+  const path = `supplier-invoices/${siId}/${Date.now()}_${file.name}`;
+  return await uploadToStorage(file, path);
+}
+
 async function fbLoad() {
   if(!db) return null;
   try {
@@ -1319,10 +1425,218 @@ function cancelAdminPin() {
   window._pendingAdminUser = null;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// TWO-FACTOR AUTHENTICATION (TOTP — Google Authenticator)
+// ══════════════════════════════════════════════════════════════════════════════
+let _pendingLoginUser = null; // holds user object between login and 2FA verify
+
+function showTwoFAOverlay(user) {
+  _pendingLoginUser = user;
+  document.getElementById('twofa-username').textContent = user.name;
+  const tfaEl=document.getElementById('twofa-overlay'); if(!tfaEl) return; tfaEl.style.display = 'flex';
+  document.getElementById('twofa-err').textContent = '';
+  // Clear digit inputs
+  for(let i=0;i<6;i++) {
+    const el = document.getElementById('td'+i);
+    if(el) { el.value=''; el.style.borderColor='var(--border-mid)'; }
+  }
+  setTimeout(()=>document.getElementById('td0')?.focus(), 100);
+}
+
+function tfaInput(idx, el) {
+  const val = el.value.replace(/\D/g,'');
+  el.value = val.slice(-1);
+  if(val && idx < 5) document.getElementById('td'+(idx+1))?.focus();
+  if(idx===5 && val) verifyTOTP();
+}
+
+function tfaKey(idx, e) {
+  if(e.key==='Backspace' && !document.getElementById('td'+idx).value && idx>0)
+    document.getElementById('td'+(idx-1))?.focus();
+  if(e.key==='Enter') verifyTOTP();
+}
+
+async function verifyTOTP() {
+  const code = [0,1,2,3,4,5].map(i=>document.getElementById('td'+i)?.value||'').join('');
+  if(code.length!==6) { document.getElementById('twofa-err').textContent='Enter all 6 digits.'; return; }
+  const btn = document.getElementById('twofa-btn');
+  btn.disabled=true; btn.innerHTML='<i class="ti ti-loader" style="margin-right:8px"></i>Verifying…';
+  const valid = await TOTP.verify(_pendingLoginUser.totpSecret, code);
+  if(valid) {
+    const tfaEl2=document.getElementById('twofa-overlay'); if(tfaEl2) tfaEl2.style.display='none';
+    completeLogin(_pendingLoginUser);
+    _pendingLoginUser = null;
+  } else {
+    document.getElementById('twofa-err').textContent='❌ Incorrect code. Try again.';
+    // Shake effect
+    for(let i=0;i<6;i++) {
+      const el=document.getElementById('td'+i);
+      if(el) { el.style.borderColor='var(--red)'; el.value=''; }
+    }
+    document.getElementById('td0')?.focus();
+    btn.disabled=false; btn.innerHTML='<i class="ti ti-shield-check" style="margin-right:8px"></i>Verify';
+  }
+}
+
+function cancelTwoFA() {
+  const tfaEl4=document.getElementById('twofa-overlay'); if(tfaEl4) tfaEl4.style.display='none';
+  _pendingLoginUser = null;
+}
+
+// ── 2FA SETUP MODAL ──────────────────────────────────────────────────────────
+async function showSetup2FA(userId) {
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  const secret = u.totpSecret || TOTP.randomSecret();
+  const issuer = 'PharmaHub';
+  const label  = encodeURIComponent(u.username+'@anmolpharma');
+  const otpUrl = `otpauth://totp/${issuer}:${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
+  // QR code via Google Charts API
+  const qrUrl  = `https://chart.googleapis.com/chart?chs=200x200&chld=M|0&cht=qr&chl=${encodeURIComponent(otpUrl)}`;
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-shield-lock" style="margin-right:6px;color:var(--accent)"></i>Set Up Google Authenticator — ${u.name}</h3>
+  <button class="close-btn" onclick="closeModal()">×</button>
+</div>
+<div style="display:flex;gap:20px;flex-wrap:wrap">
+  <div style="text-align:center">
+    <img src="${qrUrl}" style="width:180px;height:180px;border-radius:12px;border:3px solid var(--accent)">
+    <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Scan with Google Authenticator</div>
+  </div>
+  <div style="flex:1;min-width:200px">
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
+      <strong>Step 1</strong> — Install Google Authenticator or Microsoft Authenticator on your phone<br><br>
+      <strong>Step 2</strong> — Tap <strong>+</strong> → <strong>Scan QR code</strong><br><br>
+      <strong>Step 3</strong> — Scan the QR code on the left<br><br>
+      <strong>Step 4</strong> — Enter the 6-digit code below to confirm setup
+    </div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">Or enter manually:</div>
+    <div class="mono" style="font-size:13px;font-weight:700;letter-spacing:3px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border-mid);margin-bottom:14px;word-break:break-all">${secret}</div>
+    <div class="form-group">
+      <label>Enter 6-digit code to confirm <span style="color:var(--red)">*</span></label>
+      <input type="number" id="twofa-confirm-code" placeholder="000000" maxlength="6"
+        style="font-size:24px;letter-spacing:8px;font-family:monospace;text-align:center;padding:10px"
+        onkeydown="if(event.key==='Enter')confirmSetup2FA('${userId}','${secret}')">
+    </div>
+    <button class="btn primary" onclick="confirmSetup2FA('${userId}','${secret}')" style="width:100%">
+      <i class="ti ti-shield-check"></i>Activate 2FA
+    </button>
+  </div>
+</div>`);
+}
+
+async function confirmSetup2FA(userId, secret) {
+  const code = document.getElementById('twofa-confirm-code')?.value?.trim();
+  if(!code || code.length<6) { alert('Enter the 6-digit code from your authenticator app.'); return; }
+  const valid = await TOTP.verify(secret, code);
+  if(!valid) { alert('❌ Code is incorrect. Make sure your phone clock is accurate and try again.'); return; }
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  u.totpSecret = secret;
+  u.twoFAEnabled = true;
+  saveUsers(users);
+  closeModal();
+  toast('✅ Two-Factor Authentication activated for '+u.name+'!');
+  render();
+}
+
+async function disable2FA(userId) {
+  if(!requireAdmin('disable 2FA')) return;
+  if(!confirm('Disable Two-Factor Authentication for this user?\nThey will no longer need a code to log in.')) return;
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  u.twoFAEnabled = false;
+  delete u.totpSecret;
+  saveUsers(users);
+  toast('2FA disabled for '+u.name);
+  render();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SESSION TIMEOUT (20 min total — warning at 15 min)
+// ══════════════════════════════════════════════════════════════════════════════
+const SESSION_TIMEOUT_MS  = 20 * 60 * 1000; // 20 minutes
+const SESSION_WARNING_MS  = 15 * 60 * 1000; // warn at 15 minutes
+let _sessionTimer   = null;
+let _warningTimer   = null;
+let _countdownTimer = null;
+let _lastActivity   = Date.now();
+
+function resetSessionTimer() {
+  _lastActivity = Date.now();
+  // Clear existing timers
+  clearTimeout(_sessionTimer);
+  clearTimeout(_warningTimer);
+  clearInterval(_countdownTimer);
+  // Hide warning if showing
+  const swEl2=document.getElementById('session-warning'); if(swEl2) swEl2.style.display='none';
+  // Set warning timer (15 min)
+  _warningTimer = setTimeout(()=>{
+    if(!currentUser) return;
+    showSessionWarning();
+  }, SESSION_WARNING_MS);
+  // Set logout timer (20 min)
+  _sessionTimer = setTimeout(()=>{
+    if(!currentUser) return;
+    const warn = document.getElementById('session-warning');
+    if(warn) warn.style.display='none';
+    clearInterval(_countdownTimer);
+    toast('⏱ Session expired due to inactivity. Please log in again.','warning',4000);
+    setTimeout(logout, 1500);
+  }, SESSION_TIMEOUT_MS);
+}
+
+function showSessionWarning() {
+  const warn = document.getElementById('session-warning');
+  if(!warn) return;
+  if(!currentUser) return;
+  warn.style.display = 'flex';
+  // Countdown from 5 minutes (20-15)
+  let remaining = 5 * 60;
+  updateCountdown(remaining);
+  _countdownTimer = setInterval(()=>{
+    remaining--;
+    updateCountdown(remaining);
+    if(remaining <= 0) { clearInterval(_countdownTimer); }
+  }, 1000);
+}
+
+function updateCountdown(sec) {
+  const el = document.getElementById('session-countdown');
+  if(el) el.textContent = Math.floor(sec/60)+':'+ String(sec%60).padStart(2,'0');
+}
+
+function extendSession() {
+  clearInterval(_countdownTimer);
+  const swEl=document.getElementById('session-warning'); if(swEl) swEl.style.display='none';
+  resetSessionTimer();
+  toast('✅ Session extended for another 20 minutes.');
+}
+
+function startSessionTimeout() {
+  // Track activity events
+  ['click','keydown','mousemove','touchstart','scroll'].forEach(evt=>{
+    document.addEventListener(evt, ()=>{ if(currentUser) resetSessionTimer(); }, {passive:true});
+  });
+  resetSessionTimer();
+}
+
+function stopSessionTimeout() {
+  clearTimeout(_sessionTimer);
+  clearTimeout(_warningTimer);
+  clearInterval(_countdownTimer);
+  const warn = document.getElementById('session-warning');
+  if(warn) warn.style.display='none';
+}
+
 function logout() {
   if(currentUser) auditLog('LOGOUT','System',currentUser.id,{description:`${currentUser.name} logged out`});
   clearSession();
   currentUser = null;
+  stopSessionTimeout();
   showLoginScreen();
 }
 
@@ -1375,6 +1689,7 @@ function showAppScreen() {
   if(restoreBtn) restoreBtn.style.display = isAdmin() ? '' : 'none';
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
+  startSessionTimeout();
   // Load latest data from Firebase then start real-time listener
   Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
     if(remoteState) {
@@ -1455,12 +1770,31 @@ function doLogin() {
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
   const result = login(u, p);
-  if(result === 'pending') return; // waiting for admin PIN
+  if(result === 'pending') return;
   if(result) {
-    showAppScreen();
+    // Check if 2FA is enabled for this user
+    const users = getUsers();
+    const user  = users.find(usr=>usr.username===u);
+    if(user?.twoFAEnabled && user?.totpSecret) {
+      // Show 2FA overlay instead of going to app
+      showTwoFAOverlay(user);
+    } else {
+      completeLogin(result);
+    }
   } else {
     document.getElementById('login-error').textContent = 'Incorrect username or password.';
   }
+}
+
+function completeLogin(user) {
+  // Called after successful login (with or without 2FA)
+  if(user && typeof user === 'object') {
+    currentUser = { id:user.id, username:user.username, name:user.name, role:user.role,
+      branchId:user.branchId||null, assignedCustomers:user.assignedCustomers||null };
+    saveSession(currentUser);
+  }
+  showAppScreen();
+  startSessionTimeout();
 }
 
 // ── USER MANAGEMENT (admin only) ──────────────────────────────────────────────
@@ -1679,6 +2013,9 @@ ${users.filter(u=>u&&u.id).map(u => {
         <button class="btn" style="padding:5px 12px;font-size:12px" onclick="showEditUser('${u.id}')"><i class="ti ti-edit"></i> Edit</button>
         <button class="btn primary" style="padding:5px 12px;font-size:12px" onclick="showCustomizeAccess('${u.id}')"><i class="ti ti-key"></i> Customize Access</button>
         ${(hasCustom||hasCustomActions)?`<button class="btn" style="padding:5px 12px;font-size:12px" onclick="resetToRoleDefault('${u.id}')"><i class="ti ti-refresh"></i> Reset to default</button>`:''}
+        <button class="btn" style="padding:5px 12px;font-size:12px;color:${u.twoFAEnabled?'var(--green)':'var(--text-secondary)'};border-color:${u.twoFAEnabled?'var(--green)':'var(--border-mid)'}" onclick="${u.twoFAEnabled?`disable2FA('${u.id}')`:`showSetup2FA('${u.id}')`}">
+          <i class="ti ti-shield-lock"></i>${u.twoFAEnabled?'2FA ✓ Active':'Set Up 2FA'}
+        </button>
         <button class="btn danger" style="padding:5px 12px;font-size:12px;margin-left:auto" onclick="deleteUser('${u.id}')"><i class="ti ti-trash"></i> Delete</button>
       ` : '<span style="font-size:12px;color:var(--text-tertiary);padding:4px 0"><i class="ti ti-lock" style="margin-right:4px"></i>Protected system account</span>'}
     </div>
@@ -13135,6 +13472,11 @@ function showAddSI(prefill) {
   </div>
 </div>
 <div class="form-group"><label>Notes</label><input type="text" id="si-notes" value="${prefill?.notes||''}" placeholder="Remarks or special instructions"></div>
+<div class="form-group">
+  <label>Attach Scanned Invoice <span style="font-size:11px;color:var(--text-tertiary)">(JPG, PNG, PDF — uploaded to Firebase Storage)</span></label>
+  <input type="file" id="si-file-input" accept="image/*,.pdf"
+    style="padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;width:100%">
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveSI()"><i class="ti ti-check"></i>Save Supplier Invoice</button>
@@ -13196,7 +13538,7 @@ function prefillFromPO(poId) {
   renderSILines();
 }
 
-function saveSI() {
+async function saveSI() {
   const supplier=document.getElementById('si-sup')?.value;
   const invNo=document.getElementById('si-invno')?.value.trim();
   const date=document.getElementById('si-date')?.value||today();
@@ -13212,7 +13554,22 @@ function saveSI() {
   const {subtotal=0,vat=0,total=0}=window._siTotal||{};
   if(!state.supplierInvoices) state.supplierInvoices=[];
   const id='SI-'+String(state.supplierInvoices.length+1).padStart(4,'0');
-  const si={id,supplier,supplierInvNo:invNo,date,dueDate,poRef,drNo,notes,lines,subtotal,vat,total,payments:[],status:'unpaid',createdAt:new Date().toISOString(),createdBy:currentUser?.name||''};
+
+  // Upload attachment to Firebase Storage if file selected
+  let attachmentUrl='', attachmentName='';
+  const fileInput = document.getElementById('si-file-input');
+  const file = fileInput?.files?.[0];
+  if(file) {
+    try {
+      toast('Uploading attachment…','info',3000);
+      attachmentUrl = await uploadAttachment(file, id);
+      attachmentName = file.name;
+    } catch(e) {
+      toast('⚠ File upload failed. Invoice saved without attachment.','warning',4000);
+    }
+  }
+
+  const si={id,supplier,supplierInvNo:invNo,date,dueDate,poRef,drNo,notes,lines,subtotal,vat,total,payments:[],status:'unpaid',attachmentUrl,attachmentName,createdAt:new Date().toISOString(),createdBy:currentUser?.name||''};
   state.supplierInvoices.push(si);
   // Mark linked PO as received
   if(poRef){const po=(state.purchaseOrders||[]).find(p=>p.id===poRef);if(po){po.status='received';po.siRef=id;stampUpdate(po);}}
@@ -13232,7 +13589,7 @@ function viewSI(id) {
   const si=(state.supplierInvoices||[]).find(s=>s.id===id); if(!si) return;
   const st=getSIStatus(si), bal=getSIBalance(si), paid=(si.total||0)-bal;
   const sc=st==='paid'?'var(--green)':st==='overdue'?'var(--red)':st==='partial'?'var(--amber)':'var(--text-secondary)';
-  const hasFile=!!(si.attachmentData||si.attachmentName);
+  const hasFile=!!(si.attachmentUrl||si.attachmentData||si.attachmentName);
 
   // Use full-width split layout if attachment exists
   const modalStyle = hasFile ? 'max-width:1100px;width:98vw' : '';
@@ -13294,12 +13651,21 @@ function viewSI(id) {
   ${hasFile?`
   <div id="si-preview-pane" style="display:none;width:480px;flex-shrink:0;border-left:1px solid var(--border-light);padding-left:16px">
     <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px"><i class="ti ti-file-search" style="margin-right:5px"></i>${si.attachmentName||'Scanned Invoice'}</div>
-    ${si.attachmentData?.startsWith('data:image')?
-      `<img src="${si.attachmentData}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-light)">`
-      :si.attachmentData?.startsWith('data:application/pdf')?
-      `<iframe src="${si.attachmentData}" style="width:100%;height:600px;border:none;border-radius:var(--radius-sm)"></iframe>`
-      :`<div style="padding:24px;text-align:center;color:var(--text-tertiary)"><i class="ti ti-file" style="font-size:32px;display:block;margin-bottom:8px"></i>Preview not available</div>`
-    }
+    ${(()=>{
+      const url = si.attachmentUrl || si.attachmentData || '';
+      if(!url) return '<div style="padding:24px;text-align:center;color:var(--text-tertiary)"><i class="ti ti-file" style="font-size:32px;display:block;margin-bottom:8px"></i>Preview not available</div>';
+      if(url.startsWith('https://') || url.includes('firebasestorage')) {
+        // Firebase Storage URL — detect type from filename
+        const isImg = /\.(jpg|jpeg|png|gif|webp)$/i.test(si.attachmentName||'');
+        return isImg
+          ? `<img src="${url}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-light)">`
+          : `<iframe src="${url}" style="width:100%;height:600px;border:none;border-radius:var(--radius-sm)"></iframe>`;
+      }
+      // Legacy base64
+      return url.startsWith('data:image')
+        ? `<img src="${url}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-light)">`
+        : `<iframe src="${url}" style="width:100%;height:600px;border:none;border-radius:var(--radius-sm)"></iframe>`;
+    })()}
   </div>`:''}
 </div>`);
 }
@@ -14380,27 +14746,24 @@ function handleRecvFile(input) {
 function processRecvFile(file) {
   if(file.size>10*1024*1024){alert('File too large. Max 10MB.');return;}
   window._recvFile=file;
-  const reader=new FileReader();
-  reader.onload=e=>{window._recvFileData=e.target.result;};
-  reader.readAsDataURL(file);
-  // Show preview bar
+  // Don't read as base64 — will upload to Firebase Storage on confirm
   const zone=document.getElementById('recv-upload-zone');
   const prev=document.getElementById('recv-file-preview');
   if(zone) zone.style.borderColor='var(--green)';
   if(prev) {
     prev.style.display='flex';
     document.getElementById('recv-file-name').textContent=file.name;
-    document.getElementById('recv-file-size').textContent=(file.size/1024).toFixed(0)+' KB · '+file.type;
+    document.getElementById('recv-file-size').textContent=(file.size/1024).toFixed(0)+' KB · '+file.type+' · Will upload to Firebase Storage';
   }
 }
 function clearRecvFile() {
-  window._recvFile=null; window._recvFileData=null;
+  window._recvFile=null;
   document.getElementById('recv-file-input').value='';
   document.getElementById('recv-file-preview').style.display='none';
   document.getElementById('recv-upload-zone').style.borderColor='var(--border-mid)';
 }
 
-function confirmReceivePO(id) {
+async function confirmReceivePO(id) {
   const supInvNo = document.getElementById('recv-inv-no')?.value.trim();
   const drNo     = document.getElementById('recv-dr-no')?.value.trim()||'';
   const recvDate = document.getElementById('recv-date')?.value||today();
@@ -14431,14 +14794,28 @@ function confirmReceivePO(id) {
   // Create Supplier Invoice record
   if(!state.supplierInvoices) state.supplierInvoices=[];
   const siId='SI-'+String(state.supplierInvoices.length+1).padStart(4,'0');
-  const si={
+  // Upload attachment to Firebase Storage (not base64 in Firestore)
+  let attachmentUrl = '';
+  let attachmentName = '';
+  if(window._recvFile) {
+    try {
+      toast('Uploading attachment…','info',3000);
+      attachmentUrl = await uploadAttachment(window._recvFile, siId);
+      attachmentName = window._recvFile.name;
+    } catch(e) {
+      console.warn('Attachment upload failed, saving without file:', e);
+      toast('⚠ File upload failed. Invoice saved without attachment.','warning',4000);
+    }
+  }
+
+  const si = {
     id:siId, supplier:po.supplier, supplierInvNo:supInvNo,
     date:recvDate, dueDate, poRef:po.id, drNo, notes,
     lines:(po.lines||[]).map(l=>({desc:l.desc||'',qty:l.qty||1,unit:l.unit||'pcs',unitPrice:l.unitPrice||0,lineTotal:l.lineTotal||0,vatExempt:vatTrx==='vat_exempt'})),
     subtotal:net, vat:vatAmt, total, vatTreatment:vatTrx,
     payments:[], status:'unpaid',
-    attachmentName: window._recvFile?.name||'',
-    attachmentData: window._recvFileData||'',
+    attachmentName,
+    attachmentUrl,  // ← Firebase Storage URL instead of base64
     createdAt:new Date().toISOString(), createdBy:currentUser?.name||''
   };
   state.supplierInvoices.push(si);
