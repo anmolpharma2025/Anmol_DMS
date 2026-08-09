@@ -142,7 +142,7 @@ body{display:flex;flex-direction:column;height:100dvh}
 #cam-video{
   position:absolute;inset:0;width:100%;height:100%;
   object-fit:cover;
-  transform:scaleX(-1) scale(0.65);
+  transform:scaleX(-1);
   transform-origin:center center;
   background:#000
 }
@@ -161,7 +161,8 @@ body{display:flex;flex-direction:column;height:100dvh}
 
 .cam-overlay{
   position:absolute;inset:0;z-index:5;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding-top:80px;gap:20px
 }
 /* Face oval — fills most of screen width on mobile */
 .face-oval-wrap{position:relative;width:min(80vw,340px);height:min(96vw,408px)}
