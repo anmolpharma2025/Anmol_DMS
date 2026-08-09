@@ -413,7 +413,9 @@ const TOTP = {
       </button>
     </div>
   </div>
-</div> style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;position:relative;overflow:hidden;background:var(--bg-tertiary)">
+</div>
+
+<div id="login-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;width:100vw;position:relative;overflow:hidden;background:var(--bg-tertiary)">
 
   <!-- Logo background layer (shown when logo is uploaded) -->
   <div id="login-bg" style="position:absolute;inset:0;background-size:cover;background-position:center;background-repeat:no-repeat;opacity:0;transition:opacity 0.6s ease;z-index:0"></div>
@@ -1642,8 +1644,11 @@ function logout() {
 
 // ── LOGIN SCREEN ──────────────────────────────────────────────────────────────
 function showLoginScreen() {
-  document.getElementById('shell').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
+  const shellEl = document.getElementById('shell');
+  const loginEl = document.getElementById('login-screen');
+  if(!shellEl || !loginEl) { setTimeout(showLoginScreen, 50); return; }
+  shellEl.style.display = 'none';
+  loginEl.style.display = 'flex';
   // Hide chat elements on login screen
   const chatBtn = document.getElementById('chat-float-btn');
   const chatPanel = document.getElementById('chat-panel');
@@ -1676,8 +1681,15 @@ function showLoginScreen() {
 }
 
 function showAppScreen() {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('shell').style.display = 'flex';
+  const loginEl = document.getElementById('login-screen');
+  const shellEl = document.getElementById('shell');
+  if(!loginEl || !shellEl) {
+    // DOM not ready yet — defer
+    setTimeout(showAppScreen, 50);
+    return;
+  }
+  loginEl.style.display = 'none';
+  shellEl.style.display = 'flex';
   restoreSidebarState();
   // Update user badge
   const badge = document.getElementById('user-badge');
