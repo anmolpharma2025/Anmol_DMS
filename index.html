@@ -1803,20 +1803,119 @@ function doLogin() {
   const result = login(u, p);
   if(result === 'pending') return;
   if(result) {
-    // Check if 2FA is enabled for this user
     const users = getUsers();
     const user  = users.find(usr=>usr.username===u);
-    if(user?.twoFAEnabled && user?.totpSecret) {
-      // Clear session — don't let them in until 2FA is verified
+    if(!user) { completeLogin(result); return; }
+
+    if(user.twoFAEnabled && user.totpSecret) {
+      // 2FA already set up — verify code
       clearSession();
       currentUser = null;
       showTwoFAOverlay(user);
     } else {
-      completeLogin(user||result);
+      // 2FA NOT set up yet — force setup before entering system
+      clearSession();
+      currentUser = null;
+      showForced2FASetup(user);
     }
   } else {
     document.getElementById('login-error').textContent = 'Incorrect username or password.';
   }
+}
+
+async function showForced2FASetup(user) {
+  const secret = TOTP.randomSecret();
+  const issuer = 'PharmaHub';
+  const label  = encodeURIComponent(user.username+'@anmolpharma');
+  const otpUrl = `otpauth://totp/${issuer}:${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
+
+  // Show 2FA setup overlay (full screen, can't dismiss)
+  const overlay = document.createElement('div');
+  overlay.id = 'forced-2fa-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = `
+<div style="background:var(--bg-secondary);border:1px solid var(--border-mid);border-radius:24px;padding:36px 32px;width:100%;max-width:540px;max-height:90vh;overflow-y:auto">
+  <div style="text-align:center;margin-bottom:20px">
+    <div style="width:56px;height:56px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">
+      <i class="ti ti-shield-lock" style="font-size:28px;color:#fff"></i>
+    </div>
+    <div style="font-size:20px;font-weight:800;margin-bottom:6px">Set Up Two-Factor Authentication</div>
+    <div style="font-size:13px;color:var(--text-secondary)">
+      PharmaHub requires 2FA for all users.<br>
+      <strong>${user.name}</strong> — please set up Google Authenticator to continue.
+    </div>
+  </div>
+
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px">
+    <div style="text-align:center;flex-shrink:0">
+      <div id="forced-qr-canvas" style="width:160px;height:160px;background:#fff;border-radius:12px;border:3px solid var(--amber);padding:6px;display:flex;align-items:center;justify-content:center;margin:0 auto"></div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Scan with Google Authenticator</div>
+    </div>
+    <div style="flex:1;min-width:180px">
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.7">
+        <strong>Step 1</strong> — Install <strong>Google Authenticator</strong> on your phone<br>
+        <strong>Step 2</strong> — Tap <strong>+</strong> → <strong>Scan QR code</strong><br>
+        <strong>Step 3</strong> — Scan the QR on the left<br>
+        <strong>Step 4</strong> — Enter the 6-digit code below
+      </div>
+      <div style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px">Or enter secret manually:</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:2px;padding:6px 10px;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border-mid);word-break:break-all;font-family:monospace;margin-bottom:12px">${secret}</div>
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-bottom:12px">
+    <label style="font-size:12px;font-weight:600">Enter the 6-digit code from your app to confirm <span style="color:var(--red)">*</span></label>
+    <input type="number" id="forced-2fa-code" placeholder="000000" maxlength="6"
+      style="font-size:24px;letter-spacing:8px;font-family:monospace;text-align:center;padding:10px;width:100%;border:1.5px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary)"
+      onkeydown="if(event.key==='Enter')confirmForced2FA('${user.id}','${secret}')">
+  </div>
+  <div id="forced-2fa-err" style="color:var(--red);font-size:12px;min-height:18px;margin-bottom:10px;text-align:center"></div>
+  <button onclick="confirmForced2FA('${user.id}','${secret}')"
+    style="width:100%;padding:14px;background:var(--amber);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font)">
+    <i class="ti ti-shield-check" style="margin-right:8px"></i>Activate & Enter PharmaHub
+  </button>
+  <div style="text-align:center;margin-top:12px;font-size:11px;color:var(--text-tertiary)">
+    <i class="ti ti-info-circle" style="margin-right:4px"></i>You will only need to do this once. Keep the app on your phone.
+  </div>
+</div>`;
+  document.body.appendChild(overlay);
+
+  // Generate QR code
+  setTimeout(()=>{
+    const el = document.getElementById('forced-qr-canvas');
+    if(!el) return;
+    el.innerHTML = '';
+    if(typeof QRCode !== 'undefined') {
+      new QRCode(el, { text:otpUrl, width:148, height:148, colorDark:'#000', colorLight:'#fff', correctLevel:QRCode.CorrectLevel.M });
+    } else {
+      el.innerHTML = '<div style="font-size:10px;color:#666;padding:8px">Use secret key above</div>';
+    }
+  }, 150);
+}
+
+async function confirmForced2FA(userId, secret) {
+  const code = document.getElementById('forced-2fa-code')?.value?.trim();
+  const errEl = document.getElementById('forced-2fa-err');
+  if(!code || code.length < 6) { if(errEl) errEl.textContent='Enter the 6-digit code.'; return; }
+
+  const valid = await TOTP.verify(secret, code);
+  if(!valid) {
+    if(errEl) errEl.textContent='❌ Incorrect code. Make sure your phone clock is accurate and try again.';
+    document.getElementById('forced-2fa-code').value='';
+    return;
+  }
+
+  // Save 2FA secret to user
+  const users = getUsers();
+  const u = users.find(u=>u.id===userId);
+  if(!u) return;
+  u.totpSecret = secret;
+  u.twoFAEnabled = true;
+  saveUsers(users);
+
+  // Remove overlay and complete login
+  document.getElementById('forced-2fa-overlay')?.remove();
+  completeLogin(u);
 }
 
 function completeLogin(user) {
