@@ -1807,10 +1807,12 @@ function doLogin() {
     const users = getUsers();
     const user  = users.find(usr=>usr.username===u);
     if(user?.twoFAEnabled && user?.totpSecret) {
-      // Show 2FA overlay instead of going to app
+      // Clear session — don't let them in until 2FA is verified
+      clearSession();
+      currentUser = null;
       showTwoFAOverlay(user);
     } else {
-      completeLogin(result);
+      completeLogin(user||result);
     }
   } else {
     document.getElementById('login-error').textContent = 'Incorrect username or password.';
@@ -1818,12 +1820,19 @@ function doLogin() {
 }
 
 function completeLogin(user) {
-  // Called after successful login (with or without 2FA)
-  if(user && typeof user === 'object') {
-    currentUser = { id:user.id, username:user.username, name:user.name, role:user.role,
-      branchId:user.branchId||null, assignedCustomers:user.assignedCustomers||null };
-    saveSession(currentUser);
+  // user can be the full user object from getUsers()
+  if(user && typeof user === 'object' && user.id) {
+    currentUser = {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      role: user.role,
+      branchId: user.branchId||null,
+      assignedCustomers: user.assignedCustomers||null
+    };
+    setSession(currentUser);
   }
+  // If currentUser already set by login() (no-2FA path), just proceed
   showAppScreen();
   startSessionTimeout();
 }
