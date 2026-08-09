@@ -367,6 +367,7 @@ const TOTP = {
   }
 };
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -1494,26 +1495,25 @@ async function showSetup2FA(userId) {
   const issuer = 'PharmaHub';
   const label  = encodeURIComponent(u.username+'@anmolpharma');
   const otpUrl = `otpauth://totp/${issuer}:${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30`;
-  // QR code via Google Charts API
-  const qrUrl  = `https://chart.googleapis.com/chart?chs=200x200&chld=M|0&cht=qr&chl=${encodeURIComponent(otpUrl)}`;
+
   showModal(`
 <div class="modal-head">
   <h3><i class="ti ti-shield-lock" style="margin-right:6px;color:var(--accent)"></i>Set Up Google Authenticator — ${u.name}</h3>
   <button class="close-btn" onclick="closeModal()">×</button>
 </div>
 <div style="display:flex;gap:20px;flex-wrap:wrap">
-  <div style="text-align:center">
-    <img src="${qrUrl}" style="width:180px;height:180px;border-radius:12px;border:3px solid var(--accent)">
+  <div style="text-align:center;flex-shrink:0">
+    <div id="qr-canvas" style="width:180px;height:180px;border-radius:12px;border:3px solid var(--accent);background:#fff;padding:8px;display:flex;align-items:center;justify-content:center"></div>
     <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">Scan with Google Authenticator</div>
   </div>
   <div style="flex:1;min-width:200px">
     <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">
-      <strong>Step 1</strong> — Install Google Authenticator or Microsoft Authenticator on your phone<br><br>
+      <strong>Step 1</strong> — Install <strong>Google Authenticator</strong> or <strong>Microsoft Authenticator</strong> on your phone<br><br>
       <strong>Step 2</strong> — Tap <strong>+</strong> → <strong>Scan QR code</strong><br><br>
       <strong>Step 3</strong> — Scan the QR code on the left<br><br>
       <strong>Step 4</strong> — Enter the 6-digit code below to confirm setup
     </div>
-    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px">Or enter manually:</div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px">Or enter secret manually:</div>
     <div class="mono" style="font-size:13px;font-weight:700;letter-spacing:3px;padding:8px 12px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border-mid);margin-bottom:14px;word-break:break-all">${secret}</div>
     <div class="form-group">
       <label>Enter 6-digit code to confirm <span style="color:var(--red)">*</span></label>
@@ -1526,6 +1526,25 @@ async function showSetup2FA(userId) {
     </button>
   </div>
 </div>`);
+
+  // Generate QR code after modal renders
+  setTimeout(()=>{
+    const el = document.getElementById('qr-canvas');
+    if(!el) return;
+    el.innerHTML = '';
+    if(typeof QRCode !== 'undefined') {
+      new QRCode(el, {
+        text: otpUrl,
+        width: 164,
+        height: 164,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    } else {
+      el.innerHTML = `<div style="font-size:11px;color:#666;padding:10px">QR library not loaded.<br>Use the secret key below.</div>`;
+    }
+  }, 150);
 }
 
 async function confirmSetup2FA(userId, secret) {
