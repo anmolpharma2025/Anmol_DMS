@@ -1342,7 +1342,7 @@ function login(username, password) {
 
   setSession(u);
   currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId, assignedCustomers:u.assignedCustomers||null };
-  return true;
+  return u; // return full user object so doLogin can check 2FA
 }
 
 function showAdminPinVerify(u) {
@@ -1406,12 +1406,19 @@ function verifyAdminPin(userId) {
     return;
   }
 
-  // PIN correct — complete login
+  // PIN correct — check 2FA before completing login
   window._pendingAdminUser = null;
   cancelAdminPin(); // restore form
-  setSession(u);
-  currentUser = { id:u.id, username:u.username, name:u.name, role:u.role, branchId:u.branchId, assignedCustomers:u.assignedCustomers||null };
-  showAppScreen();
+
+  if(u.twoFAEnabled && u.totpSecret) {
+    // Has 2FA — verify it
+    clearSession(); currentUser = null;
+    showTwoFAOverlay(u);
+  } else {
+    // No 2FA set up yet — force setup
+    clearSession(); currentUser = null;
+    showForced2FASetup(u);
+  }
 }
 
 function cancelAdminPin() {
@@ -1803,19 +1810,15 @@ function doLogin() {
   const result = login(u, p);
   if(result === 'pending') return;
   if(result) {
-    const users = getUsers();
-    const user  = users.find(usr=>usr.username===u);
+    // result is the full user object returned from login()
+    const user = (typeof result === 'object') ? result : getUsers().find(usr=>usr.username===u);
     if(!user) { completeLogin(result); return; }
 
+    clearSession(); currentUser = null; // clear premature session set by login()
+
     if(user.twoFAEnabled && user.totpSecret) {
-      // 2FA already set up — verify code
-      clearSession();
-      currentUser = null;
       showTwoFAOverlay(user);
     } else {
-      // 2FA NOT set up yet — force setup before entering system
-      clearSession();
-      currentUser = null;
       showForced2FASetup(user);
     }
   } else {
