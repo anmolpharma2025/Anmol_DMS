@@ -9695,12 +9695,18 @@ function deductFEFO(itemId, qtyNeeded) {
 // ── LOTS TAB ─────────────────────────────────────────────────────────────────
 function buildLotsTab() {
   const lots = getAllLots();
-  const now = new Date();
-  const today30 = (()=>{const d=new Date(now.getTime()+30*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-  const today60 = (()=>{const d=new Date(now.getTime()+60*864e5);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-  const today90 = new Date(now.getTime()+90*864e5).toISOString().slice(0,10);
-  const expired  = lots.filter(l=>l.expiryDate&&l.expiryDate<today());
-  const exp30    = lots.filter(l=>l.expiryDate&&l.expiryDate>=today()&&l.expiryDate<=today30);
+  const now  = new Date();
+  // Use local date components to avoid UTC shift bug
+  const localOffset = (days) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  };
+  const today30 = localOffset(30);
+  const today60 = localOffset(60);
+  const today90 = localOffset(90);
+  const todayStr = today(); // local today with no UTC shift
+  const expired  = lots.filter(l=>l.expiryDate&&l.expiryDate<todayStr);
+  const exp30    = lots.filter(l=>l.expiryDate&&l.expiryDate>=todayStr&&l.expiryDate<=today30);
   const exp60    = lots.filter(l=>l.expiryDate&&l.expiryDate>today30&&l.expiryDate<=today60);
   const noExpiry = lots.filter(l=>!l.expiryDate);
   const invFilter = window._lotsFilter||'';
@@ -9715,10 +9721,10 @@ function buildLotsTab() {
 
   function expiryBadge(exp) {
     if(!exp) return '<span style="font-size:11px;color:var(--text-tertiary)">No expiry</span>';
-    if(exp<today()) return `<span class="badge" style="background:var(--red-bg);color:var(--red)">EXPIRED</span>`;
-    if(exp<=today30) return `<span class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">Exp in ≤30d</span>`;
-    if(exp<=today60) return `<span class="badge" style="background:rgba(245,158,11,0.12);color:var(--amber)">Exp in ≤60d</span>`;
-    if(exp<=today90) return `<span class="badge" style="background:rgba(245,158,11,0.08);color:var(--amber)">Exp in ≤90d</span>`;
+    if(exp<todayStr)  return `<span class="badge" style="background:var(--red-bg);color:var(--red)">EXPIRED</span>`;
+    if(exp<=today30)  return `<span class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">Exp in ≤30d</span>`;
+    if(exp<=today60)  return `<span class="badge" style="background:rgba(245,158,11,0.12);color:var(--amber)">Exp in ≤60d</span>`;
+    if(exp<=today90)  return `<span class="badge" style="background:rgba(245,158,11,0.08);color:var(--amber)">Exp in ≤90d</span>`;
     return `<span class="badge paid">Good</span>`;
   }
 
@@ -9757,7 +9763,7 @@ function buildLotsTab() {
         <div style="font-size:9px;color:var(--text-tertiary)">${pct}% remaining</div>
       </td>
       <td style="font-size:12px;color:var(--text-secondary)">${l.dateReceived||'—'}</td>
-      <td class="mono" style="font-size:12px;color:${l.expiryDate&&l.expiryDate<today()?'var(--red)':l.expiryDate&&l.expiryDate<=today30?'var(--amber)':'inherit'}">${l.expiryDate||'—'}</td>
+      <td class="mono" style="font-size:12px;color:${l.expiryDate&&l.expiryDate<todayStr?'var(--red)':l.expiryDate&&l.expiryDate<=today30?'var(--amber)':'inherit'}">${l.expiryDate||'—'}</td>
       <td>${expiryBadge(l.expiryDate)}</td>
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditLotModal('${l.itemId}','${l.lotId}')"><i class="ti ti-edit"></i></button>
