@@ -10203,16 +10203,45 @@ function saveEditItem(id) {
   save(); closeModal(); render();
 }
 
+function updateAdjQtyDisplay(itemId, branchId) {
+  const it = state.inventory.find(i=>i.id===itemId);
+  if(!it) return;
+  let qty = it.qty||0;
+  if(branchId) {
+    const bs = getBranchStock(branchId);
+    qty = bs[itemId]||0;
+  }
+  const el = document.querySelector('#modal-inner .kpi-value, #modal-inner [style*="font-size:24px"]');
+  // Update the displayed qty
+  document.querySelectorAll('#modal-inner div[style*="font-size:24px"]').forEach((el,i)=>{
+    if(i===0) el.innerHTML = `${qty} <span style="font-size:13px;color:var(--text-secondary)">${it.unit}</span>`;
+  });
+}
+
 function showAdjustQty(id) {
   const it = state.inventory.find(i=>i.id===id);
   if(!it) return;
-  const branches   = getBranches();
-  const mainId     = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  const myBranchId = currentUser?.branchId || null;
-  const isMain     = !myBranchId || myBranchId === mainId;
+  const branches    = getBranches();
+  const mainId      = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId  = currentUser?.branchId || null;
+  const isMain      = !myBranchId || myBranchId === mainId;
   const branchStock = myBranchId && !isMain ? getBranchStock(myBranchId) : null;
   const displayQty  = branchStock ? (branchStock[id]||0) : (it.qty||0);
   const branchName  = myBranchId ? (branches.find(b=>b.id===myBranchId)?.name||myBranchId) : 'Main';
+
+  // Branch selector for admin/main users
+  const branchSelector = isMain
+    ? `<div class="form-group">
+        <label>Apply to Branch</label>
+        <select id="adj-branch" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)" onchange="updateAdjQtyDisplay('${id}',this.value)">
+          <option value="">— Main Inventory —</option>
+          ${branches.filter(b=>b.id!==mainId).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
+        </select>
+      </div>`
+    : `<div style="padding:6px 10px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-sm);font-size:11px;color:var(--accent);margin-bottom:8px">
+        <i class="ti ti-building-store" style="margin-right:4px"></i>Recording for <strong>${branchName}</strong>
+        <input type="hidden" id="adj-branch" value="${myBranchId}">
+      </div>`;
   showModal(`
 <div class="modal-head"><h3>Adjust: ${it.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
@@ -10225,6 +10254,7 @@ function showAdjustQty(id) {
     <div style="font-size:24px;font-weight:500">${it.reorderLevel} <span style="font-size:13px;color:var(--text-secondary)">${it.unit}</span></div>
   </div>
 </div>
+${branchSelector}
 <div class="form-row">
   <div class="form-group"><label>Movement Type</label><select id="adj-type"><option value="in">Stock In (+)</option><option value="out">Stock Out (−)</option></select></div>
   <div class="form-group"><label>Quantity</label><input type="number" id="adj-qty" placeholder="0" min="1" step="1"></div>
@@ -10234,7 +10264,6 @@ function showAdjustQty(id) {
   <div class="form-group"><label>Date</label><input type="date" id="adj-date" value="${today()}"></div>
 </div>
 <div class="form-group"><label>Notes</label><input type="text" id="adj-note" placeholder="Brief description"></div>
-${myBranchId&&!isMain?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);font-size:12px;color:var(--accent)"><i class="ti ti-building-store" style="margin-right:4px"></i>This adjustment will be recorded for <strong>${branchName}</strong>.</div>`:''}
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveMovement('${id}')">Save Movement</button>
@@ -10255,7 +10284,9 @@ function saveMovement(itemId) {
 
   const branches   = getBranches();
   const mainId     = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  const myBranchId = currentUser?.branchId || null;
+  // Use selected branch from dropdown (admin) or user's assigned branch
+  const selectedBranchId = document.getElementById('adj-branch')?.value || currentUser?.branchId || null;
+  const myBranchId = selectedBranchId || null;
   const isMain     = !myBranchId || myBranchId === mainId;
 
   // Update master item qty
@@ -10402,19 +10433,29 @@ function saveMovement2() {
 }
 
 function showAddItem() {
-  const branches = getBranches();
-  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  const myBranchId = currentUser?.branchId || null;
-  const myBranch = myBranchId ? branches.find(b=>b.id===myBranchId) : null;
-  const isMain = !myBranchId || myBranchId === mainId;
-  const branchBanner = myBranch && !isMain
-    ? `<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--accent)">
+  const branches  = getBranches();
+  const mainId    = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  const myBranchId= currentUser?.branchId || null;
+  const isMain    = !myBranchId || myBranchId === mainId;
+
+  // Branch selector — shown to admin/main users; auto-set for branch users
+  const branchSection = isMain
+    ? `<div class="form-group" style="margin-bottom:14px">
+        <label>Record Opening Stock At Branch <span style="font-size:11px;color:var(--text-tertiary)">(optional)</span></label>
+        <select id="itm-branch" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
+          <option value="">— Main / All Branches —</option>
+          ${branches.filter(b=>b.id!==mainId).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:4px">Leave blank to add to main inventory, or select a branch to assign opening stock there.</div>
+      </div>`
+    : `<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--accent)">
         <i class="ti ti-building-store" style="margin-right:5px"></i>
-        Opening stock will be added to <strong>${myBranch.name}</strong> (your assigned branch).
-      </div>` : '';
+        Opening stock will be added to <strong>${branches.find(b=>b.id===myBranchId)?.name||myBranchId}</strong> (your assigned branch).
+        <input type="hidden" id="itm-branch" value="${myBranchId}">
+      </div>`;
   showModal(`
 <div class="modal-head"><h3>Add Inventory Item</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-${branchBanner}
+${branchSection}
 
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px">
   <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;color:var(--accent);margin-bottom:8px"><i class="ti ti-barcode" style="margin-right:5px"></i>Barcode Scanner</div>
@@ -10536,11 +10577,14 @@ function saveItem() {
   if(!id||!name) { alert('Item code and name are required.'); return; }
   if(state.inventory.find(i=>i.id===id)) { alert('Item code already exists.'); return; }
 
-  const branches = getBranches();
-  const mainId = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
-  const myBranchId = currentUser?.branchId || null;
-  const isMain = !myBranchId || myBranchId === mainId;
 
+  const branches    = getBranches();
+  const mainId      = branches.find(b=>b.type==='main'||b.type==='warehouse')?.id || branches[0]?.id;
+  // Use selected branch from dropdown (admin) or user assigned branch
+  const selectedBranchId = document.getElementById('itm-branch')?.value || currentUser?.branchId || null;
+  const effectiveBranchId = selectedBranchId || null;
+  const isMain = !effectiveBranchId || effectiveBranchId === mainId;
+  const branchName = effectiveBranchId ? branches.find(b=>b.id===effectiveBranchId)?.name||effectiveBranchId : 'Main';
   if(isMain) {
     // Build initial lots array if batch/lot info provided
     const initialLots = [];
@@ -10571,15 +10615,15 @@ function saveItem() {
       if(!state.inventoryTransfers) state.inventoryTransfers = [];
       state.inventoryTransfers.push({
         id: txId, date: today(),
-        fromBranch: mainId, toBranch: myBranchId,
+        fromBranch: mainId, toBranch: effectiveBranchId,
         lines: [{ itemId:id, desc:name, qty, unit }],
         notes: 'Opening stock'+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:''),
         transferredBy: currentUser?.name||'System',
         status: 'received', receivedDate: today(), receivedBy: currentUser?.name||'System'
       });
       if(!state.inventoryMovements) state.inventoryMovements = [];
-      const myBranch = branches.find(b=>b.id===myBranchId);
-      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+(myBranch?.name||myBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
+      const myBranch = branches.find(b=>b.id===effectiveBranchId);
+      state.inventoryMovements.push({ id:'MOV-'+String(state.inventoryMovements.length+1).padStart(3,'0'), date:today(), item:id, type:'in', qty, ref:txId, note:'Opening stock at '+(myBranch?.name||effectiveBranchId)+(batchNo?` — Batch ${batchNo}`:'')+(lotNo?` / Lot ${lotNo}`:'') });
     }
   }
   save();
