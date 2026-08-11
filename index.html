@@ -19157,61 +19157,134 @@ function runAutoGeneratePayroll() {
       }
     });
 
-    let daysWorked  = empAtt.length + leaveDays;
-    let totalNetHrs = 0;
-    let totalOTHrs  = 0;
-    let totalLateMins = 0;
+    // ── COMPUTE SCHEDULED WORKING DAYS IN PERIOD ─────────────────────
+    // Mon–Sat = 1 full day counted, Sunday = 0
+    let scheduledDays = 0;
+    {
+      const [fy,fm,fd] = from.split('-').map(Number);
+      const [ty,tm,td] = to.split('-').map(Number);
+      let cur = new Date(fy,fm-1,fd);
+      const end = new Date(ty,tm-1,td);
+      while(cur<=end) {
+        const dow = cur.getDay();
+        if(dow!==0) scheduledDays += 1; // Mon–Sat = 1 working day each
+        cur.setDate(cur.getDate()+1);
+      }
+    }
+
+    // ── RATES ─────────────────────────────────────────────────────────
+    const monthlySalary    = parseFloat(emp.basicSalary)||0;
+    const semiMonthlyBasic = monthlySalary / 2;     // fixed half-month
+    const dailyRate        = monthlySalary / 26;    // for deductions
+    const satAbsentRate    = dailyRate / 2;          // Saturday absent = half day deduction
+    const hourlyRate       = dailyRate / 8;          // for late/OT
+
+    // ── PROCESS EACH ATTENDANCE RECORD ────────────────────────────────
+    let totalNetHrs    = 0;
+    let totalOTHrs     = 0;
+    let totalLateMins  = 0;
+    let absentDays     = 0;    // full day absences
+    let absentHalfDays = 0;    // saturday absences
 
     empAtt.forEach(a => {
+      const attDate = new Date(a.date+'T00:00');
+      const dow     = attDate.getDay();
+      const isSat   = dow===6;
+
       const inMins  = toMins(a.timeIn);
       const outMins = toMins(a.timeOut);
 
-      if(inMins!==null && outMins!==null && outMins > inMins) {
-        // Raw hours
-        let rawMins = outMins - inMins;
-        // Deduct 1 hour (60 mins) lunch break
-        let netMins = rawMins - 60;
-        if(netMins < 0) netMins = 0;
+      if(isSat) {
+        // Saturday: standard shift 9AM onward
+        // 1 hr lunch deducted, 4 hrs regular, OT beyond 4 hrs
+        if(inMins!==null && outMins!==null && outMins>inMins) {
+          let rawMins = outMins - inMins;
+          let netMins = rawMins - 60;  // deduct 1hr lunch (same as weekday)
+          if(netMins<0) netMins=0;
 
-        // Late deduction — beyond grace period from standard time-in
-        const lateMins = Math.max(0, inMins - (stdInMins + graceMins));
-        totalLateMins += lateMins;
+          // Late on Saturday
+          const lateMins = Math.max(0, inMins-(stdInMins+graceMins));
+          totalLateMins += lateMins;
+          netMins = Math.max(0, netMins-lateMins);
 
-        // Deduct late minutes from net worked time
-        netMins = Math.max(0, netMins - lateMins);
-
-        const regularMins = Math.min(netMins, 480); // max 8 hrs regular
-        const otMins      = Math.max(0, netMins - 480);
-
-        totalNetHrs += regularMins/60;
-        totalOTHrs  += otMins/60;
+          const regularMins = Math.min(netMins, 240); // 4 hrs regular
+          const otMins      = Math.max(0, netMins-240); // OT after 4 hrs
+          totalNetHrs += regularMins/60;
+          totalOTHrs  += otMins/60;
+        } else {
+          totalNetHrs += 4; // manual present Saturday = 4 hrs regular
+        }
       } else {
-        // No time record but marked present (manual) → count as full day
-        totalNetHrs += 8;
+        // Mon–Fri: 9AM–6PM = 8hrs net after 1hr lunch
+        if(inMins!==null && outMins!==null && outMins>inMins) {
+          let rawMins = outMins - inMins;
+          let netMins = rawMins - 60; // deduct 1hr lunch
+          if(netMins<0) netMins=0;
+
+          const lateMins = Math.max(0, inMins-(stdInMins+graceMins));
+          totalLateMins += lateMins;
+          netMins = Math.max(0, netMins-lateMins);
+
+          const regularMins = Math.min(netMins, 480);
+          const otMins      = Math.max(0, netMins-480);
+          totalNetHrs += regularMins/60;
+          totalOTHrs  += otMins/60;
+        } else {
+          totalNetHrs += 8; // manual present = full 8hrs
+        }
       }
     });
 
-    // Leave days = full 8 hrs each
+    // Add leave hours
     totalNetHrs += leaveDays * 8;
 
-    // Rates — 26 day basis
-    const monthlySalary = parseFloat(emp.basicSalary)||0;
-    const dailyRate     = monthlySalary / 26;
-    const hourlyRate    = dailyRate / 8;
+    // ── ABSENCES ──────────────────────────────────────────────────────
+    // Calculate absent days = scheduled working days − (actual present + leave days)
+    // For each day in period that is working, check if there's a record
+    {
+      const [fy,fm,fd] = from.split('-').map(Number);
+      const [ty,tm,td] = to.split('-').map(Number);
+      let cur = new Date(fy,fm-1,fd);
+      const end = new Date(ty,tm-1,td);
+      const attDates = new Set(empAtt.map(a=>a.date));
+      // Build leave date set
+      const leaveDateSet = new Set();
+      approvedLeaves.forEach(l=>{
+        const s=l.startDate||l.from||'', e2=l.endDate||l.to||'';
+        const ls=s<from?from:s, le=e2>to?to:e2;
+        if(ls<=le){
+          let lc=new Date(ls+'T00:00'), le2=new Date(le+'T00:00');
+          while(lc<=le2){
+            leaveDateSet.add(lc.toISOString().slice(0,10));
+            lc.setDate(lc.getDate()+1);
+          }
+        }
+      });
+      while(cur<=end) {
+        const dow=cur.getDay();
+        const ds=`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+        if(dow!==0 && !attDates.has(ds) && !leaveDateSet.has(ds)) {
+          if(dow===6) absentHalfDays++; // Saturday absent = half day deduction
+          else absentDays++;            // Mon–Fri absent = full day deduction
+        }
+        cur.setDate(cur.getDate()+1);
+      }
+    }
 
-    // Semi-monthly basic = 13 days if full period, else actual days
-    const basicPay      = parseFloat((daysWorked * dailyRate).toFixed(2));
+    // ── DEDUCTIONS FROM BASIC ─────────────────────────────────────────
+    // Mon–Fri absent = full daily rate deducted
+    // Saturday absent = half daily rate deducted
+    const absentDeduction = parseFloat(
+      (absentDays * dailyRate + absentHalfDays * satAbsentRate).toFixed(2)
+    );
+    const lateDeduction   = parseFloat((totalLateMins/60 * hourlyRate).toFixed(2));
+    const otPay              = parseFloat((totalOTHrs * hourlyRate * otMult).toFixed(2));
+    const allowance          = parseFloat(emp.allowance||0)/2;
 
-    // OT pay
-    const otPay         = parseFloat((totalOTHrs * hourlyRate * otMult).toFixed(2));
-
-    // Late deduction
-    const lateDeduction = parseFloat((totalLateMins/60 * hourlyRate).toFixed(2));
-
-    // Allowance (from employee record if any)
-    const allowance     = parseFloat(emp.allowance||0)/2; // semi-monthly
-
-    const grossPay      = parseFloat(Math.max(0, basicPay + otPay + allowance - lateDeduction).toFixed(2));
+    // Basic = half monthly − absent deductions − late deductions + OT
+    const basicPay  = parseFloat(Math.max(0, semiMonthlyBasic - absentDeduction - lateDeduction).toFixed(2));
+    const daysWorked= empAtt.length + leaveDays;
+    const grossPay  = parseFloat((basicPay + otPay + allowance).toFixed(2));
 
     // Gov't deductions — 50% each payroll
     // SSS: 2025 table — employee share ~4.5% capped
@@ -19240,11 +19313,12 @@ function runAutoGeneratePayroll() {
     const netPay          = parseFloat(Math.max(0, grossPay-totalDeductions).toFixed(2));
 
     return {
-      emp, daysWorked, leaveDays,
+      emp, daysWorked, leaveDays, scheduledDays,
+      absentDays, absentHalfDays, absentDeduction,
       totalHours: parseFloat(totalNetHrs.toFixed(2)),
       totalOT:    parseFloat(totalOTHrs.toFixed(2)),
       totalLateMins, lateDeduction,
-      basicPay, otPay, allowance, grossPay,
+      semiMonthlyBasic, basicPay, otPay, allowance, grossPay,
       sss, philhealth, pagibig, withholdingTax,
       totalDeductions, netPay,
       dailyRate, hourlyRate,
@@ -19270,14 +19344,15 @@ function runAutoGeneratePayroll() {
 <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:900px">
   <thead style="position:sticky;top:0;z-index:1"><tr style="background:var(--bg-card)">
     <th style="padding:7px 8px;text-align:left;border-bottom:2px solid var(--border-mid)">Employee</th>
-    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Days</th>
-    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Net Hrs</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Sched.</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Present</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Absent</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--amber)">OT Hrs</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Late</th>
-    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Basic</th>
-    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">OT Pay</th>
-    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Allow.</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">½-Mo Basic</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Abs.Ded.</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Late Ded.</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--amber)">OT Pay</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);font-weight:700">Gross</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">SSS</th>
     <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">PH</th>
@@ -19291,14 +19366,17 @@ function runAutoGeneratePayroll() {
       <div style="font-size:10px;color:var(--text-tertiary)">${r.emp.department||''} · ₱${Number(r.dailyRate).toLocaleString('en-PH',{maximumFractionDigits:0})}/day</div>
       ${r.leaveDays>0?`<div style="font-size:10px;color:var(--green)">${r.leaveDays} leave day(s) paid</div>`:''}
     </td>
+    <td style="padding:6px;text-align:right;color:var(--text-secondary)">${r.scheduledDays}</td>
     <td style="padding:6px;text-align:right">${r.daysWorked}</td>
-    <td style="padding:6px;text-align:right">${r.totalHours.toFixed(1)}</td>
-    <td style="padding:6px;text-align:right;color:var(--amber)">${r.totalOT.toFixed(1)}</td>
-    <td style="padding:6px;text-align:right;color:${r.totalLateMins>0?'var(--red)':'var(--text-tertiary)'}">${r.totalLateMins>0?r.totalLateMins+'min':'—'}</td>
-    <td style="padding:6px;text-align:right">${fmt(r.basicPay)}</td>
-    <td style="padding:6px;text-align:right;color:var(--amber)">${r.otPay>0?fmt(r.otPay):'—'}</td>
-    <td style="padding:6px;text-align:right">${r.allowance>0?fmt(r.allowance):'—'}</td>
+    <td style="padding:6px;text-align:right;color:${(r.absentDays+r.absentHalfDays)>0?'var(--red)':'var(--text-tertiary)'}">
+      ${r.absentDays>0?r.absentDays+'d':''}${r.absentHalfDays>0?` ${r.absentHalfDays}×½`:''}${(r.absentDays+r.absentHalfDays)===0?'—':''}
+    </td>
+    <td style="padding:6px;text-align:right;color:var(--amber)">${r.totalOT>0?r.totalOT.toFixed(1):'—'}</td>
+    <td style="padding:6px;text-align:right;color:${r.totalLateMins>0?'var(--red)':'var(--text-tertiary)'}">${r.totalLateMins>0?r.totalLateMins+'m':'—'}</td>
+    <td style="padding:6px;text-align:right">${fmt(r.semiMonthlyBasic)}</td>
+    <td style="padding:6px;text-align:right;color:var(--red)">${r.absentDeduction>0?'-'+fmt(r.absentDeduction):'—'}</td>
     <td style="padding:6px;text-align:right;color:var(--red)">${r.lateDeduction>0?'-'+fmt(r.lateDeduction):'—'}</td>
+    <td style="padding:6px;text-align:right;color:var(--amber)">${r.otPay>0?fmt(r.otPay):'—'}</td>
     <td style="padding:6px;text-align:right;font-weight:600">${fmt(r.grossPay)}</td>
     <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.sss)}</td>
     <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.philhealth)}</td>
@@ -19308,7 +19386,7 @@ function runAutoGeneratePayroll() {
   </tr>`).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-secondary);font-weight:700;font-size:12px">
-    <td colspan="9" style="padding:8px">TOTAL — ${rows.length} employees</td>
+    <td colspan="10" style="padding:8px">TOTAL — ${rows.length} employees</td>
     <td style="padding:8px;text-align:right">${fmt(totalGross)}</td>
     <td colspan="3" style="padding:8px"></td>
     <td style="padding:8px;text-align:right;color:var(--red);font-size:11px">${fmt(totalDed)}</td>
@@ -19338,11 +19416,16 @@ function confirmAutoGeneratePayroll(rows) {
     const id = 'PR-'+String(state.payrolls.length+1).padStart(4,'0');
     state.payrolls.push({
       id, empId:r.emp.id, empName:r.emp.name, period:r.period, payDate:r.payDate, payType:r.payType,
+      scheduledDays:  r.scheduledDays||0,
       daysWorked:     r.daysWorked,
       leaveDaysPaid:  r.leaveDays||0,
+      absentDays:     r.absentDays||0,
+      absentHalfDays: r.absentHalfDays||0,
+      absentDeduction:r.absentDeduction||0,
       totalHours:     r.totalHours,
       totalOTHours:   r.totalOT,
       totalLateMins:  r.totalLateMins||0,
+      semiMonthlyBasic: r.semiMonthlyBasic||0,
       basicPay:       r.basicPay,
       overtime:       r.otPay,
       allowance:      r.allowance||0,
