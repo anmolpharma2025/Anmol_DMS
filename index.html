@@ -18974,180 +18974,379 @@ function showAutoGeneratePayroll() {
   const emps = (state.employees||[]).filter(e=>e.status==='active');
   if(!emps.length) { alert('No active employees found.'); return; }
 
-  // Get available cutoffs from attendance dates
-  const attDates = [...new Set((state.attendance||[]).map(a=>a.date))].sort();
+  // Semi-monthly period detection
+  // 1st payroll: cut-off 26th–10th → payday 15th
+  // 2nd payroll: cut-off 11th–25th → payday 30th
   const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth();
-  // Default: current semi-monthly period
-  const day = now.getDate();
-  const defaultFrom = day<=15
-    ? `${y}-${String(m+1).padStart(2,'0')}-01`
-    : `${y}-${String(m+1).padStart(2,'0')}-16`;
-  const defaultTo   = day<=15
-    ? `${y}-${String(m+1).padStart(2,'0')}-15`
-    : new Date(y,m+1,0).toISOString().slice(0,10);
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  let defaultFrom, defaultTo, defaultPayDate, defaultPeriodLabel;
+
+  if(d >= 11 && d <= 25) {
+    // We are in 11th–25th window → generate for this cut-off → pay 30th
+    defaultFrom = `${y}-${String(m+1).padStart(2,'0')}-11`;
+    defaultTo   = `${y}-${String(m+1).padStart(2,'0')}-25`;
+    const lastDay = new Date(y, m+1, 0).getDate();
+    defaultPayDate = `${y}-${String(m+1).padStart(2,'0')}-${lastDay}`;
+    defaultPeriodLabel = `2nd (${defaultFrom} to ${defaultTo})`;
+  } else {
+    // We are in 26th–10th window → generate for this cut-off → pay 15th
+    let fromY = y, fromM = m;
+    if(d <= 10) { fromM = m-1; if(fromM<0){fromM=11;fromY=y-1;} }
+    const fromLastDay = new Date(fromY, fromM+1, 0).getDate();
+    defaultFrom = `${fromY}-${String(fromM+1).padStart(2,'0')}-26`;
+    defaultTo   = `${y}-${String(m+1).padStart(2,'0')}-10`;
+    defaultPayDate = `${y}-${String(m+1).padStart(2,'0')}-15`;
+    defaultPeriodLabel = `1st (${defaultFrom} to ${defaultTo})`;
+  }
 
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-robot" style="margin-right:6px;color:var(--accent)"></i>Auto-Generate Payroll from Attendance</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:12px 14px;border:1px solid var(--border-light);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
+<div class="modal-head"><h3><i class="ti ti-robot" style="margin-right:6px;color:var(--accent)"></i>Auto-Generate Semi-Monthly Payroll</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+
+<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:16px;font-size:12px">
   <i class="ti ti-info-circle" style="margin-right:5px;color:var(--accent)"></i>
-  Calculates pay based on actual hours worked from attendance records. Overtime hours are paid at 1.25× the hourly rate.
+  <strong>Semi-Monthly Setup:</strong> Schedule 9AM–6PM · 8 hrs/day · 15-min grace period · 1-hr lunch deducted · 26-day basis · OT rate 1.25× · Gov't deductions split 50/50
 </div>
+
+<div class="form-row">
+  <div class="form-group">
+    <label>Payroll Type</label>
+    <select id="ag-paytype" onchange="updatePayrollPeriod()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
+      <option value="1st">1st Payroll — Cut-off 26th to 10th → Pay 15th</option>
+      <option value="2nd">2nd Payroll — Cut-off 11th to 25th → Pay 30th</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Reference Month/Year</label>
+    <input type="month" id="ag-month" value="${y}-${String(m+1).padStart(2,'0')}" onchange="updatePayrollPeriod()">
+  </div>
+</div>
+
 <div class="form-row">
   <div class="form-group"><label>Period From</label><input type="date" id="ag-from" value="${defaultFrom}"></div>
   <div class="form-group"><label>Period To</label><input type="date" id="ag-to" value="${defaultTo}"></div>
 </div>
+
 <div class="form-row">
-  <div class="form-group"><label>Pay Date</label><input type="date" id="ag-paydate" value="${today()}"></div>
-  <div class="form-group"><label>OT Rate Multiplier</label>
+  <div class="form-group"><label>Pay Date</label><input type="date" id="ag-paydate" value="${defaultPayDate}"></div>
+  <div class="form-group">
+    <label>OT Rate</label>
     <select id="ag-ot-rate" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
-      <option value="1.25">1.25× (Standard)</option>
-      <option value="1.30">1.30×</option>
-      <option value="1.50">1.50× (Holiday)</option>
-      <option value="2.00">2.00× (Rest Day OT)</option>
+      <option value="1.25">1.25× — Regular OT (PH Labor Code)</option>
+      <option value="1.30">1.30× — Rest Day OT</option>
+      <option value="1.50">1.50× — Special Holiday OT</option>
+      <option value="2.00">2.00× — Regular Holiday OT</option>
     </select>
   </div>
 </div>
+
+<div class="form-row">
+  <div class="form-group">
+    <label>Late Grace Period (mins)</label>
+    <input type="number" id="ag-grace" value="15" min="0" max="60" style="width:100%">
+  </div>
+  <div class="form-group">
+    <label>Standard Time In</label>
+    <input type="time" id="ag-timein" value="09:00" style="width:100%">
+  </div>
+</div>
+
 <div style="margin-bottom:14px">
   <label style="display:block;font-size:12px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Employees to Include</label>
-  <div style="max-height:200px;overflow-y:auto;padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary)">
+  <div style="max-height:180px;overflow-y:auto;padding:8px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary)">
     <label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px;font-weight:600;cursor:pointer;border-bottom:1px solid var(--border-light);margin-bottom:4px">
       <input type="checkbox" id="ag-all" checked onchange="document.querySelectorAll('.ag-emp-chk').forEach(c=>c.checked=this.checked)"> Select All
     </label>
     ${emps.map(e=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;cursor:pointer">
       <input type="checkbox" class="ag-emp-chk" value="${e.id}" checked>
       <span style="flex:1">${e.name}</span>
-      <span style="font-size:11px;color:var(--text-secondary)">${e.department||''} · ₱${Number(e.basicSalary||0).toLocaleString()}/mo</span>
+      <span style="font-size:11px;color:var(--text-secondary)">${e.department||''} · ₱${Number(e.basicSalary||0).toLocaleString('en-PH')}/mo</span>
     </label>`).join('')}
   </div>
 </div>
+
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" onclick="runAutoGeneratePayroll()"><i class="ti ti-robot"></i>Preview & Generate</button>
+  <button class="btn primary" onclick="runAutoGeneratePayroll()"><i class="ti ti-eye"></i>Preview Payroll</button>
 </div>`);
+
+  // Auto-select correct paytype
+  const selType = document.getElementById('ag-paytype');
+  if(selType) selType.value = (d>=11&&d<=25) ? '2nd' : '1st';
+}
+
+function updatePayrollPeriod() {
+  const type  = document.getElementById('ag-paytype')?.value;
+  const month = document.getElementById('ag-month')?.value; // YYYY-MM
+  if(!type||!month) return;
+  const [y,m] = month.split('-').map(Number);
+
+  let from, to, payDate;
+  if(type==='1st') {
+    // Cut-off: 26th of prev month to 10th of this month → pay 15th
+    const prevM = m===1?12:m-1;
+    const prevY = m===1?y-1:y;
+    from    = `${prevY}-${String(prevM).padStart(2,'0')}-26`;
+    to      = `${y}-${String(m).padStart(2,'0')}-10`;
+    payDate = `${y}-${String(m).padStart(2,'0')}-15`;
+  } else {
+    // Cut-off: 11th to 25th of this month → pay last day
+    from    = `${y}-${String(m).padStart(2,'0')}-11`;
+    to      = `${y}-${String(m).padStart(2,'0')}-25`;
+    const lastDay = new Date(y,m,0).getDate();
+    payDate = `${y}-${String(m).padStart(2,'0')}-${lastDay}`;
+  }
+  document.getElementById('ag-from').value    = from;
+  document.getElementById('ag-to').value      = to;
+  document.getElementById('ag-paydate').value = payDate;
 }
 
 function runAutoGeneratePayroll() {
-  const from    = document.getElementById('ag-from')?.value;
-  const to      = document.getElementById('ag-to')?.value;
-  const payDate = document.getElementById('ag-paydate')?.value;
-  const otMult  = parseFloat(document.getElementById('ag-ot-rate')?.value)||1.25;
+  const from      = document.getElementById('ag-from')?.value;
+  const to        = document.getElementById('ag-to')?.value;
+  const payDate   = document.getElementById('ag-paydate')?.value;
+  const payType   = document.getElementById('ag-paytype')?.value||'1st';
+  const otMult    = parseFloat(document.getElementById('ag-ot-rate')?.value)||1.25;
+  const graceMins = parseInt(document.getElementById('ag-grace')?.value)||15;
+  const stdTimeIn = document.getElementById('ag-timein')?.value||'09:00';
+
   if(!from||!to||!payDate) { alert('Please fill all date fields.'); return; }
   if(from>to) { alert('From date must be before To date.'); return; }
 
   const selectedEmpIds = [...document.querySelectorAll('.ag-emp-chk:checked')].map(c=>c.value);
   if(!selectedEmpIds.length) { alert('Please select at least one employee.'); return; }
 
-  const period = `${from} to ${to}`;
-  const emps   = (state.employees||[]).filter(e=>selectedEmpIds.includes(e.id));
-  const att    = (state.attendance||[]).filter(a=>a.date>=from&&a.date<=to&&a.status==='present');
+  const period   = `${from} to ${to}`;
+  const emps     = (state.employees||[]).filter(e=>selectedEmpIds.includes(e.id));
+  const allAtt   = (state.attendance||[]);
 
-  // Build preview data per employee
+  // Helper — parse HH:MM to minutes
+  const toMins = t => { if(!t) return null; const [h,m]=(t+'').split(':').map(Number); return h*60+m; };
+  const stdInMins = toMins(stdTimeIn); // 9:00 = 540
+
   const rows = emps.map(emp => {
-    const empAtt = att.filter(a=>a.empId===emp.id);
-    const daysWorked   = empAtt.length;
-    const totalHours   = empAtt.reduce((s,a)=>s+(parseFloat(a.hoursWorked)||0),0);
-    const totalOT      = empAtt.reduce((s,a)=>s+(parseFloat(a.overtimeHours)||0),0);
+    // Match attendance records — by empId or empName
+    const empAtt = allAtt.filter(a=>{
+      if(a.date<from||a.date>to) return false;
+      if(a.status!=='present') return false;
+      return a.empId===emp.id || a.empId===emp.name ||
+        (a.empName&&a.empName.trim().toLowerCase()===emp.name.trim().toLowerCase());
+    });
 
-    // Daily rate from monthly salary (÷22 working days)
-    const dailyRate   = (emp.basicSalary||0) / 22;
-    // For semi-monthly: basic = days worked × daily rate
-    const basicPay    = parseFloat((daysWorked * dailyRate).toFixed(2));
-    // Hourly rate for OT
-    const hourlyRate  = dailyRate / 8;
-    const otPay       = parseFloat((totalOT * hourlyRate * otMult).toFixed(2));
-    const grossPay    = basicPay + otPay;
+    // Also count approved with-pay leaves as present
+    const approvedLeaves = (state.leaves||[]).filter(l=>{
+      const s = l.startDate||l.from||'';
+      const e2= l.endDate||l.to||'';
+      if(l.status!=='approved') return false;
+      if(l.withPay===false) return false;
+      return (l.empId===emp.id||l.empId===emp.name||(l.empName&&l.empName===emp.name)) &&
+        s<=to && e2>=from;
+    });
 
-    // Gov't deductions (semi-monthly basis)
-    const monthly      = emp.basicSalary||0;
-    const sss          = parseFloat((Math.min(Math.max(monthly*0.045,135),900)/2).toFixed(2));
-    const philhealth   = parseFloat((monthly*0.025/2).toFixed(2));
-    const pagibig      = 50;
-    // Withholding tax (annual gross ÷ 24 periods)
-    const annualGross  = grossPay * 24;
+    // Count leave days within period
+    let leaveDays = 0;
+    approvedLeaves.forEach(l=>{
+      const s = l.startDate||l.from||'';
+      const e2= l.endDate||l.to||'';
+      const ls = s<from?from:s;
+      const le = e2>to?to:e2;
+      if(ls<=le) {
+        const [sy,sm,sd]=ls.split('-').map(Number);
+        const [ey,em,ed]=le.split('-').map(Number);
+        const d1=new Date(sy,sm-1,sd), d2=new Date(ey,em-1,ed);
+        leaveDays += Math.round((d2-d1)/864e5)+1;
+      }
+    });
+
+    let daysWorked  = empAtt.length + leaveDays;
+    let totalNetHrs = 0;
+    let totalOTHrs  = 0;
+    let totalLateMins = 0;
+
+    empAtt.forEach(a => {
+      const inMins  = toMins(a.timeIn);
+      const outMins = toMins(a.timeOut);
+
+      if(inMins!==null && outMins!==null && outMins > inMins) {
+        // Raw hours
+        let rawMins = outMins - inMins;
+        // Deduct 1 hour (60 mins) lunch break
+        let netMins = rawMins - 60;
+        if(netMins < 0) netMins = 0;
+
+        // Late deduction — beyond grace period from standard time-in
+        const lateMins = Math.max(0, inMins - (stdInMins + graceMins));
+        totalLateMins += lateMins;
+
+        // Deduct late minutes from net worked time
+        netMins = Math.max(0, netMins - lateMins);
+
+        const regularMins = Math.min(netMins, 480); // max 8 hrs regular
+        const otMins      = Math.max(0, netMins - 480);
+
+        totalNetHrs += regularMins/60;
+        totalOTHrs  += otMins/60;
+      } else {
+        // No time record but marked present (manual) → count as full day
+        totalNetHrs += 8;
+      }
+    });
+
+    // Leave days = full 8 hrs each
+    totalNetHrs += leaveDays * 8;
+
+    // Rates — 26 day basis
+    const monthlySalary = parseFloat(emp.basicSalary)||0;
+    const dailyRate     = monthlySalary / 26;
+    const hourlyRate    = dailyRate / 8;
+
+    // Semi-monthly basic = 13 days if full period, else actual days
+    const basicPay      = parseFloat((daysWorked * dailyRate).toFixed(2));
+
+    // OT pay
+    const otPay         = parseFloat((totalOTHrs * hourlyRate * otMult).toFixed(2));
+
+    // Late deduction
+    const lateDeduction = parseFloat((totalLateMins/60 * hourlyRate).toFixed(2));
+
+    // Allowance (from employee record if any)
+    const allowance     = parseFloat(emp.allowance||0)/2; // semi-monthly
+
+    const grossPay      = parseFloat(Math.max(0, basicPay + otPay + allowance - lateDeduction).toFixed(2));
+
+    // Gov't deductions — 50% each payroll
+    // SSS: 2025 table — employee share ~4.5% capped
+    const monthly       = monthlySalary;
+    const sssMonthly    = Math.min(Math.max(monthly*0.045, 135), 900);
+    const sss           = parseFloat((sssMonthly/2).toFixed(2));
+
+    // PhilHealth: 5% of basic monthly salary, employee pays 2.5%
+    const phMonthly     = Math.min(monthly*0.025, 1800);
+    const philhealth    = parseFloat((phMonthly/2).toFixed(2));
+
+    // Pag-IBIG: ₱100/month
+    const pagibig       = 50; // ₱50 per payroll = ₱100/month
+
+    // Withholding tax — BIR 2023 table (annualized)
+    const annualGross   = grossPay * 24;
     let wtaxAnnual = 0;
-    if(annualGross>800000)      wtaxAnnual=130000+(annualGross-800000)*0.32;
-    else if(annualGross>400000) wtaxAnnual=22500+(annualGross-400000)*0.25;
-    else if(annualGross>250000) wtaxAnnual=(annualGross-250000)*0.15;
-    const withholdingTax = parseFloat(Math.max(0,wtaxAnnual/24).toFixed(2));
-    const totalDeductions = sss+philhealth+pagibig+withholdingTax;
-    const netPay = parseFloat(Math.max(0,grossPay-totalDeductions).toFixed(2));
+    if(annualGross > 8000000)      wtaxAnnual = 2202500 + (annualGross-8000000)*0.35;
+    else if(annualGross > 2000000) wtaxAnnual =  402500 + (annualGross-2000000)*0.32;
+    else if(annualGross > 800000)  wtaxAnnual =   130000 + (annualGross-800000)*0.30;
+    else if(annualGross > 400000)  wtaxAnnual =    22500 + (annualGross-400000)*0.25;
+    else if(annualGross > 250000)  wtaxAnnual =            (annualGross-250000)*0.15;
+    const withholdingTax  = parseFloat(Math.max(0, wtaxAnnual/24).toFixed(2));
 
-    return { emp, daysWorked, totalHours, totalOT, basicPay, otPay, grossPay, sss, philhealth, pagibig, withholdingTax, totalDeductions, netPay, dailyRate, hourlyRate };
+    const totalDeductions = parseFloat((sss+philhealth+pagibig+withholdingTax).toFixed(2));
+    const netPay          = parseFloat(Math.max(0, grossPay-totalDeductions).toFixed(2));
+
+    return {
+      emp, daysWorked, leaveDays,
+      totalHours: parseFloat(totalNetHrs.toFixed(2)),
+      totalOT:    parseFloat(totalOTHrs.toFixed(2)),
+      totalLateMins, lateDeduction,
+      basicPay, otPay, allowance, grossPay,
+      sss, philhealth, pagibig, withholdingTax,
+      totalDeductions, netPay,
+      dailyRate, hourlyRate,
+      period, payDate, payType
+    };
   });
 
-  // Tag rows with period and paydate for confirm function
-  rows.forEach(r=>{ r.period=period; r.payDate=payDate; });
-
-  // Show preview modal
-  const totalNet   = rows.reduce((s,r)=>s+r.netPay,0);
+  // Summary totals
   const totalGross = rows.reduce((s,r)=>s+r.grossPay,0);
-
-  const rowsJson = JSON.stringify(rows).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;');
+  const totalNet   = rows.reduce((s,r)=>s+r.netPay,0);
+  const totalDed   = rows.reduce((s,r)=>s+r.totalDeductions,0);
 
   showModal(`
-<div class="modal-head"><h3><i class="ti ti-check" style="margin-right:6px;color:var(--green)"></i>Payroll Preview — ${period}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div style="overflow-x:auto;margin-bottom:14px">
-<table style="width:100%;border-collapse:collapse;font-size:12px">
-  <thead><tr style="background:var(--bg-secondary)">
-    <th style="padding:7px 10px;text-align:left;font-size:11px;white-space:nowrap">Employee</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Days</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Hours</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">OT Hrs</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Basic Pay</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">OT Pay</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Gross</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">SSS</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">PhilHealth</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">Pag-IBIG</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap">W/Tax</th>
-    <th style="padding:7px 6px;text-align:right;white-space:nowrap;color:var(--green)">Net Pay</th>
+<div class="modal-head"><h3><i class="ti ti-eye" style="margin-right:6px;color:var(--accent)"></i>Payroll Preview — ${period}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+  <div class="kpi" style="background:var(--bg-secondary)"><div class="kpi-label">Employees</div><div class="kpi-value" style="color:var(--accent)">${rows.length}</div></div>
+  <div class="kpi" style="background:var(--bg-secondary)"><div class="kpi-label">Total Gross</div><div class="kpi-value">${fmt(totalGross)}</div></div>
+  <div class="kpi" style="background:var(--bg-secondary)"><div class="kpi-label">Total Net Pay</div><div class="kpi-value" style="color:var(--green)">${fmt(totalNet)}</div></div>
+</div>
+
+<div style="overflow-x:auto;margin-bottom:14px;max-height:400px;overflow-y:auto">
+<table style="width:100%;border-collapse:collapse;font-size:11px;min-width:900px">
+  <thead style="position:sticky;top:0;z-index:1"><tr style="background:var(--bg-card)">
+    <th style="padding:7px 8px;text-align:left;border-bottom:2px solid var(--border-mid)">Employee</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Days</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Net Hrs</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--amber)">OT Hrs</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Late</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Basic</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">OT Pay</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">Allow.</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--red)">Late Ded.</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);font-weight:700">Gross</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">SSS</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">PH</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">PI</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid)">W/Tax</th>
+    <th style="padding:7px 6px;text-align:right;border-bottom:2px solid var(--border-mid);color:var(--green);font-weight:700">Net Pay</th>
   </tr></thead>
   <tbody>
   ${rows.map(r=>`<tr style="border-bottom:1px solid var(--border-light)">
-    <td style="padding:7px 10px;font-weight:500">${r.emp.name}<div style="font-size:10px;color:var(--text-tertiary)">${r.emp.department||''}</div></td>
-    <td style="padding:7px 6px;text-align:right">${r.daysWorked}</td>
-    <td style="padding:7px 6px;text-align:right">${r.totalHours.toFixed(1)}</td>
-    <td style="padding:7px 6px;text-align:right;color:var(--amber)">${r.totalOT.toFixed(1)}</td>
-    <td style="padding:7px 6px;text-align:right">${fmt(r.basicPay)}</td>
-    <td style="padding:7px 6px;text-align:right;color:var(--amber)">${fmt(r.otPay)}</td>
-    <td style="padding:7px 6px;text-align:right;font-weight:600">${fmt(r.grossPay)}</td>
-    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.sss)}</td>
-    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.philhealth)}</td>
-    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.pagibig)}</td>
-    <td style="padding:7px 6px;text-align:right;font-size:11px">${fmt(r.withholdingTax)}</td>
-    <td style="padding:7px 6px;text-align:right;font-weight:700;color:var(--green)">${fmt(r.netPay)}</td>
+    <td style="padding:6px 8px;font-weight:500">${r.emp.name}
+      <div style="font-size:10px;color:var(--text-tertiary)">${r.emp.department||''} · ₱${Number(r.dailyRate).toLocaleString('en-PH',{maximumFractionDigits:0})}/day</div>
+      ${r.leaveDays>0?`<div style="font-size:10px;color:var(--green)">${r.leaveDays} leave day(s) paid</div>`:''}
+    </td>
+    <td style="padding:6px;text-align:right">${r.daysWorked}</td>
+    <td style="padding:6px;text-align:right">${r.totalHours.toFixed(1)}</td>
+    <td style="padding:6px;text-align:right;color:var(--amber)">${r.totalOT.toFixed(1)}</td>
+    <td style="padding:6px;text-align:right;color:${r.totalLateMins>0?'var(--red)':'var(--text-tertiary)'}">${r.totalLateMins>0?r.totalLateMins+'min':'—'}</td>
+    <td style="padding:6px;text-align:right">${fmt(r.basicPay)}</td>
+    <td style="padding:6px;text-align:right;color:var(--amber)">${r.otPay>0?fmt(r.otPay):'—'}</td>
+    <td style="padding:6px;text-align:right">${r.allowance>0?fmt(r.allowance):'—'}</td>
+    <td style="padding:6px;text-align:right;color:var(--red)">${r.lateDeduction>0?'-'+fmt(r.lateDeduction):'—'}</td>
+    <td style="padding:6px;text-align:right;font-weight:600">${fmt(r.grossPay)}</td>
+    <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.sss)}</td>
+    <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.philhealth)}</td>
+    <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.pagibig)}</td>
+    <td style="padding:6px;text-align:right;font-size:10px">${fmt(r.withholdingTax)}</td>
+    <td style="padding:6px;text-align:right;font-weight:700;color:var(--green)">${fmt(r.netPay)}</td>
   </tr>`).join('')}
   </tbody>
-  <tfoot><tr style="background:var(--bg-secondary);font-weight:700">
-    <td colspan="6" style="padding:8px 10px">TOTAL (${rows.length} employees)</td>
-    <td style="padding:8px 6px;text-align:right">${fmt(totalGross)}</td>
-    <td colspan="4" style="padding:8px 6px"></td>
-    <td style="padding:8px 6px;text-align:right;color:var(--green)">${fmt(totalNet)}</td>
+  <tfoot><tr style="background:var(--bg-secondary);font-weight:700;font-size:12px">
+    <td colspan="9" style="padding:8px">TOTAL — ${rows.length} employees</td>
+    <td style="padding:8px;text-align:right">${fmt(totalGross)}</td>
+    <td colspan="3" style="padding:8px"></td>
+    <td style="padding:8px;text-align:right;color:var(--red);font-size:11px">${fmt(totalDed)}</td>
+    <td style="padding:8px;text-align:right;color:var(--green)">${fmt(totalNet)}</td>
   </tr></tfoot>
 </table>
 </div>
+
+<div style="padding:10px 14px;background:var(--amber-bg,rgba(245,158,11,0.08));border:1px solid var(--amber);border-radius:var(--radius-md);font-size:12px;color:var(--amber);margin-bottom:14px">
+  <i class="ti ti-edit" style="margin-right:5px"></i>
+  <strong>OT hours can be adjusted</strong> after generation — open each payslip and edit OT hours before releasing.
+</div>
+
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="showAutoGeneratePayroll()">← Back</button>
-  <button class="btn primary" onclick="confirmAutoGeneratePayroll(JSON.parse(decodeURIComponent(this.dataset.rows)));" data-rows="${encodeURIComponent(JSON.stringify(rows))}"><i class="ti ti-check"></i>Confirm & Save ${rows.length} Payroll Records</button>
-</div>`);
-}
+  <button class="btn primary" onclick="confirmAutoGeneratePayroll(JSON.parse(decodeURIComponent(this.dataset.rows)))" data-rows="${encodeURIComponent(JSON.stringify(rows))}">
+    <i class="ti ti-check"></i>Confirm & Save ${rows.length} Payroll Records
+  </button>
+</div>`);}
 
 function confirmAutoGeneratePayroll(rows) {
   if(!state.payrolls) state.payrolls=[];
-  let created=0;
+  let created=0, skipped=0;
   rows.forEach(r=>{
     const alreadyExists = state.payrolls.some(p=>p.empId===r.emp.id&&p.period===r.period);
-    if(alreadyExists) return;
+    if(alreadyExists){ skipped++; return; }
     const id = 'PR-'+String(state.payrolls.length+1).padStart(4,'0');
     state.payrolls.push({
-      id, empId:r.emp.id, period:r.period, payDate:r.payDate,
+      id, empId:r.emp.id, empName:r.emp.name, period:r.period, payDate:r.payDate, payType:r.payType,
       daysWorked:     r.daysWorked,
-      totalHours:     parseFloat((r.totalHours||0).toFixed(2)),
-      totalOTHours:   parseFloat((r.totalOT||0).toFixed(2)),
+      leaveDaysPaid:  r.leaveDays||0,
+      totalHours:     r.totalHours,
+      totalOTHours:   r.totalOT,
+      totalLateMins:  r.totalLateMins||0,
       basicPay:       r.basicPay,
       overtime:       r.otPay,
-      allowance:      0,
+      allowance:      r.allowance||0,
+      lateDeduction:  r.lateDeduction||0,
       grossPay:       r.grossPay,
       sss:            r.sss,
       philhealth:     r.philhealth,
@@ -19155,6 +19354,8 @@ function confirmAutoGeneratePayroll(rows) {
       withholdingTax: r.withholdingTax,
       totalDeductions:r.totalDeductions,
       netPay:         r.netPay,
+      dailyRate:      r.dailyRate,
+      hourlyRate:     r.hourlyRate,
       status:         'pending',
       source:         'auto_attendance',
       createdAt:      new Date().toISOString(),
@@ -19162,10 +19363,10 @@ function confirmAutoGeneratePayroll(rows) {
     });
     created++;
   });
-  if(!created){ alert('All selected employees already have payroll records for this period.'); return; }
-  auditLog('CREATE','Payroll',rows[0]?.period||'',{description:`Auto-generated ${created} payroll records`});
-  save(); closeModal(); render();
-  alert(`✅ Generated ${created} payroll record${created!==1?'s':''}.\n\nReview and click "Release" when ready to finalize.`);
+  save();
+  closeModal();
+  render();
+  toast(`✅ ${created} payroll record${created!==1?'s':''} generated${skipped?` (${skipped} skipped — already exists)`:''}. Review and release from Payroll tab.`);
 }
 
 function showGeneratePayroll() {
