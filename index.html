@@ -18983,6 +18983,7 @@ function renderPayroll(c, ta) {
       </td>
       <td><div class="action-btns">
         ${p.status==='pending'?`<button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="releasePayroll('${p.id}')"><i class="ti ti-check"></i>Release</button>`:''}
+        ${p.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditPayroll('${p.id}')"><i class="ti ti-edit"></i></button>`:''}
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printPayslip('${p.id}')"><i class="ti ti-printer"></i></button>
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="emailPayslip('${p.id}')" title="Email payslip"><i class="ti ti-mail"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePayroll('${p.id}')"><i class="ti ti-trash"></i></button>
@@ -19006,6 +19007,193 @@ function renderPayroll(c, ta) {
     <td colspan="2"></td>
   </tr></tfoot>
 </table>`;
+}
+
+function showEditPayroll(id) {
+  if(!requireAdmin('edit payroll')) return;
+  const p = (state.payrolls||[]).find(p=>p.id===id);
+  if(!p) return;
+  if(p.status==='released') { alert('Released payroll cannot be edited.'); return; }
+  const emp = (state.employees||[]).find(e=>e.id===p.empId)||{name:p.empName||p.empId};
+
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Payroll — ${emp.name} · ${p.period}</h3>
+  <button class="close-btn" onclick="closeModal()">×</button>
+</div>
+
+<div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:8px 14px;margin-bottom:16px;font-size:12px;color:var(--accent)">
+  <i class="ti ti-info-circle" style="margin-right:5px"></i>
+  Editing <strong>${p.id}</strong> · Changes will recalculate gross and net pay automatically.
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+
+  <!-- EARNINGS -->
+  <div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">Earnings</div>
+    <div class="form-group">
+      <label>½-Month Basic Pay</label>
+      <input type="number" id="ep-basic" value="${p.semiMonthlyBasic||p.basicPay||0}" min="0" step="0.01" style="font-weight:600">
+    </div>
+    <div class="form-group">
+      <label>Absent Deduction <span style="font-size:11px;color:var(--text-tertiary)">(will be subtracted)</span></label>
+      <input type="number" id="ep-absent-ded" value="${p.absentDeduction||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Late Deduction <span style="font-size:11px;color:var(--text-tertiary)">(will be subtracted)</span></label>
+      <input type="number" id="ep-late-ded" value="${p.lateDeduction||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Overtime Pay</label>
+      <input type="number" id="ep-ot" value="${p.overtime||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Allowances</label>
+      <input type="number" id="ep-allow" value="${p.allowance||0}" min="0" step="0.01">
+    </div>
+    <!-- Custom earnings -->
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;margin-top:4px">Additional Earnings:</div>
+    <div id="ep-extra-earnings">
+      ${(p.earnings||[]).map((e,i)=>`
+      <div class="form-row" style="gap:6px;margin-bottom:6px" id="ep-earn-${i}">
+        <input type="text" placeholder="Label" value="${e.label||''}" id="ep-earn-lbl-${i}" style="flex:2">
+        <input type="number" placeholder="Amount" value="${e.amount||0}" id="ep-earn-amt-${i}" min="0" step="0.01" style="flex:1">
+        <button class="btn danger" style="padding:4px 8px" onclick="document.getElementById('ep-earn-${i}').remove()"><i class="ti ti-x"></i></button>
+      </div>`).join('')}
+    </div>
+    <button class="btn" style="font-size:11px;padding:4px 10px;margin-top:2px" onclick="addEpEarningRow()"><i class="ti ti-plus"></i> Add Earning</button>
+  </div>
+
+  <!-- DEDUCTIONS -->
+  <div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">Government Deductions</div>
+    <div class="form-group">
+      <label>SSS Contribution</label>
+      <input type="number" id="ep-sss" value="${p.sss||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>PhilHealth</label>
+      <input type="number" id="ep-ph" value="${p.philhealth||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Pag-IBIG</label>
+      <input type="number" id="ep-pi" value="${p.pagibig||0}" min="0" step="0.01">
+    </div>
+    <div class="form-group">
+      <label>Withholding Tax</label>
+      <input type="number" id="ep-wtax" value="${p.withholdingTax||0}" min="0" step="0.01">
+    </div>
+    <!-- Custom deductions -->
+    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;margin-top:4px">Additional Deductions:</div>
+    <div id="ep-extra-deductions">
+      ${(p.deductions||[]).map((d,i)=>`
+      <div class="form-row" style="gap:6px;margin-bottom:6px" id="ep-ded-${i}">
+        <input type="text" placeholder="Label" value="${d.label||''}" id="ep-ded-lbl-${i}" style="flex:2">
+        <input type="number" placeholder="Amount" value="${d.amount||0}" id="ep-ded-amt-${i}" min="0" step="0.01" style="flex:1">
+        <button class="btn danger" style="padding:4px 8px" onclick="document.getElementById('ep-ded-${i}').remove()"><i class="ti ti-x"></i></button>
+      </div>`).join('')}
+    </div>
+    <button class="btn" style="font-size:11px;padding:4px 10px;margin-top:2px" onclick="addEpDeductionRow()"><i class="ti ti-plus"></i> Add Deduction</button>
+  </div>
+</div>
+
+<div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px">
+  <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Pay Date</div>
+  <input type="date" id="ep-paydate" value="${p.payDate||''}" style="border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);padding:6px 10px;font-size:13px;font-family:var(--font)">
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn primary" onclick="saveEditPayroll('${id}')"><i class="ti ti-check"></i>Save Changes</button>
+</div>`);
+}
+
+let _epEarnIdx = 100, _epDedIdx = 100;
+
+function addEpEarningRow() {
+  const idx = _epEarnIdx++;
+  const el = document.createElement('div');
+  el.className='form-row'; el.id=`ep-earn-${idx}`; el.style.cssText='gap:6px;margin-bottom:6px';
+  el.innerHTML=`<input type="text" placeholder="e.g. Bonus" id="ep-earn-lbl-${idx}" style="flex:2">
+    <input type="number" placeholder="0.00" id="ep-earn-amt-${idx}" min="0" step="0.01" style="flex:1">
+    <button class="btn danger" style="padding:4px 8px" onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button>`;
+  document.getElementById('ep-extra-earnings')?.appendChild(el);
+  document.getElementById(`ep-earn-lbl-${idx}`)?.focus();
+}
+
+function addEpDeductionRow() {
+  const idx = _epDedIdx++;
+  const el = document.createElement('div');
+  el.className='form-row'; el.id=`ep-ded-${idx}`; el.style.cssText='gap:6px;margin-bottom:6px';
+  el.innerHTML=`<input type="text" placeholder="e.g. Loan" id="ep-ded-lbl-${idx}" style="flex:2">
+    <input type="number" placeholder="0.00" id="ep-ded-amt-${idx}" min="0" step="0.01" style="flex:1">
+    <button class="btn danger" style="padding:4px 8px" onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button>`;
+  document.getElementById('ep-extra-deductions')?.appendChild(el);
+  document.getElementById(`ep-ded-lbl-${idx}`)?.focus();
+}
+
+function saveEditPayroll(id) {
+  const p = (state.payrolls||[]).find(p=>p.id===id);
+  if(!p) return;
+
+  const basic       = parseFloat(document.getElementById('ep-basic')?.value)||0;
+  const absentDed   = parseFloat(document.getElementById('ep-absent-ded')?.value)||0;
+  const lateDed     = parseFloat(document.getElementById('ep-late-ded')?.value)||0;
+  const ot          = parseFloat(document.getElementById('ep-ot')?.value)||0;
+  const allow       = parseFloat(document.getElementById('ep-allow')?.value)||0;
+  const sss         = parseFloat(document.getElementById('ep-sss')?.value)||0;
+  const ph          = parseFloat(document.getElementById('ep-ph')?.value)||0;
+  const pi          = parseFloat(document.getElementById('ep-pi')?.value)||0;
+  const wtax        = parseFloat(document.getElementById('ep-wtax')?.value)||0;
+  const payDate     = document.getElementById('ep-paydate')?.value||p.payDate;
+
+  // Collect custom earnings rows
+  const earnings = [];
+  document.querySelectorAll('#ep-extra-earnings .form-row').forEach(row=>{
+    const lbl = row.querySelector('input[type="text"]')?.value?.trim();
+    const amt = parseFloat(row.querySelector('input[type="number"]')?.value)||0;
+    if(lbl && amt>0) earnings.push({label:lbl, amount:amt});
+  });
+
+  // Collect custom deduction rows
+  const deductions = [];
+  document.querySelectorAll('#ep-extra-deductions .form-row').forEach(row=>{
+    const lbl = row.querySelector('input[type="text"]')?.value?.trim();
+    const amt = parseFloat(row.querySelector('input[type="number"]')?.value)||0;
+    if(lbl && amt>0) deductions.push({label:lbl, amount:amt});
+  });
+
+  // Recalculate
+  const extraEarnings = earnings.reduce((s,e)=>s+e.amount,0);
+  const extraDed      = deductions.reduce((s,d)=>s+d.amount,0);
+  const grossPay      = parseFloat(Math.max(0, basic - absentDed - lateDed + ot + allow + extraEarnings).toFixed(2));
+  const totalDed      = parseFloat((sss + ph + pi + wtax + extraDed).toFixed(2));
+  const netPay        = parseFloat(Math.max(0, grossPay - totalDed).toFixed(2));
+
+  // Update payroll record
+  p.semiMonthlyBasic = basic;
+  p.basicPay         = basic;
+  p.absentDeduction  = absentDed;
+  p.lateDeduction    = lateDed;
+  p.overtime         = ot;
+  p.allowance        = allow;
+  p.earnings         = earnings;
+  p.sss              = sss;
+  p.philhealth       = ph;
+  p.pagibig          = pi;
+  p.withholdingTax   = wtax;
+  p.deductions       = deductions;
+  p.grossPay         = grossPay;
+  p.totalDeductions  = totalDed;
+  p.netPay           = netPay;
+  p.payDate          = payDate;
+  p.editedBy         = currentUser?.name||'';
+  p.editedAt         = new Date().toISOString();
+
+  auditLog('UPDATE','Payroll',id,{description:`Edited payroll ${id} — Net: ${fmt(netPay)}`});
+  save(); closeModal(); render();
+  toast(`✅ Payroll ${id} updated. Net Pay: ${fmt(netPay)}`);
 }
 
 function releasePayroll(id) { if(!requireAdmin("release payroll")) return; const p=(state.payrolls||[]).find(p=>p.id===id); if(p){ p.status='released'; p.releasedBy=currentUser?.name; p.releasedAt=new Date().toISOString().slice(0,16).replace('T',' '); stampUpdate(p); auditLog('UPDATE','Payroll',p.id,{description:`Released payroll ${p.id} — Net: ${fmt(p.netPay||0)}`}); } save(); render(); }
