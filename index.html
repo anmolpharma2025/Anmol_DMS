@@ -4609,28 +4609,26 @@ ${creditLines.length === 0
 }
 
 function commitJeAccount(fieldId, onchangeFn) {
-  setTimeout(() => {
-    const input = document.getElementById(fieldId+'-input');
-    const drop  = document.getElementById(fieldId+'-drop');
-    if(!input) return;
-    hideJeDropdown(fieldId);
-    const q = (input.value||'').toLowerCase().trim();
-    if(!q) return;
-    const visible = drop ? Array.from(drop.children).filter(d=>d.style.display!=='none') : [];
-    const exact = state.accounts.find(a=>{
-      const id = String(a.id||'').toLowerCase();
-      const name = String(a.name||'').toLowerCase();
-      return (id+' – '+name)===q || id===q || name===q;
-    });
-    const pick = exact || (visible.length===1 ? state.accounts.find(a=>String(a.id)===visible[0].dataset.id) : null);
-    if(pick && onchangeFn) {
-      input.value = `${pick.id} – ${pick.name}`;
-      const [field, idx] = onchangeFn.split('|');
-      updateJeLine(parseInt(idx), field, String(pick.id));
-      updateJeTotals();
-      updateNetDrawn();
-    }
-  }, 150);
+  const input = document.getElementById(fieldId+'-input');
+  const drop  = document.getElementById(fieldId+'-drop');
+  if(!input) return;
+  hideJeDropdown(fieldId);
+  const q = (input.value||'').toLowerCase().trim();
+  if(!q) return;
+  const visible = drop ? Array.from(drop.children).filter(d=>d.style.display!=='none') : [];
+  const exact = state.accounts.find(a=>{
+    const id = String(a.id||'').toLowerCase();
+    const name = String(a.name||'').toLowerCase();
+    return (id+' – '+name)===q || (id+' - '+name)===q || id===q || name===q;
+  });
+  const pick = exact || (visible.length===1 ? state.accounts.find(a=>String(a.id)===visible[0].dataset.id) : null);
+  if(pick && onchangeFn) {
+    input.value = `${pick.id} – ${pick.name}`;
+    const [field, idx] = onchangeFn.split('|');
+    updateJeLine(parseInt(idx), field, String(pick.id));
+    updateJeTotals();
+    updateNetDrawn();
+  }
 }
 
 function showJeDropdown(fieldId) {
@@ -4761,20 +4759,37 @@ function nextRefNum(prefix, collection, field='id') {
 }
 
 function saveJournal() {
-  // Synchronously read all account search inputs into jeLines before processing
+  // Force-commit all account search inputs synchronously before processing
+  // This handles the race condition where blur/commitJeAccount hasn't fired yet
   jeLines.forEach((l, i) => {
-    const debitInp  = document.getElementById(`jeline-debit-${i}-input`) || document.getElementById(`jeline-dr-${i}-input`);
-    const creditInp = document.getElementById(`jeline-credit-${i}-input`) || document.getElementById(`jeline-cr-${i}-input`);
-    [{ inp: debitInp, field: 'debit' }, { inp: creditInp, field: 'credit' }].forEach(({inp, field}) => {
-      if(!inp || !inp.value.trim()) return;
-      const q = inp.value.trim().toLowerCase();
-      const match = state.accounts.find(a =>
-        (String(a.id||'')+' – '+String(a.name||'')).toLowerCase() === q ||
-        String(a.id||'').toLowerCase() === q ||
-        String(a.name||'').toLowerCase() === q ||
-        (String(a.id||'')+' - '+String(a.name||'')).toLowerCase() === q
-      );
-      if(match) l[field] = String(match.id);
+    ['debit','credit'].forEach(field => {
+      const fieldId = field==='debit'
+        ? `jeline-debit-${i}`
+        : `jeline-credit-${i}`;
+      const altId = field==='debit'
+        ? `jeline-dr-${i}`
+        : `jeline-cr-${i}`;
+      const input = document.getElementById(fieldId+'-input') ||
+                    document.getElementById(altId+'-input');
+      if(!input || !input.value.trim()) return;
+      const q = input.value.trim().toLowerCase();
+      // Try exact match first, then partial match
+      const match = state.accounts.find(a => {
+        const id   = String(a.id||'').toLowerCase();
+        const name = String(a.name||'').toLowerCase();
+        return (id+' – '+name)===q ||
+               (id+' - '+name)===q ||
+               id===q || name===q;
+      }) || state.accounts.find(a => {
+        const id   = String(a.id||'').toLowerCase();
+        const name = String(a.name||'').toLowerCase();
+        return name.includes(q) || q.includes(id) || q.includes(name);
+      });
+      if(match) {
+        l[field] = String(match.id);
+        // Update display
+        input.value = `${match.id} – ${match.name}`;
+      }
     });
   });
 
