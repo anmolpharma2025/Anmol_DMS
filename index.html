@@ -18921,28 +18921,68 @@ function renderPayroll(c, ta) {
   <div class="kpi"><div class="kpi-label"><i class="ti ti-check"></i>Released</div><div class="kpi-value">${released} / ${payrolls.length}</div></div>
 </div>
 <table>
-  <thead><tr><th>ID</th><th>Period</th><th>Employee</th><th style="text-align:right">Days</th><th style="text-align:right">Hours</th><th style="text-align:right">Basic</th><th style="text-align:right">OT</th><th style="text-align:right">Allow.</th><th style="text-align:right">Gross</th><th style="text-align:right">SSS</th><th style="text-align:right">PhilHealth</th><th style="text-align:right">Pag-IBIG</th><th style="text-align:right">W/Tax</th><th style="text-align:right">Net Pay</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr>
+    <th>ID</th><th>Period</th><th>Employee</th>
+    <th style="text-align:right">Days</th>
+    <th style="text-align:right">OT Hrs</th>
+    <th style="text-align:right">½-Mo Basic</th>
+    <th style="text-align:right;color:var(--red)">Abs.Ded.</th>
+    <th style="text-align:right;color:var(--red)">Late Ded.</th>
+    <th style="text-align:right;color:var(--amber)">OT Pay</th>
+    <th style="text-align:right">Allow.</th>
+    <th style="text-align:right;font-weight:700">Gross Pay</th>
+    <th style="text-align:right">SSS</th>
+    <th style="text-align:right">PhilHealth</th>
+    <th style="text-align:right">Pag-IBIG</th>
+    <th style="text-align:right">W/Tax</th>
+    <th style="text-align:right;font-weight:700">Net Pay</th>
+    <th>Status</th><th>Actions</th>
+  </tr></thead>
   <tbody>
   ${payrolls.map(p=>{
     const emp = emps.find(e=>e.id===p.empId);
+    const hasAbsent = (p.absentDeduction||0)>0;
+    const hasLate   = (p.lateDeduction||0)>0;
+    // Custom earnings/deductions from manual entry
+    const extraEarnings = (p.earnings||[]).filter(e=>e.label&&e.amount>0);
+    const extraDed      = (p.deductions||[]).filter(d=>d.label&&d.amount>0);
     return `<tr>
-      <td class="mono">${p.id}</td>
-      <td style="font-size:12px;color:var(--text-secondary)">${p.period}</td>
-      <td style="font-weight:500">${emp?emp.name:p.empId}</td>
-      <td style="text-align:right;font-size:12px">${p.daysWorked||'—'}</td>
-      <td style="text-align:right;font-size:12px">${p.totalHours?parseFloat(p.totalHours).toFixed(1):'—'}</td>
-      <td style="text-align:right">${fmt(p.basicPay||0)}</td>
-      <td style="text-align:right;color:var(--amber)">${fmt(p.overtime||0)}</td>
-      <td style="text-align:right">${fmt(p.allowance||0)}</td>
-      <td style="text-align:right;font-weight:500">${fmt(p.grossPay||0)}</td>
-      <td style="text-align:right;font-size:12px">${fmt(p.sss||0)}</td>
-      <td style="text-align:right;font-size:12px">${fmt(p.philhealth||0)}</td>
-      <td style="text-align:right;font-size:12px">${fmt(p.pagibig||0)}</td>
-      <td style="text-align:right;font-size:12px">${fmt(p.withholdingTax||0)}</td>
-      <td style="text-align:right;font-weight:600;color:var(--green)">${fmt(p.netPay||0)}</td>
-      <td><span class="badge ${p.status==='released'?'paid':'pending'}">${p.status}${p.source==='auto_attendance'?' <i class="ti ti-robot" title="Auto-generated from attendance" style="font-size:10px"></i>':''}</span></td>
+      <td class="mono" style="font-size:11px">${p.id}
+        ${p.source==='auto_attendance'?'<div style="font-size:9px;color:var(--accent)"><i class="ti ti-robot"></i> Auto</div>':''}
+      </td>
+      <td style="font-size:11px;color:var(--text-secondary)">${p.period}<br>
+        <span style="font-size:10px">Pay: ${p.payDate||'—'}</span>
+      </td>
+      <td style="font-weight:500">${emp?emp.name:(p.empName||p.empId)}
+        <div style="font-size:10px;color:var(--text-tertiary)">${emp?.department||''}</div>
+      </td>
+      <td style="text-align:right;font-size:12px">
+        ${p.daysWorked||0}
+        ${p.absentDays||p.absentHalfDays?`<div style="font-size:10px;color:var(--red)">-${p.absentDays||0}d${p.absentHalfDays?` -${p.absentHalfDays}×½`:''}abs</div>`:''}
+      </td>
+      <td style="text-align:right;font-size:12px;color:var(--amber)">${p.totalOTHours>0?parseFloat(p.totalOTHours).toFixed(1)+'h':'—'}</td>
+      <td style="text-align:right">${fmt(p.semiMonthlyBasic||p.basicPay||0)}</td>
+      <td style="text-align:right;color:${hasAbsent?'var(--red)':'var(--text-tertiary)'}">${hasAbsent?'-'+fmt(p.absentDeduction):'—'}</td>
+      <td style="text-align:right;color:${hasLate?'var(--red)':'var(--text-tertiary)'}">${hasLate?'-'+fmt(p.lateDeduction)+'<div style="font-size:9px">${p.totalLateMins||0}min</div>':'—'}</td>
+      <td style="text-align:right;color:var(--amber)">
+        ${fmt(p.overtime||0)}
+        ${extraEarnings.map(e=>`<div style="font-size:10px;color:var(--green)">+${fmt(e.amount)} ${e.label}</div>`).join('')}
+      </td>
+      <td style="text-align:right">${(p.allowance||0)>0?fmt(p.allowance||0):'—'}</td>
+      <td style="text-align:right;font-weight:600">${fmt(p.grossPay||0)}</td>
+      <td style="text-align:right;font-size:11px">${fmt(p.sss||0)}</td>
+      <td style="text-align:right;font-size:11px">${fmt(p.philhealth||0)}</td>
+      <td style="text-align:right;font-size:11px">${fmt(p.pagibig||0)}</td>
+      <td style="text-align:right;font-size:11px">
+        ${fmt(p.withholdingTax||0)}
+        ${extraDed.map(d=>`<div style="font-size:10px;color:var(--red)">-${fmt(d.amount)} ${d.label}</div>`).join('')}
+      </td>
+      <td style="text-align:right;font-weight:700;color:var(--green)">${fmt(p.netPay||0)}</td>
+      <td><span class="badge ${p.status==='released'?'paid':'pending'}">${p.status}</span>
+        ${p.releasedBy?`<div style="font-size:9px;color:var(--text-tertiary)">by ${p.releasedBy}</div>`:''}
+      </td>
       <td><div class="action-btns">
-        ${p.status==='pending'?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="releasePayroll('${p.id}')">Release</button>`:''}
+        ${p.status==='pending'?`<button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="releasePayroll('${p.id}')"><i class="ti ti-check"></i>Release</button>`:''}
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="printPayslip('${p.id}')"><i class="ti ti-printer"></i></button>
         <button class="btn" style="padding:3px 8px;font-size:11px" onclick="emailPayslip('${p.id}')" title="Email payslip"><i class="ti ti-mail"></i></button>
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deletePayroll('${p.id}')"><i class="ti ti-trash"></i></button>
@@ -18951,11 +18991,18 @@ function renderPayroll(c, ta) {
   }).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-card);font-weight:600">
-    <td colspan="6" style="padding:8px 12px">Totals</td>
-    <td style="text-align:right;padding:8px 12px">${fmt(totalGross)}</td>
-    <td colspan="3" style="padding:8px 12px"></td>
+    <td colspan="5" style="padding:8px 12px">Totals (${payrolls.length} records)</td>
+    <td style="text-align:right;padding:8px 12px">${fmt(payrolls.reduce((s,p)=>s+(p.semiMonthlyBasic||p.basicPay||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;color:var(--red)">${fmt(payrolls.reduce((s,p)=>s+(p.absentDeduction||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;color:var(--red)">${fmt(payrolls.reduce((s,p)=>s+(p.lateDeduction||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;color:var(--amber)">${fmt(payrolls.reduce((s,p)=>s+(p.overtime||0),0))}</td>
     <td style="padding:8px 12px"></td>
-    <td style="text-align:right;padding:8px 12px;color:var(--green)">${fmt(totalNet)}</td>
+    <td style="text-align:right;padding:8px 12px;font-weight:700">${fmt(totalGross)}</td>
+    <td style="text-align:right;padding:8px 12px;font-size:11px">${fmt(payrolls.reduce((s,p)=>s+(p.sss||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;font-size:11px">${fmt(payrolls.reduce((s,p)=>s+(p.philhealth||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;font-size:11px">${fmt(payrolls.reduce((s,p)=>s+(p.pagibig||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;font-size:11px">${fmt(payrolls.reduce((s,p)=>s+(p.withholdingTax||0),0))}</td>
+    <td style="text-align:right;padding:8px 12px;color:var(--green);font-weight:700">${fmt(totalNet)}</td>
     <td colspan="2"></td>
   </tr></tfoot>
 </table>`;
@@ -20484,8 +20531,21 @@ function printPayslip(id) {
   const emp = (state.employees||[]).find(e=>e.id===p.empId)||{ name:p.empId, position:'', department:'', sssNo:'', tinNo:'' };
   const logo = localStorage.getItem(LOGO_KEY)||'';
   const cp   = getCompanyProfile();
-  const earnings  = p.customEarnings  || [{ label:'Basic Pay',amount:p.basicPay||0 },{ label:'Overtime Pay',amount:p.overtime||0 },{ label:'Allowances',amount:p.allowance||0 }];
-  const deductions = p.customDeductions || [{ label:'SSS Contribution',amount:p.sss||0 },{ label:'PhilHealth',amount:p.philhealth||0 },{ label:'Pag-IBIG',amount:p.pagibig||0 },{ label:'Withholding Tax',amount:p.withholdingTax||0 }];
+  const earnings = [
+    { label:'Basic Pay (½ month)',    amount: p.semiMonthlyBasic||p.basicPay||0 },
+    ...(p.absentDeduction>0 ? [{ label:`Absent Deduction (${(p.absentDays||0)}d${p.absentHalfDays?` + ${p.absentHalfDays}×½d`:''})`, amount: -(p.absentDeduction||0) }] : []),
+    ...(p.lateDeduction>0   ? [{ label:`Late Deduction (${p.totalLateMins||0} mins)`, amount: -(p.lateDeduction||0) }] : []),
+    ...(p.overtime>0        ? [{ label:`Overtime Pay (${parseFloat(p.totalOTHours||0).toFixed(2)} hrs)`, amount: p.overtime||0 }] : []),
+    ...(p.allowance>0       ? [{ label:'Allowances', amount: p.allowance||0 }] : []),
+    ...((p.earnings||[]).filter(e=>e.label&&e.amount).map(e=>({ label:e.label, amount:e.amount }))),
+  ];
+  const deductions = [
+    { label:'SSS Contribution',  amount: p.sss||0 },
+    { label:'PhilHealth',        amount: p.philhealth||0 },
+    { label:'Pag-IBIG',          amount: p.pagibig||0 },
+    { label:'Withholding Tax',   amount: p.withholdingTax||0 },
+    ...((p.deductions||[]).filter(d=>d.label&&d.amount).map(d=>({ label:d.label, amount:d.amount }))),
+  ];
   const win = window.open('','_blank','width=760,height:660');
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payslip ${p.id}</title>
 <style>
@@ -20535,7 +20595,14 @@ function printPayslip(id) {
 <table>
   <thead><tr><th colspan="2">Earnings</th></tr></thead>
   <tbody>
-    ${earnings.map(e=>`<tr><td>${e.label}</td><td>₱${(+(e.amount||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>`).join('')}
+    ${earnings.map(e=>{
+      const isNeg = e.amount<0;
+      const val = Math.abs(e.amount);
+      return `<tr>
+        <td style="${isNeg?'color:#dc2626':''}">${e.label}</td>
+        <td style="${isNeg?'color:#dc2626':''}">${isNeg?'− ':''} ₱${val.toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+      </tr>`;
+    }).join('')}
     <tr class="total-row"><td>Gross Pay</td><td>₱${(+(p.grossPay||0)).toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>
   </tbody>
 </table>
