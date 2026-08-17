@@ -11595,11 +11595,12 @@ function exportToExcel() {
   const wb = XLSX.utils.book_new();
   const emps = state.employees || [];
 
-  // Helper to add sheet
+  // Helper to add sheet — always writes even if empty (shows headers)
   function addSheet(name, rows) {
-    if(!rows||rows.length===0) return;
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, name);
+    const ws = rows && rows.length > 0
+      ? XLSX.utils.json_to_sheet(rows)
+      : XLSX.utils.aoa_to_sheet([['No records found']]);
+    XLSX.utils.book_append_sheet(wb, ws, name.substring(0, 31)); // Excel 31 char limit
   }
 
   addSheet('Invoices', state.invoices.map(i=>({
@@ -11645,12 +11646,32 @@ function exportToExcel() {
     'VAT Base':p.vatBase||p.amount,'Input VAT':p.vat||0,'Total Amount':p.amount,
     'Status':p.status,'Notes':p.notes||''
   })));
-  addSheet('Expenses', (state.expenses||[]).map(e=>({
-    'Expense ID':e.id,'Date':e.date,'Vendor':e.vendor,'Category':e.category,
-    'Type':e.expType||'admin','VAT Base':e.vatBase||e.amount,
-    'Input VAT':e.vat||0,'Total Amount':e.amount,'VAT Type':e.vatType||'',
-    'Status':e.status
-  })));
+  // Expenses — combine state.expenses AND disbursement journal expense entries
+  const expAccounts = (state.accounts||[]).filter(a=>a.type==='Expense');
+  const dvExpLines  = (state.journal||[]).filter(j=>{
+    if(!j.debit || j.type!=='disbursement') return false;
+    return expAccounts.some(a=>String(a.id)===String(j.debit));
+  });
+  const dvExpRows = dvExpLines.map(j=>{
+    const acc = expAccounts.find(a=>String(a.id)===String(j.debit));
+    return {
+      'Expense ID': j.group||j.id, 'Date': j.date||'',
+      'Vendor': j.payee||'', 'Category': acc?.name||'',
+      'Type': 'disbursement', 'VAT Base': j.amount||0,
+      'Input VAT': 0, 'Total Amount': j.amount||0,
+      'VAT Type': '', 'Status': 'paid', 'Source': 'Disbursement Journal',
+      'Reference': j.ref||'', 'Description': j.desc||''
+    };
+  });
+  const stateExpRows = (state.expenses||[]).map(e=>({
+    'Expense ID': e.id, 'Date': e.date||'', 'Vendor': e.vendor||'',
+    'Category': e.category||'', 'Type': e.expType||'admin',
+    'VAT Base': e.vatBase||e.amount||0, 'Input VAT': e.vat||0,
+    'Total Amount': e.amount||0, 'VAT Type': e.vatType||'',
+    'Status': e.status||'', 'Source': 'Expense Entry', 'Reference': '',
+    'Description': ''
+  }));
+  addSheet('Expenses', [...stateExpRows, ...dvExpRows]);
   addSheet('Journal', (state.journal||[]).map(j=>({
     'Entry ID':j.id,'Group ID':j.group||j.id,'Date':j.date,'Reference':j.ref||'',
     'Type':j.type||'general','Description':j.desc||'',
