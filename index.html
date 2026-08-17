@@ -6712,6 +6712,7 @@ function renderReports(c, ta) {
   <div class="tab ${currentReport==='vat'?'active':''}" onclick="switchReport('vat',this)">VAT Summary</div>
   <div class="tab ${currentReport==='ar'?'active':''}" onclick="switchReport('ar',this)">A/R Aging</div>
   <div class="tab ${currentReport==='payroll'?'active':''}" onclick="switchReport('payroll',this)">Payroll Summary</div>
+  <div class="tab ${currentReport==='expenses'?'active':''}" onclick="switchReport('expenses',this)"><i class="ti ti-receipt-2" style="font-size:11px;margin-right:3px"></i>Expense Report</div>
   <div class="tab ${currentReport==='bir_sales'?'active':''}" onclick="switchReport('bir_sales',this)" style="color:var(--accent)"><i class="ti ti-receipt" style="font-size:11px;margin-right:3px"></i>BIR Sales Book</div>
   <div class="tab ${currentReport==='bir_purchases'?'active':''}" onclick="switchReport('bir_purchases',this)" style="color:var(--accent)"><i class="ti ti-receipt" style="font-size:11px;margin-right:3px"></i>BIR Purchases Book</div>
   <div class="tab ${currentReport==='bir_receipts'?'active':''}" onclick="switchReport('bir_receipts',this)" style="color:var(--accent)"><i class="ti ti-cash" style="font-size:11px;margin-right:3px"></i>Cash Receipts Book</div>
@@ -7002,7 +7003,147 @@ function showReport(type) {
   const sectionHeader = (label) =>
     `<tr><td colspan="2" style="padding:8px 0 4px;font-weight:600;color:var(--text-primary)">${label}</td></tr>`;
 
-  if (type === 'pnl') {
+  if(type==='expenses') {
+    const cp = getCompanyProfile();
+
+    // Category breakdown
+    const byCat = {};
+    allExpInPeriod.forEach(e=>{
+      const cat = e.category||'Uncategorized';
+      if(!byCat[cat]) byCat[cat]={items:[],total:0,vat:0};
+      byCat[cat].items.push(e);
+      byCat[cat].total += (e.vatBase!=null?e.vatBase:e.amount)||0;
+      byCat[cat].vat   += e.vat||0;
+    });
+
+    // Type breakdown
+    const byType = {};
+    allExpInPeriod.forEach(e=>{
+      const t = e.expType==='operating'?'Operating':'Admin & General';
+      byType[t] = (byType[t]||0) + ((e.vatBase!=null?e.vatBase:e.amount)||0);
+    });
+
+    // Vendor breakdown
+    const byVendor = {};
+    allExpInPeriod.forEach(e=>{
+      const v = e.vendor||'—';
+      byVendor[v] = (byVendor[v]||0) + ((e.vatBase!=null?e.vatBase:e.amount)||0);
+    });
+
+    const totalAmount = allExpInPeriod.reduce((s,e)=>s+((e.vatBase!=null?e.vatBase:e.amount)||0),0);
+    const totalVAT    = allExpInPeriod.reduce((s,e)=>s+(e.vat||0),0);
+    const totalGross  = totalAmount + totalVAT;
+
+    rb.innerHTML = `<div class="report-section" style="max-width:960px">
+      <div class="report-section-title">Expense Report — ${periodLabel}</div>
+
+      <!-- KPI Summary -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+        <div class="kpi"><div class="kpi-label">Total Entries</div><div class="kpi-value" style="color:var(--accent)">${allExpInPeriod.length}</div></div>
+        <div class="kpi"><div class="kpi-label">Net Amount (excl. VAT)</div><div class="kpi-value">${fmt(totalAmount)}</div></div>
+        <div class="kpi"><div class="kpi-label">Input VAT</div><div class="kpi-value" style="color:var(--amber)">${fmt(totalVAT)}</div></div>
+        <div class="kpi"><div class="kpi-label">Total Gross</div><div class="kpi-value neg">${fmt(totalGross)}</div></div>
+      </div>
+
+      <!-- Category + Type Summary side by side -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+        <!-- By Category -->
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">By Category</div>
+          <table class="report-table" style="font-size:12px">
+            <thead><tr><th>Category</th><th style="text-align:right">Net Amount</th><th style="text-align:right">VAT</th><th style="text-align:right">%</th></tr></thead>
+            <tbody>
+              ${Object.entries(byCat).sort((a,b)=>b[1].total-a[1].total).map(([cat,v])=>`
+              <tr>
+                <td style="padding:5px 8px">${cat}</td>
+                <td style="text-align:right;padding:5px 8px">${fmt(v.total)}</td>
+                <td style="text-align:right;padding:5px 8px;color:var(--amber)">${fmt(v.vat)}</td>
+                <td style="text-align:right;padding:5px 8px;color:var(--text-secondary)">${totalAmount>0?(v.total/totalAmount*100).toFixed(1):'0'}%</td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr class="report-total">
+              <td>TOTAL</td>
+              <td style="text-align:right">${fmt(totalAmount)}</td>
+              <td style="text-align:right;color:var(--amber)">${fmt(totalVAT)}</td>
+              <td></td>
+            </tr></tfoot>
+          </table>
+        </div>
+        <!-- By Type -->
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">By Type</div>
+          <table class="report-table" style="font-size:12px;margin-bottom:16px">
+            <thead><tr><th>Type</th><th style="text-align:right">Amount</th><th style="text-align:right">%</th></tr></thead>
+            <tbody>
+              ${Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`
+              <tr>
+                <td style="padding:5px 8px">${t}</td>
+                <td style="text-align:right;padding:5px 8px">${fmt(v)}</td>
+                <td style="text-align:right;padding:5px 8px;color:var(--text-secondary)">${totalAmount>0?(v/totalAmount*100).toFixed(1):'0'}%</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">Top Vendors</div>
+          <table class="report-table" style="font-size:12px">
+            <thead><tr><th>Vendor / Payee</th><th style="text-align:right">Amount</th></tr></thead>
+            <tbody>
+              ${Object.entries(byVendor).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([v,amt])=>`
+              <tr>
+                <td style="padding:5px 8px">${v}</td>
+                <td style="text-align:right;padding:5px 8px">${fmt(amt)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Full Detail Table -->
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text-secondary);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">All Expense Entries — ${periodLabel}</div>
+      <table class="report-table">
+        <thead><tr>
+          <th>Date</th><th>Ref/ID</th><th>Vendor / Payee</th>
+          <th>Category</th><th>Type</th>
+          <th style="text-align:right">Net Amount</th>
+          <th style="text-align:right">VAT</th>
+          <th style="text-align:right">Gross</th>
+          <th>VAT Type</th><th>Status</th>
+        </tr></thead>
+        <tbody>
+        ${allExpInPeriod.length===0?`<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text-tertiary)">No expense entries for this period.</td></tr>`:''}
+        ${allExpInPeriod.sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(e=>{
+          const net   = e.vatBase!=null?e.vatBase:e.amount||0;
+          const vat   = e.vat||0;
+          const gross = net+vat;
+          const status= e.status||'pending';
+          const src   = e.notes?'📋 DV':'';
+          return `<tr>
+            <td style="white-space:nowrap">${e.date||'—'}</td>
+            <td class="mono" style="font-size:11px">${e.id||src||'—'}</td>
+            <td style="font-weight:500">${e.vendor||e.notes||'—'}</td>
+            <td style="font-size:12px">${e.category||'—'}</td>
+            <td style="font-size:11px;color:var(--text-secondary)">${e.expType==='operating'?'Operating':'Admin'}</td>
+            <td style="text-align:right">${fmt(net)}</td>
+            <td style="text-align:right;color:var(--amber)">${vat>0?fmt(vat):'—'}</td>
+            <td style="text-align:right;font-weight:500">${fmt(gross)}</td>
+            <td style="font-size:11px">${e.vatType||'—'}</td>
+            <td><span class="badge ${status==='paid'?'paid':'pending'}">${status}</span></td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+        <tfoot><tr class="report-total">
+          <td colspan="5">TOTAL — ${allExpInPeriod.length} entries</td>
+          <td style="text-align:right">${fmt(totalAmount)}</td>
+          <td style="text-align:right;color:var(--amber)">${fmt(totalVAT)}</td>
+          <td style="text-align:right">${fmt(totalGross)}</td>
+          <td colspan="2"></td>
+        </tr></tfoot>
+      </table>
+    </div>`;
+    currentReport = 'expenses';
+    return;
+  }
+
+  if(type==='pnl') {
     // Group revenue by customer
     const revByCustomer = groupBy(
       state.invoices.filter(i=>getInvoiceStatus(i)!=='draft'),
@@ -11463,68 +11604,153 @@ function exportToExcel() {
 
   addSheet('Invoices', state.invoices.map(i=>({
     'Invoice ID':i.id,'Date':i.date,'Due Date':i.due,'Customer':i.customer,
-    'VAT Base':i.vatBase||i.amount,'Output VAT':i.vat||0,'Total Amount':i.amount,'Status':i.status
+    'VAT Base':i.vatBase||i.amount,'Output VAT':i.vat||0,'Total Amount':i.amount,
+    'Status':i.status,'Source':i.source||''
   })));
-  addSheet('Purchases', (state.purchases||[]).map(p=>({
-    'Purchase ID':p.id,'Date':p.date,'Vendor':p.vendor,'Category':p.category,
-    'VAT Base':p.vatBase||p.amount,'Input VAT':p.vat||0,'Total Amount':p.amount,'Status':p.status,'Notes':p.notes||''
+  addSheet('Sales Orders', (state.salesOrders||[]).map(s=>({
+    'SO ID':s.id,'Date':s.date,'Customer':s.customer,'Status':s.status,
+    'Total Amount':s.total||0,'Notes':s.notes||''
   })));
-  addSheet('Expenses', (state.expenses||[]).map(e=>({
-    'Expense ID':e.id,'Date':e.date,'Vendor':e.vendor,'Category':e.category,'Type':e.expType||'admin',
-    'VAT Base':e.vatBase||e.amount,'Input VAT':e.vat||0,'Total Amount':e.amount,'Status':e.status
-  })));
-  addSheet('Journal', state.journal.map(j=>({
-    'Entry ID':j.id,'Date':j.date,'Reference':j.ref,'Description':j.desc,
-    'Debit Account':j.debit||'','Credit Account':j.credit||'','Amount':j.amount
+  addSheet('Sales Returns', (state.salesReturns||[]).map(r=>({
+    'Return ID':r.id,'Date':r.date,'Customer':r.customer,'Invoice Ref':r.invoiceRef||'',
+    'Amount':r.amount||0,'Reason':r.reason||''
   })));
   addSheet('Collections', (state.collections||[]).map(r=>({
     'OR No':r.id,'Date':r.date,'Customer':r.customer,'Invoice':r.invoice,
-    'Amount':r.amount,'Mode':r.mode,'Reference':r.reference,'Received By':r.receivedBy
+    'Amount':r.amount,'Net Cash':r.netCash||r.amount,'Mode':r.mode,
+    'Reference':r.reference||'','Received By':r.receivedBy||''
   })));
-  addSheet('Vouchers', (state.vouchers||[]).map(v=>({
-    'DV No':v.id,'Date':v.date,'Payee':v.payee,'Purpose':v.purpose,
-    'Amount':v.amount,'Account':v.account,'Prepared By':v.preparedBy,'Approved By':v.approvedBy,'Status':v.status
+  addSheet('Deposits', (state.deposits||[]).map(d=>({
+    'Deposit ID':d.id,'Date':d.date,'Bank Account':d.bankAccount,'Amount':d.amount,
+    'Source':d.source||'','Reference':d.ref||'','Description':d.description||'','Status':d.status
   })));
-  addSheet('Employees', emps.map(e=>({
-    'Employee ID':e.id,'Name':e.name,'Position':e.position,'Department':e.department,
-    'Basic Salary':e.basicSalary,'SSS No':e.sssNo||'','PhilHealth No':e.philhealthNo||'',
-    'Pag-IBIG No':e.pagibigNo||'','TIN':e.tinNo||'','Status':e.status,'Start Date':e.startDate
+  addSheet('Supplier Invoices', (state.supplierInvoices||[]).map(si=>({
+    'SI ID':si.id,'Date':si.date,'Due Date':si.dueDate,'Supplier':si.supplier,
+    'Supplier Inv No':si.supplierInvNo||'','PO Ref':si.poRef||'',
+    'Net Amount':si.subtotal||0,'VAT':si.vat||0,'Total':si.total||0,
+    'Balance':si.total-(si.payments||[]).reduce((s,p)=>s+(p.amount||0),0),
+    'Status':si.status
   })));
-  addSheet('Payroll', (state.payrolls||[]).map(p=>{
-    const emp = emps.find(e=>e.id===p.empId)||{};
-    return {
-      'Payroll ID':p.id,'Period':p.period,'Pay Date':p.payDate,'Employee ID':p.empId,'Employee Name':emp.name||'',
-      'Basic Pay':p.basicPay,'Overtime':p.overtime||0,'Allowance':p.allowance||0,'Gross Pay':p.grossPay,
-      'SSS':p.sss,'PhilHealth':p.philhealth,'Pag-IBIG':p.pagibig,'W/Tax':p.withholdingTax,
-      'Total Deductions':p.totalDeductions,'Net Pay':p.netPay,'Status':p.status
-    };
-  }));
-  addSheet('Attendance', (state.attendance||[]).map(a=>{
-    const emp = emps.find(e=>e.id===a.empId)||{};
-    return {
-      'Record ID':a.id,'Date':a.date,'Employee ID':a.empId,'Employee Name':emp.name||'',
-      'Status':a.status,'Time In':a.timeIn||'','Time Out':a.timeOut||'',
-      'Hours Worked':a.hoursWorked||0,'Overtime Hours':a.overtimeHours||0,'Notes':a.notes||''
-    };
-  }));
-  addSheet('Inventory', (state.inventory||[]).map(it=>({
-    'Item ID':it.id,'Name':it.name,'Category':it.category,'Unit':it.unit,
-    'Cost Price':it.costPrice,'Sale Price':it.salePrice,'Qty on Hand':it.qty,'Reorder Level':it.reorderLevel
+  addSheet('Purchase Orders', (state.purchaseOrders||[]).map(po=>({
+    'PO ID':po.id,'Date':po.date,'Supplier':po.supplier,'Status':po.status,
+    'Total Amount':(po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0),
+    'Notes':po.notes||''
+  })));
+  addSheet('Purchase Requests', (state.purchaseRequests||[]).map(pr=>({
+    'PR ID':pr.id,'Date':pr.date,'Requested By':pr.requestedBy||'','Department':pr.department||'',
+    'Description':pr.description||'','Estimated Cost':pr.estimatedCost||0,'Status':pr.status
+  })));
+  addSheet('Purchases', (state.purchases||[]).map(p=>({
+    'Purchase ID':p.id,'Date':p.date,'Vendor':p.vendor,'Category':p.category,
+    'VAT Base':p.vatBase||p.amount,'Input VAT':p.vat||0,'Total Amount':p.amount,
+    'Status':p.status,'Notes':p.notes||''
+  })));
+  addSheet('Expenses', (state.expenses||[]).map(e=>({
+    'Expense ID':e.id,'Date':e.date,'Vendor':e.vendor,'Category':e.category,
+    'Type':e.expType||'admin','VAT Base':e.vatBase||e.amount,
+    'Input VAT':e.vat||0,'Total Amount':e.amount,'VAT Type':e.vatType||'',
+    'Status':e.status
+  })));
+  addSheet('Journal', (state.journal||[]).map(j=>({
+    'Entry ID':j.id,'Group ID':j.group||j.id,'Date':j.date,'Reference':j.ref||'',
+    'Type':j.type||'general','Description':j.desc||'',
+    'Debit Account':j.debit||'','Credit Account':j.credit||'','Amount':j.amount||0,
+    'Payee':j.payee||'','Prepared By':j.preparedBy||'','Approved By':j.approvedBy||'',
+    'Cancelled':j.cancelled?'Yes':'No'
+  })));
+  addSheet('Chart of Accounts', (state.accounts||[]).map(a=>({
+    'Account Code':a.id,'Account Name':a.name,'Type':a.type,'Balance':a.balance||0
   })));
   addSheet('Customers', (state.customers||[]).map(cu=>({
-    'Customer ID':cu.id,'Name':cu.name,'Email':cu.email,'Phone':cu.phone,'Balance':cu.balance
+    'Customer ID':cu.id,'Name':cu.name,'Email':cu.email||'','Phone':cu.phone||'',
+    'Address':cu.address||'','TIN':cu.tin||'','Credit Limit':cu.creditLimit||0,
+    'Balance':cu.balance||0,'Status':cu.status||'active'
   })));
   addSheet('Suppliers', (state.suppliers||[]).map(s=>({
     'Supplier ID':s.id,'Name':s.name,'TIN':s.tin||'','Contact Person':s.contactPerson||'',
     'Email':s.email||'','Phone':s.phone||'','Address':s.address||'',
     'Category':s.category||'','Payment Terms':s.terms||'','Status':s.status,'Notes':s.notes||''
   })));
-  addSheet('Chart of Accounts', state.accounts.map(a=>({
-    'Account Code':a.id,'Account Name':a.name,'Type':a.type,'Balance':a.balance
+  addSheet('Inventory', (state.inventory||[]).map(it=>({
+    'Item ID':it.id,'Name':it.name,'Category':it.category||'','Unit':it.unit,
+    'Cost Price':it.costPrice||0,'Sale Price':it.salePrice||0,
+    'Qty on Hand':it.qty||0,'Reorder Level':it.reorderLevel||0,
+    'Description':it.description||'','Status':it.status||'active'
+  })));
+  addSheet('Inventory Movements', (state.inventoryMovements||[]).map(m=>({
+    'Movement ID':m.id,'Date':m.date,'Item ID':m.itemId,'Item Name':m.itemName||'',
+    'Type':m.type,'Qty':m.qty,'Reference':m.ref||'','Notes':m.notes||'',
+    'Branch':m.branchId||'Main','Recorded By':m.recordedBy||''
+  })));
+  addSheet('Employees', emps.map(e=>({
+    'Employee ID':e.id,'Name':e.name,'Position':e.position||'','Department':e.department||'',
+    'Basic Salary':e.basicSalary||0,'Allowance':e.allowance||0,
+    'SSS No':e.sssNo||'','PhilHealth No':e.philhealthNo||'',
+    'Pag-IBIG No':e.pagibigNo||'','TIN':e.tinNo||'',
+    'Date Hired':e.startDate||'','Status':e.status||'active',
+    'Email':e.email||'','Phone':e.phone||''
+  })));
+  addSheet('Attendance', (state.attendance||[]).map(a=>{
+    const emp = emps.find(e=>e.id===a.empId||e.name===a.empName)||{};
+    return {
+      'Record ID':a.id,'Date':a.date,'Employee ID':a.empId||'',
+      'Employee Name':emp.name||a.empName||'','Department':emp.department||'',
+      'Status':a.status||'present','Time In':a.timeIn||'','Time Out':a.timeOut||'',
+      'Hours Worked':a.hoursWorked||0,'OT Hours':a.overtimeHours||0,
+      'Late (mins)':a.lateMins||0,'Face Verified':a.verifiedFace?'Yes':'No',
+      'Source':a.source||'manual','Notes':a.notes||''
+    };
+  }));
+  addSheet('Payroll', (state.payrolls||[]).map(p=>{
+    const emp = emps.find(e=>e.id===p.empId)||{};
+    return {
+      'Payroll ID':p.id,'Period':p.period,'Pay Type':p.payType||'','Pay Date':p.payDate||'',
+      'Employee ID':p.empId,'Employee Name':emp.name||p.empName||'',
+      'Department':emp.department||'',
+      'Scheduled Days':p.scheduledDays||'','Days Worked':p.daysWorked||0,
+      'OT Hours':p.totalOTHours||0,'Late (mins)':p.totalLateMins||0,
+      '½-Mo Basic':p.semiMonthlyBasic||p.basicPay||0,
+      'Absent Deduction':p.absentDeduction||0,'Late Deduction':p.lateDeduction||0,
+      'OT Pay':p.overtime||0,'Allowance':p.allowance||0,'Gross Pay':p.grossPay||0,
+      'SSS':p.sss||0,'PhilHealth':p.philhealth||0,'Pag-IBIG':p.pagibig||0,
+      'W/Tax':p.withholdingTax||0,'Total Deductions':p.totalDeductions||0,
+      'Net Pay':p.netPay||0,'Status':p.status||'pending',
+      'Source':p.source||'','Created By':p.createdBy||''
+    };
+  }));
+  addSheet('Leave Management', (state.leaves||[]).map(l=>({
+    'Leave ID':l.id,'Employee ID':l.empId||'','Employee Name':l.empName||'',
+    'Leave Type':l.leaveTypeLabel||l.type||'','Date From':l.startDate||l.from||'',
+    'Date To':l.endDate||l.to||'','Days':l.days||0,'Reason':l.reason||'',
+    'With Pay':l.withPay===false?'No':'Yes','Status':l.status||'pending',
+    'Filed On':l.filedOn||l.appliedOn||''
+  })));
+  addSheet('Performance', (state.performances||[]).map(p=>({
+    'Record ID':p.id,'Employee ID':p.empId||'','Employee Name':p.empName||'',
+    'Period':p.period||'','Rating':p.rating||'','Score':p.score||'',
+    'Notes':p.notes||'','Reviewed By':p.reviewedBy||''
+  })));
+  addSheet('Training', (state.trainings||[]).map(t=>({
+    'Training ID':t.id,'Title':t.title||'','Date':t.date||'','Trainer':t.trainer||'',
+    'Duration':t.duration||'','Participants':Array.isArray(t.participants)?t.participants.join(', '):(t.participants||''),
+    'Status':t.status||''
+  })));
+  addSheet('Disciplinary', (state.disciplinary||[]).map(d=>({
+    'Record ID':d.id,'Employee ID':d.empId||'','Employee Name':d.empName||'',
+    'Date':d.date||'','Type':d.type||'','Description':d.description||'',
+    'Action Taken':d.action||'','Status':d.status||''
+  })));
+  addSheet('Announcements', (state.announcements||[]).map(a=>({
+    'ID':a.id,'Date':a.date||'','Title':a.title||'','Content':a.content||'',
+    'Posted By':a.postedBy||'','Priority':a.priority||'normal'
+  })));
+  addSheet('Audit Log', (state.auditLog||[]).slice(-1000).map(l=>({
+    'Timestamp':l.timestamp||'','Action':l.action||'','Module':l.module||'',
+    'Record ID':l.recordId||'','User':l.user||'','Description':l.description||''
   })));
 
-  const date = new Date().toISOString().split('T')[0];
-  XLSX.writeFile(wb, 'ANMOL_Pharma_' + date + '.xlsx');
+  const date = today();
+  XLSX.writeFile(wb, `PharmaHub_Export_${date}.xlsx`);
 }
 
 function showImportExcel() {
@@ -11539,18 +11765,39 @@ function showImportExcel() {
 </div>
 <div class="form-group"><label>Sheet to Import</label>
   <select id="import-sheet">
-    <option value="Invoices">Invoices</option>
-    <option value="Purchases">Purchases</option>
-    <option value="Expenses">Expenses</option>
-    <option value="Journal">Journal</option>
-    <option value="Collections">Collections</option>
-    <option value="Employees">Employees</option>
-    <option value="Payroll">Payroll</option>
-    <option value="Attendance">Attendance</option>
-    <option value="Inventory">Inventory</option>
-    <option value="Customers">Customers</option>
-    <option value="Suppliers">Suppliers</option>
-    <option value="Chart of Accounts">Chart of Accounts</option>
+    <optgroup label="Accounting">
+      <option value="Invoices">Invoices</option>
+      <option value="Sales Orders">Sales Orders</option>
+      <option value="Sales Returns">Sales Returns</option>
+      <option value="Collections">Collections</option>
+      <option value="Deposits">Deposits</option>
+      <option value="Supplier Invoices">Supplier Invoices</option>
+      <option value="Purchase Orders">Purchase Orders</option>
+      <option value="Purchase Requests">Purchase Requests</option>
+      <option value="Purchases">Purchases</option>
+      <option value="Expenses">Expenses</option>
+      <option value="Journal">Journal</option>
+      <option value="Chart of Accounts">Chart of Accounts</option>
+    </optgroup>
+    <optgroup label="Management">
+      <option value="Customers">Customers</option>
+      <option value="Suppliers">Suppliers</option>
+      <option value="Inventory">Inventory</option>
+      <option value="Inventory Movements">Inventory Movements</option>
+    </optgroup>
+    <optgroup label="HR & Payroll">
+      <option value="Employees">Employees</option>
+      <option value="Attendance">Attendance</option>
+      <option value="Payroll">Payroll</option>
+      <option value="Leave Management">Leave Management</option>
+      <option value="Performance">Performance</option>
+      <option value="Training">Training</option>
+      <option value="Disciplinary">Disciplinary</option>
+      <option value="Announcements">Announcements</option>
+    </optgroup>
+    <optgroup label="System">
+      <option value="Audit Log">Audit Log</option>
+    </optgroup>
   </select>
 </div>
 <div id="import-preview" style="font-size:12px;color:var(--text-secondary);min-height:30px;margin-bottom:8px"></div>
@@ -11593,17 +11840,30 @@ function runImport() {
       else { arr.push(mapped); added++; }
     });
   };
-  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending' }));
+  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', source:r['Source']||'' }));
+  else if(sheetName==='Sales Orders') { if(!state.salesOrders) state.salesOrders=[]; merge(state.salesOrders, _importData, 'SO ID', r=>({ id:r['SO ID'], date:r['Date']||'', customer:r['Customer']||'', status:r['Status']||'pending', total:+r['Total Amount']||0, notes:r['Notes']||'' })); }
+  else if(sheetName==='Sales Returns') { if(!state.salesReturns) state.salesReturns=[]; merge(state.salesReturns, _importData, 'Return ID', r=>({ id:r['Return ID'], date:r['Date']||'', customer:r['Customer']||'', invoiceRef:r['Invoice Ref']||'', amount:+r['Amount']||0, reason:r['Reason']||'' })); }
+  else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, netCash:+r['Net Cash']||+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' })); }
+  else if(sheetName==='Deposits') { if(!state.deposits) state.deposits=[]; merge(state.deposits, _importData, 'Deposit ID', r=>({ id:r['Deposit ID'], date:r['Date']||'', bankAccount:r['Bank Account']||'', amount:+r['Amount']||0, source:r['Source']||'', ref:r['Reference']||'', description:r['Description']||'', status:r['Status']||'pending' })); }
+  else if(sheetName==='Supplier Invoices') { if(!state.supplierInvoices) state.supplierInvoices=[]; merge(state.supplierInvoices, _importData, 'SI ID', r=>({ id:r['SI ID'], date:r['Date']||'', dueDate:r['Due Date']||'', supplier:r['Supplier']||'', supplierInvNo:r['Supplier Inv No']||'', poRef:r['PO Ref']||'', subtotal:+r['Net Amount']||0, vat:+r['VAT']||0, total:+r['Total']||0, payments:[], status:r['Status']||'unpaid' })); }
+  else if(sheetName==='Purchase Orders') { if(!state.purchaseOrders) state.purchaseOrders=[]; merge(state.purchaseOrders, _importData, 'PO ID', r=>({ id:r['PO ID'], date:r['Date']||'', supplier:r['Supplier']||'', status:r['Status']||'pending', lines:[], notes:r['Notes']||'' })); }
+  else if(sheetName==='Purchase Requests') { if(!state.purchaseRequests) state.purchaseRequests=[]; merge(state.purchaseRequests, _importData, 'PR ID', r=>({ id:r['PR ID'], date:r['Date']||'', requestedBy:r['Requested By']||'', department:r['Department']||'', description:r['Description']||'', estimatedCost:+r['Estimated Cost']||0, status:r['Status']||'pending' })); }
   else if(sheetName==='Purchases') { if(!state.purchases) state.purchases=[]; merge(state.purchases, _importData, 'Purchase ID', r=>({ id:r['Purchase ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', notes:r['Notes']||'' })); }
-  else if(sheetName==='Expenses') { if(!state.expenses) state.expenses=[]; merge(state.expenses, _importData, 'Expense ID', r=>({ id:r['Expense ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', expType:r['Type']||'admin', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending' })); }
-  else if(sheetName==='Employees') { if(!state.employees) state.employees=[]; merge(state.employees, _importData, 'Employee ID', r=>({ id:r['Employee ID'], name:r['Name']||'', position:r['Position']||'', department:r['Department']||'', basicSalary:+r['Basic Salary']||0, sssNo:r['SSS No']||'', philhealthNo:r['PhilHealth No']||'', pagibigNo:r['Pag-IBIG No']||'', tinNo:r['TIN']||'', status:r['Status']||'active', startDate:r['Start Date']||'' })); }
-  else if(sheetName==='Payroll') { if(!state.payrolls) state.payrolls=[]; merge(state.payrolls, _importData, 'Payroll ID', r=>({ id:r['Payroll ID'], period:r['Period']||'', payDate:r['Pay Date']||'', empId:r['Employee ID']||'', basicPay:+r['Basic Pay']||0, overtime:+r['Overtime']||0, allowance:+r['Allowance']||0, grossPay:+r['Gross Pay']||0, sss:+r['SSS']||0, philhealth:+r['PhilHealth']||0, pagibig:+r['Pag-IBIG']||0, withholdingTax:+r['W/Tax']||0, totalDeductions:+r['Total Deductions']||0, netPay:+r['Net Pay']||0, status:r['Status']||'pending' })); }
-  else if(sheetName==='Attendance') { if(!state.attendance) state.attendance=[]; merge(state.attendance, _importData, 'Record ID', r=>({ id:r['Record ID'], date:r['Date']||'', empId:r['Employee ID']||'', status:r['Status']||'present', timeIn:r['Time In']||'', timeOut:r['Time Out']||'', hoursWorked:+r['Hours Worked']||0, overtimeHours:+r['Overtime Hours']||0, notes:r['Notes']||'' })); }
-  else if(sheetName==='Inventory') { if(!state.inventory) state.inventory=[]; merge(state.inventory, _importData, 'Item ID', r=>({ id:r['Item ID'], name:r['Name']||'', category:r['Category']||'', unit:r['Unit']||'pc', costPrice:+r['Cost Price']||0, salePrice:+r['Sale Price']||0, qty:+r['Qty on Hand']||0, reorderLevel:+r['Reorder Level']||0 })); }
-  else if(sheetName==='Customers') { merge(state.customers, _importData, 'Customer ID', r=>({ id:r['Customer ID'], name:r['Name']||'', email:r['Email']||'', phone:r['Phone']||'', balance:+r['Balance']||0 })); }
+  else if(sheetName==='Expenses') { if(!state.expenses) state.expenses=[]; merge(state.expenses, _importData, 'Expense ID', r=>({ id:r['Expense ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', expType:r['Type']||'admin', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, vatType:r['VAT Type']||'', status:r['Status']||'pending' })); }
+  else if(sheetName==='Journal') { if(!state.journal) state.journal=[]; merge(state.journal, _importData, 'Entry ID', r=>({ id:r['Entry ID'], group:r['Group ID']||r['Entry ID'], date:r['Date']||'', ref:r['Reference']||'', type:r['Type']||'general', desc:r['Description']||'', debit:r['Debit Account']||null, credit:r['Credit Account']||null, amount:+r['Amount']||0, payee:r['Payee']||'', preparedBy:r['Prepared By']||'', approvedBy:r['Approved By']||'' })); }
+  else if(sheetName==='Chart of Accounts') { if(!state.accounts) state.accounts=[]; merge(state.accounts, _importData, 'Account Code', r=>({ id:r['Account Code']||'', name:r['Account Name']||'', type:r['Type']||'Asset', balance:+r['Balance']||0 })); }
+  else if(sheetName==='Customers') { merge(state.customers, _importData, 'Customer ID', r=>({ id:r['Customer ID'], name:r['Name']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', tin:r['TIN']||'', creditLimit:+r['Credit Limit']||0, balance:+r['Balance']||0, status:r['Status']||'active' })); }
   else if(sheetName==='Suppliers') { if(!state.suppliers) state.suppliers=[]; merge(state.suppliers, _importData, 'Supplier ID', r=>({ id:r['Supplier ID'], name:r['Name']||'', tin:r['TIN']||'', contactPerson:r['Contact Person']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', category:r['Category']||'', terms:r['Payment Terms']||'', status:r['Status']||'active', notes:r['Notes']||'' })); }
-  else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' })); }
-  else if(sheetName==='Chart of Accounts') { if(!state.accounts) state.accounts=[]; merge(state.accounts, _importData, 'Account Code', r=>({ id:r['Account Code']||r['Account ID']||r['ID']||'', name:r['Account Name']||r['Name']||'', type:r['Type']||'Asset', balance:+r['Balance']||0, notes:r['Notes']||'' })); }
+  else if(sheetName==='Inventory') { if(!state.inventory) state.inventory=[]; merge(state.inventory, _importData, 'Item ID', r=>({ id:r['Item ID'], name:r['Name']||'', category:r['Category']||'', unit:r['Unit']||'pc', costPrice:+r['Cost Price']||0, salePrice:+r['Sale Price']||0, qty:+r['Qty on Hand']||0, reorderLevel:+r['Reorder Level']||0, description:r['Description']||'', status:r['Status']||'active', lots:[] })); }
+  else if(sheetName==='Inventory Movements') { if(!state.inventoryMovements) state.inventoryMovements=[]; merge(state.inventoryMovements, _importData, 'Movement ID', r=>({ id:r['Movement ID'], date:r['Date']||'', itemId:r['Item ID']||'', itemName:r['Item Name']||'', type:r['Type']||'in', qty:+r['Qty']||0, ref:r['Reference']||'', notes:r['Notes']||'', branchId:r['Branch']||'', recordedBy:r['Recorded By']||'' })); }
+  else if(sheetName==='Employees') { if(!state.employees) state.employees=[]; merge(state.employees, _importData, 'Employee ID', r=>({ id:r['Employee ID'], name:r['Name']||'', position:r['Position']||'', department:r['Department']||'', basicSalary:+r['Basic Salary']||0, allowance:+r['Allowance']||0, sssNo:r['SSS No']||'', philhealthNo:r['PhilHealth No']||'', pagibigNo:r['Pag-IBIG No']||'', tinNo:r['TIN']||'', startDate:r['Date Hired']||'', status:r['Status']||'active', email:r['Email']||'', phone:r['Phone']||'' })); }
+  else if(sheetName==='Attendance') { if(!state.attendance) state.attendance=[]; merge(state.attendance, _importData, 'Record ID', r=>({ id:r['Record ID'], date:r['Date']||'', empId:r['Employee ID']||'', empName:r['Employee Name']||'', status:r['Status']||'present', timeIn:r['Time In']||'', timeOut:r['Time Out']||'', hoursWorked:+r['Hours Worked']||0, overtimeHours:+r['OT Hours']||0, lateMins:+r['Late (mins)']||0, notes:r['Notes']||'' })); }
+  else if(sheetName==='Payroll') { if(!state.payrolls) state.payrolls=[]; merge(state.payrolls, _importData, 'Payroll ID', r=>({ id:r['Payroll ID'], period:r['Period']||'', payType:r['Pay Type']||'', payDate:r['Pay Date']||'', empId:r['Employee ID']||'', empName:r['Employee Name']||'', scheduledDays:+r['Scheduled Days']||0, daysWorked:+r['Days Worked']||0, totalOTHours:+r['OT Hours']||0, totalLateMins:+r['Late (mins)']||0, semiMonthlyBasic:+r['½-Mo Basic']||0, basicPay:+r['½-Mo Basic']||0, absentDeduction:+r['Absent Deduction']||0, lateDeduction:+r['Late Deduction']||0, overtime:+r['OT Pay']||0, allowance:+r['Allowance']||0, grossPay:+r['Gross Pay']||0, sss:+r['SSS']||0, philhealth:+r['PhilHealth']||0, pagibig:+r['Pag-IBIG']||0, withholdingTax:+r['W/Tax']||0, totalDeductions:+r['Total Deductions']||0, netPay:+r['Net Pay']||0, status:r['Status']||'pending' })); }
+  else if(sheetName==='Leave Management') { if(!state.leaves) state.leaves=[]; merge(state.leaves, _importData, 'Leave ID', r=>({ id:r['Leave ID'], empId:r['Employee ID']||'', empName:r['Employee Name']||'', leaveTypeLabel:r['Leave Type']||'', type:r['Leave Type']||'', startDate:r['Date From']||'', from:r['Date From']||'', endDate:r['Date To']||'', to:r['Date To']||'', days:+r['Days']||0, reason:r['Reason']||'', withPay:r['With Pay']==='No'?false:true, status:r['Status']||'pending', filedOn:r['Filed On']||'' })); }
+  else if(sheetName==='Performance') { if(!state.performances) state.performances=[]; merge(state.performances, _importData, 'Record ID', r=>({ id:r['Record ID'], empId:r['Employee ID']||'', empName:r['Employee Name']||'', period:r['Period']||'', rating:r['Rating']||'', score:r['Score']||'', notes:r['Notes']||'', reviewedBy:r['Reviewed By']||'' })); }
+  else if(sheetName==='Training') { if(!state.trainings) state.trainings=[]; merge(state.trainings, _importData, 'Training ID', r=>({ id:r['Training ID'], title:r['Title']||'', date:r['Date']||'', trainer:r['Trainer']||'', duration:r['Duration']||'', participants:(r['Participants']||'').split(',').map(s=>s.trim()).filter(Boolean), status:r['Status']||'' })); }
+  else if(sheetName==='Disciplinary') { if(!state.disciplinary) state.disciplinary=[]; merge(state.disciplinary, _importData, 'Record ID', r=>({ id:r['Record ID'], empId:r['Employee ID']||'', empName:r['Employee Name']||'', date:r['Date']||'', type:r['Type']||'', description:r['Description']||'', action:r['Action Taken']||'', status:r['Status']||'' })); }
+  else if(sheetName==='Announcements') { if(!state.announcements) state.announcements=[]; merge(state.announcements, _importData, 'ID', r=>({ id:r['ID'], date:r['Date']||'', title:r['Title']||'', content:r['Content']||'', postedBy:r['Posted By']||'', priority:r['Priority']||'normal' })); }
   save();
   _importData = null;
   closeModal();
