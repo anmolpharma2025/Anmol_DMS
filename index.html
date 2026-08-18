@@ -4062,10 +4062,21 @@ function viewJournal(groupId) {
 
 function approveJournalEntry(groupId) {
   if(!requireAdmin('approve journal entries')) return;
-  if(!confirm('Approve this journal entry? Once approved it cannot be edited or deleted.')) return;
-  const lines = state.journal.filter(j=>(j.group||j.id)===groupId);
-  lines.forEach(l => { l.approved = true; l.approvedBy = currentUser.name; l.approvedAt = today(); });
+  if(!confirm('Approve this journal entry? Once approved it cannot be edited or deleted without admin override.')) return;
+  // Find ALL lines matching this group — use every possible ID field
+  let found = 0;
+  state.journal.forEach(l => {
+    if((l.group||l.id||l.groupId)===groupId) {
+      l.approved    = true;
+      l.approvedBy  = currentUser?.name||'';
+      l.approvedAt  = today();
+      found++;
+    }
+  });
+  if(!found) { alert('No journal lines found for entry '+groupId); return; }
+  auditLog('APPROVE','Journal',groupId,{description:`Approved journal entry ${groupId} by ${currentUser?.name}`});
   save(); render();
+  toast(`✅ Entry ${groupId} approved and locked.`);
 }
 
 function editJournalEntry(groupId, type) {
@@ -4817,19 +4828,23 @@ function saveJournal() {
     const netDrawn    = totalDebit - totalOtherC;
     if(netDrawn < 0) { alert('Other credits cannot exceed total debits.'); return; }
     const groupId = editGroupId || nextRefNum('DV', state.journal.filter(j=>j.type==='disbursement'), 'group');
+    // Check if was previously approved before removing
+    const wasApproved = editGroupId && state.journal.some(j=>(j.group||j.id)===editGroupId && j.approved);
+    const approvedByPrev = wasApproved ? (state.journal.find(j=>(j.group||j.id)===editGroupId)?.approvedBy||approvedBy) : approvedBy;
+    const approvedAtPrev = wasApproved ? (state.journal.find(j=>(j.group||j.id)===editGroupId)?.approvedAt||'') : '';
     // Remove old lines if editing
     if(editGroupId) state.journal = state.journal.filter(j=>(j.group||j.id)!==editGroupId);
     let lineIdx = 0;
     debitLines.forEach(l => {
-      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
+      state.journal.push({ id:lineIdx===0?groupId:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:l.debit, credit:null, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy:approvedByPrev, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'', ...(wasApproved?{approved:true,approvedBy:approvedByPrev,approvedAt:approvedAtPrev}:{}) });
       lineIdx++;
     });
     creditLines.forEach(l => {
-      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
+      state.journal.push({ id:groupId+'-'+(lineIdx+1), group:groupId, date, ref, debit:null, credit:l.credit, amount:parseFloat(l.amount), desc, type:'disbursement', preparedBy, approvedBy:approvedByPrev, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'', ...(wasApproved?{approved:true,approvedBy:approvedByPrev,approvedAt:approvedAtPrev}:{}) });
       lineIdx++;
     });
     if(netDrawn > 0) {
-      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'' });
+      state.journal.push({ id:groupId+'-cr', group:groupId, date, ref, debit:null, credit:drawnFrom, amount:netDrawn, desc, type:'disbursement', preparedBy, approvedBy:approvedByPrev, poRef:poRef||'', payee:payee||'', checkNo:checkNo||'', ...(wasApproved?{approved:true,approvedBy:approvedByPrev,approvedAt:approvedAtPrev}:{}) });
     }
     auditLog(editGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${editGroupId?'Updated':'Posted'} Disbursement Voucher ${groupId} — ${desc}`});
     window._editingJournalGroupId = null; window._jeEditGroupId = null;
@@ -4847,13 +4862,17 @@ function saveJournal() {
   const entryType = hasCashCredit ? 'disbursement' : 'general';
   const entryPrefix = entryType==='disbursement' ? 'DV' : 'JV';
   const groupId = editGroupId || nextRefNum(entryPrefix, state.journal.filter(j=>j.type===entryType), 'group');
+  // Preserve approved status from old lines if editing
+  const wasApprovedGJ   = editGroupId && state.journal.some(j=>(j.group||j.id)===editGroupId && j.approved);
+  const approvedByGJ    = wasApprovedGJ ? (state.journal.find(j=>(j.group||j.id)===editGroupId)?.approvedBy||approvedBy) : approvedBy;
+  const approvedAtGJ    = wasApprovedGJ ? (state.journal.find(j=>(j.group||j.id)===editGroupId)?.approvedAt||'') : '';
   // Remove old lines if editing
   if(editGroupId) state.journal = state.journal.filter(j=>(j.group||j.id)!==editGroupId);
   jeLines.forEach((l,i) => {
     if(!l.debit && !l.credit) return;
     const a = parseFloat(l.amount)||0;
     if(!a) return;
-    state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy, poRef:poRef||'' });
+    state.journal.push({ id:i===0?groupId:groupId+'-'+(i+1), group:groupId, date, ref, debit:l.debit||null, credit:l.credit||null, amount:a, desc, type:entryType, preparedBy, approvedBy:approvedByGJ, poRef:poRef||'', ...(wasApprovedGJ?{approved:true,approvedBy:approvedByGJ,approvedAt:approvedAtGJ}:{}) });
   });
   auditLog(editGroupId?'UPDATE':'CREATE','Journal',groupId,{description:`${editGroupId?'Updated':'Posted'} ${isDisbursement?'Disbursement':'General'} Journal ${groupId} — ${desc}`});
   window._editingJournalGroupId = null; window._jeEditGroupId = null;
