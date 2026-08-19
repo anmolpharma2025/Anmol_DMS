@@ -781,9 +781,24 @@ function fbListen() {
       const by = doc.data().updatedBy || 'another device';
       const currentPage = state.page;  // use local state variable directly
 
-      // Replace all keys in the actual state object
+      // Merge remote into state preserving local approved/cancelled journal flags
+      const localApproved  = {};
+      const localCancelled = {};
+      (state.journal||[]).forEach(l => {
+        if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
+        if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
+      });
+
       Object.keys(remote).forEach(key => {
-        state[key] = remote[key];
+        if(key === 'journal') {
+          state.journal = (remote.journal||[]).map(l => ({
+            ...l,
+            ...(localApproved[l.id]  || (l.approved  ? { approved:l.approved, approvedBy:l.approvedBy, approvedAt:l.approvedAt }   : {})),
+            ...(localCancelled[l.id] || (l.cancelled ? { cancelled:l.cancelled, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt } : {})),
+          }));
+        } else {
+          state[key] = remote[key];
+        }
       });
       state.page = currentPage;  // preserve current page
 
@@ -981,16 +996,40 @@ async function fbForceRefresh() {
   if(!db) { fbSetStatus('error', 'Firebase not connected'); return; }
   fbSetStatus('loading');
   try {
-    // Force fetch from server, bypassing any cache
     const doc = await db.doc(FB_DOC).get({ source: 'server' });
     if(doc.exists && doc.data() && doc.data().data) {
       const remote = JSON.parse(doc.data().data);
       const currentPage = state.page;
-      Object.keys(remote).forEach(key => { state[key] = remote[key]; });
+
+      // Merge remote into state — but preserve local approved/cancelled flags
+      // on journal entries that may not have been pushed yet
+      Object.keys(remote).forEach(key => {
+        if(key === 'journal') {
+          // Build a map of local approved/cancelled states by line ID
+          const localApproved   = {};
+          const localCancelled  = {};
+          (state.journal||[]).forEach(l => {
+            if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
+            if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
+          });
+          // Apply remote journal but restore local approved/cancelled where present
+          state.journal = (remote.journal||[]).map(l => {
+            const localA = localApproved[l.id];
+            const localC = localCancelled[l.id];
+            return {
+              ...l,
+              ...(localA || (l.approved  ? { approved:l.approved, approvedBy:l.approvedBy, approvedAt:l.approvedAt }   : {})),
+              ...(localC || (l.cancelled ? { cancelled:l.cancelled, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt } : {})),
+            };
+          });
+        } else {
+          state[key] = remote[key];
+        }
+      });
+
       state.page = currentPage;
       recomputeBalances();
-      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
-      // Also refresh meta (users/roles)
+      try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       await fbLoadMeta();
       render();
       fbSetStatus('synced');
@@ -1001,10 +1040,8 @@ async function fbForceRefresh() {
     }
   } catch(e) {
     console.error('Force refresh error:', e);
-    // Don't stay on error — fall back to local data gracefully
     fbSetStatus('idle');
     showFbToast('Could not reach cloud — showing local data');
-    // Re-establish listener in case it dropped
     _fbListening = false;
     fbListen();
   }
