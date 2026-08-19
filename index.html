@@ -770,8 +770,11 @@ function fbListen() {
     if(!doc.exists || !doc.data() || !doc.data().data) return;
 
     const remoteDeviceId = doc.data().deviceId;
-    // Skip ONLY if this update came from THIS exact device (same tab/session)
+    // Skip if this update came from THIS exact device (same tab/session)
     if(remoteDeviceId === FB_DEVICE_ID) return;
+    // Skip if we saved very recently (within 3 seconds) — prevents race condition
+    const remoteTime = doc.data().updatedAt || 0;
+    if(_fbLastWriteTime && remoteTime <= _fbLastWriteTime) return;
 
     try {
       const remote = JSON.parse(doc.data().data);
@@ -4063,7 +4066,6 @@ function viewJournal(groupId) {
 function approveJournalEntry(groupId) {
   if(!requireAdmin('approve journal entries')) return;
   if(!confirm('Approve this journal entry? Once approved it cannot be edited or deleted without admin override.')) return;
-  // Find ALL lines matching this group — use every possible ID field
   let found = 0;
   state.journal.forEach(l => {
     if((l.group||l.id||l.groupId)===groupId) {
@@ -4075,7 +4077,11 @@ function approveJournalEntry(groupId) {
   });
   if(!found) { alert('No journal lines found for entry '+groupId); return; }
   auditLog('APPROVE','Journal',groupId,{description:`Approved journal entry ${groupId} by ${currentUser?.name}`});
-  save(); render();
+  // Save immediately to localStorage first so render reads the approved state
+  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+  // Then push to Firebase — use immediate save (bypass debounce timer)
+  _fbDoSave(state);
+  render();
   toast(`✅ Entry ${groupId} approved and locked.`);
 }
 
