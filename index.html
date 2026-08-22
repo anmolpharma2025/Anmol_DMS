@@ -672,6 +672,12 @@ if(typeof firebase !== 'undefined') {
 const FB_DOC      = 'companies/anmol';
 const FB_META_DOC = 'companies/anmol_meta';
 
+// Unique device ID per browser tab session — used to skip own-device sync
+if(!sessionStorage.getItem('_fbDeviceId')) {
+  sessionStorage.setItem('_fbDeviceId','dev_'+Math.random().toString(36).slice(2)+'_'+Date.now());
+}
+const FB_DEVICE_ID = sessionStorage.getItem('_fbDeviceId');
+
 // ── SIZE DIAGNOSTIC — call diagnoseSizes() in browser console ────────────────
 function diagnoseSizes() {
   console.log('=== STATE SIZE DIAGNOSIS ===');
