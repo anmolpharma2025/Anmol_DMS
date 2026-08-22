@@ -645,36 +645,62 @@ const firebaseConfig = {
 
 let db = null;
 let _fbUnsubscribe = null;
+let _fbUnsubscribers = [];
 let _fbSyncTimer = null;
 let _fbLastWriteTime = 0;
 let _fbListening = false;
+let _fbAuthReady = false; // tracks when auth is confirmed
 
 // Only init if Firebase SDK loaded successfully
 if(typeof firebase !== 'undefined') {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-  // Initialize Firebase Storage
-  try {
-    window.fbStorage = firebase.storage();
-  } catch(e) { console.warn('Firebase Storage not available:', e); }
-  // Silent anonymous auth — secures Firestore/Storage rules (request.auth != null)
-  try {
-    const auth = firebase.auth();
-    auth.onAuthStateChanged(user => {
-      if(!user) {
-        auth.signInAnonymously().catch(e=>console.warn('Anon auth failed:', e));
-      }
-    });
-  } catch(e) { console.warn('Firebase Auth not available:', e); }
+
+    // Initialize Firebase Storage
+    try { window.fbStorage = firebase.storage(); } catch(e) { console.warn('Firebase Storage not available:', e); }
+
+    // Silent anonymous auth — MUST complete before any Firestore read/write
+    try {
+      const auth = firebase.auth();
+      auth.onAuthStateChanged(user => {
+        if(user) {
+          // Auth confirmed — now safe to use Firestore
+          if(!_fbAuthReady) {
+            _fbAuthReady = true;
+            console.log('Firebase auth ready, starting sync...');
+            // Trigger the main app load now that auth is ready
+            if(typeof window._fbAuthReadyCallback === 'function') {
+              window._fbAuthReadyCallback();
+            }
+          }
+        } else {
+          // Not signed in — sign in anonymously
+          auth.signInAnonymously().catch(e => {
+            console.warn('Anon auth failed:', e);
+            // Even if anon auth fails, try to proceed
+            _fbAuthReady = true;
+            if(typeof window._fbAuthReadyCallback === 'function') {
+              window._fbAuthReadyCallback();
+            }
+          });
+        }
+      });
+    } catch(e) {
+      console.warn('Firebase Auth not available:', e);
+      // No auth SDK — proceed anyway (rules may be open)
+      _fbAuthReady = true;
+    }
+
   } catch(e) {
-    // Already initialized (e.g. hot reload) — get existing instance
+    // Already initialized — get existing instance
     try { db = firebase.firestore(); } catch(e2) {}
+    _fbAuthReady = true;
     if(!db) console.warn('Firebase init error:', e);
   }
 } else {
-  // SDK didn't load — app works offline using localStorage only
-  console.info('Firebase SDK not available — running in offline mode (localStorage only).');
+  console.info('Firebase SDK not available — running in offline mode.');
+  _fbAuthReady = true;
 }
 
 const FB_DOC      = 'companies/anmol';
@@ -2025,36 +2051,52 @@ function showAppScreen() {
   // Check for updates in the background (2s delay so login feels instant)
   setTimeout(checkForUpdate, 2000);
   startSessionTimeout();
-  // Load latest data from Firebase then start real-time listener
-  Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
-    if(remoteState) {
-      const currentPage = state.page;
-      Object.keys(remoteState).forEach(key => { state[key] = remoteState[key]; });
-      state.page = currentPage;
-      recomputeBalances();
-      try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
-      render();
-    }
-    _fbMetaLoadedOnce = true;
-    fbListen();
-    fbListenMeta();
-    // Log login AFTER Firebase is confirmed ready
-    if(currentUser) {
-      auditLog('LOGIN', 'System', currentUser.id, {
-        description: `${currentUser.name} logged in (${currentUser.role})`
-      });
-      // Show face verification for attendance (2s delay for UI to settle)
-      setTimeout(showFaceVerification, 2000);
-    }
-  }).catch(() => {
-    _fbMetaLoadedOnce = true;
-    // Still try to log even if load failed
-    if(currentUser && db) {
-      auditLog('LOGIN', 'System', currentUser.id, {
-        description: `${currentUser.name} logged in (${currentUser.role}) [offline]`
-      });
-    }
-  });
+  // Load latest data from Firebase — wait for auth to be ready first
+  const startFirebaseLoad = () => {
+    Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
+      if(remoteState) {
+        const currentPage = state.page;
+        Object.keys(remoteState).forEach(key => { state[key] = remoteState[key]; });
+        state.page = currentPage;
+        recomputeBalances();
+        try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+        render();
+      }
+      _fbMetaLoadedOnce = true;
+      fbListen();
+      fbListenMeta();
+      if(currentUser) {
+        auditLog('LOGIN', 'System', currentUser.id, {
+          description: `${currentUser.name} logged in (${currentUser.role})`
+        });
+        setTimeout(showFaceVerification, 2000);
+      }
+    }).catch(() => {
+      _fbMetaLoadedOnce = true;
+      if(currentUser && db) {
+        auditLog('LOGIN', 'System', currentUser.id, {
+          description: `${currentUser.name} logged in (${currentUser.role}) [offline]`
+        });
+      }
+    });
+  };
+
+  // If auth is already ready (cached session) — start immediately
+  // Otherwise wait for auth callback
+  if(_fbAuthReady) {
+    startFirebaseLoad();
+  } else {
+    window._fbAuthReadyCallback = startFirebaseLoad;
+    // Fallback: if auth takes more than 5s, start anyway
+    setTimeout(() => {
+      if(!_fbAuthReady) {
+        console.warn('Auth timeout — starting Firebase load anyway');
+        _fbAuthReady = true;
+        startFirebaseLoad();
+      }
+    }, 5000);
+  }
+
   // Absolute fallback: if Firestore load hangs for any reason, unblock saves after 8s
   setTimeout(() => { _fbMetaLoadedOnce = true; }, 8000);
   // Hide nav items user can't access, show ones they can
