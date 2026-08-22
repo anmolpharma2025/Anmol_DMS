@@ -744,40 +744,49 @@ async function _fbDoSave(snapshotOrData) {
     fbSetStatus('saving');
     const writeTime = Date.now();
     const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
-    const batch = db.batch();
 
+    // Try batch write of all chunks
+    const batch = db.batch();
     for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
       const chunk = {};
       keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
-      // Skip empty chunks
       if(!Object.keys(chunk).length) continue;
-      const chunkStr = JSON.stringify(chunk);
-      // Warn if chunk is too large
-      if(chunkStr.length > 900000) {
-        console.warn(`Chunk ${docPath} is ${chunkStr.length} bytes — may be too large`);
-      }
-      const ref = db.doc(docPath);
-      batch.set(ref, {
-        data:      chunkStr,
+      batch.set(db.doc(docPath), {
+        data: JSON.stringify(chunk),
         updatedAt: writeTime,
         updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
-        deviceId:  FB_DEVICE_ID
+        deviceId: FB_DEVICE_ID
       });
     }
-
     await batch.commit();
     _fbLastWriteTime = writeTime;
     fbSetStatus('synced');
   } catch(err) {
-    fbSetStatus('error', err.message);
-    console.error('Firebase save error:', err);
-    // If batch fails (e.g. chunk still too large), try stripping photos and retry
-    if(err.message && err.message.includes('longer than')) {
-      toast('⚠ Data too large — compressing photos and retrying…', 'warning');
+    console.error('Firebase batch save error:', err);
+    // Batch failed — try saving each chunk individually
+    try {
+      const writeTime = Date.now();
       const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
-      (stateObj.employees||[]).forEach(e=>{ if(e.photo) delete e.photo; });
-      (stateObj.inventory||[]).forEach(i=>{ if(i.photo) delete i.photo; });
-      setTimeout(()=>_fbDoSave(stateObj), 500);
+      for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
+        const chunk = {};
+        keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
+        if(!Object.keys(chunk).length) continue;
+        try {
+          await db.doc(docPath).set({
+            data: JSON.stringify(chunk),
+            updatedAt: writeTime,
+            updatedBy: window.currentUser?.name||'System',
+            deviceId: FB_DEVICE_ID
+          });
+        } catch(chunkErr) {
+          console.error(`Chunk ${docPath} save error:`, chunkErr.message);
+        }
+      }
+      _fbLastWriteTime = writeTime;
+      fbSetStatus('synced');
+    } catch(err2) {
+      fbSetStatus('error', err2.message);
+      console.error('Firebase individual save error:', err2);
     }
   }
 }
@@ -787,37 +796,56 @@ async function fbLoad() {
   if(!db) return null;
   try {
     fbSetStatus('loading');
-    // Load all chunks in parallel
+
+    // First try loading from chunk documents
     const chunkDocs = Object.keys(FB_CHUNKS);
     const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get()));
-
     let merged = {};
-    let latestTime = 0;
+    let hasChunkData = false;
 
-    snaps.forEach((snap, i) => {
-      if(!snap.exists || !snap.data() || !snap.data().data) return;
+    snaps.forEach((snap,i) => {
+      if(!snap.exists || !snap.data()?.data) return;
       try {
         const chunk = JSON.parse(snap.data().data);
+        // Only count as chunk data if it has meaningful keys
+        if(Object.keys(chunk).length > 0) hasChunkData = true;
         Object.assign(merged, chunk);
-        const t = snap.data().updatedAt || 0;
-        if(t > latestTime) latestTime = t;
       } catch(e) { console.warn('Chunk parse error:', chunkDocs[i], e); }
     });
 
-    // Fallback: if main doc has a full 'data' field (old format), use it
-    const mainSnap = snaps[chunkDocs.indexOf('companies/anmol')];
-    if(mainSnap?.exists && mainSnap.data()?.data) {
-      try {
-        const mainData = JSON.parse(mainSnap.data().data);
-        // If main doc has journal (old format), merge it in
-        if(mainData.journal && !merged.journal) Object.assign(merged, mainData);
-      } catch(e) {}
+    // If no chunk data found, fall back to old single document
+    if(!hasChunkData) {
+      console.log('No chunk data found, loading from legacy single document...');
+      const mainSnap = await db.doc('companies/anmol').get();
+      if(mainSnap.exists && mainSnap.data()?.data) {
+        try {
+          merged = JSON.parse(mainSnap.data().data);
+          _fbLastWriteTime = mainSnap.data().updatedAt || 0;
+          fbSetStatus('loaded');
+          console.log('Loaded from legacy document, will migrate on next save');
+          return merged;
+        } catch(e) {
+          console.error('Legacy doc parse error:', e);
+        }
+      }
+      fbSetStatus('idle');
+      return null;
     }
 
-    _fbLastWriteTime = latestTime;
     fbSetStatus('loaded');
-    return Object.keys(merged).length ? merged : null;
+    return merged;
   } catch(err) {
+    // On error, try legacy document
+    try {
+      console.warn('Chunk load failed, trying legacy doc:', err.message);
+      const mainSnap = await db.doc('companies/anmol').get();
+      if(mainSnap.exists && mainSnap.data()?.data) {
+        const data = JSON.parse(mainSnap.data().data);
+        _fbLastWriteTime = mainSnap.data().updatedAt || 0;
+        fbSetStatus('loaded');
+        return data;
+      }
+    } catch(e2) { console.error('Legacy fallback also failed:', e2); }
     fbSetStatus('error', err.message);
     console.error('Firebase load error:', err);
     return null;
@@ -1159,15 +1187,32 @@ async function fbForceRefresh() {
   if(!db) { fbSetStatus('error', 'Firebase not connected'); return; }
   fbSetStatus('loading');
   try {
+    // Try chunk documents first
     const chunkDocs = Object.keys(FB_CHUNKS);
-    const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get({ source: 'server' })));
+    const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get({ source:'server' })));
     let merged = {};
+    let hasChunkData = false;
+
     snaps.forEach((snap,i) => {
       if(!snap.exists || !snap.data()?.data) return;
-      try { Object.assign(merged, JSON.parse(snap.data().data)); } catch(e) {}
+      try {
+        const chunk = JSON.parse(snap.data().data);
+        if(Object.keys(chunk).length > 0) hasChunkData = true;
+        Object.assign(merged, chunk);
+      } catch(e) {}
     });
 
-    if(Object.keys(merged).length) {
+    // Fall back to legacy single document if no chunks
+    if(!hasChunkData) {
+      const mainSnap = await db.doc('companies/anmol').get({ source:'server' });
+      if(mainSnap.exists && mainSnap.data()?.data) {
+        merged = JSON.parse(mainSnap.data().data);
+        hasChunkData = true;
+        showFbToast('Loaded from legacy format — will migrate on next change');
+      }
+    }
+
+    if(hasChunkData && Object.keys(merged).length) {
       const currentPage = state.page;
       // Preserve local approved/cancelled
       const localApproved  = {};
