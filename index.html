@@ -735,52 +735,94 @@ async function _fbDoSave(snapshotOrData) {
     const writeTime = Date.now();
     const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
 
-    // Try batch write of all chunks
+    // Strip large binary data that shouldn't be in Firestore
+    // Employee photos → should be in Firebase Storage, not Firestore
+    if(stateObj.employees) {
+      stateObj.employees = stateObj.employees.map(e => {
+        if(e.photo && e.photo.length > 5000) {
+          const { photo, ...rest } = e; // remove photo from Firestore copy
+          return rest;
+        }
+        return e;
+      });
+    }
+    // Strip base64 attachments from supplier invoices (should use Storage URLs)
+    if(stateObj.supplierInvoices) {
+      stateObj.supplierInvoices = stateObj.supplierInvoices.map(si => {
+        if(si.attachmentData && si.attachmentData.length > 5000) {
+          const { attachmentData, ...rest } = si;
+          return rest;
+        }
+        return si;
+      });
+    }
+
     const batch = db.batch();
+    let batchSize = 0;
+
     for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
       const chunk = {};
       keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
       if(!Object.keys(chunk).length) continue;
+
       let chunkStr = JSON.stringify(chunk);
-      // If chunk too large, trim oldest records from arrays
-      if(chunkStr.length > 950000) {
-        console.warn(`Chunk ${docPath} is ${chunkStr.length} bytes — trimming...`);
+      const chunkKB = Math.round(chunkStr.length/1024);
+      console.log(`Chunk ${docPath.split('/').pop()}: ${chunkKB}KB`);
+
+      // If still too large, trim oldest records
+      if(chunkStr.length > 900000) {
+        console.warn(`⚠ Chunk too large (${chunkKB}KB), trimming...`);
         keys.forEach(k => {
-          if(Array.isArray(chunk[k]) && chunk[k].length > 100) {
-            chunk[k] = chunk[k].slice(-500); // keep latest 500 records
+          if(Array.isArray(chunk[k]) && chunk[k].length > 200) {
+            chunk[k] = chunk[k].slice(-800);
+            console.warn(`  Trimmed ${k} to 800 records`);
           }
         });
         chunkStr = JSON.stringify(chunk);
-        console.warn(`After trim: ${chunkStr.length} bytes`);
+        console.warn(`  After trim: ${Math.round(chunkStr.length/1024)}KB`);
       }
+
+      batchSize += chunkStr.length;
       batch.set(db.doc(docPath), {
         data: chunkStr,
         updatedAt: writeTime,
-        updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
+        updatedBy: window.currentUser?.name||'System',
         deviceId: FB_DEVICE_ID
       });
     }
+
+    console.log(`Total batch size: ${Math.round(batchSize/1024)}KB across ${Object.keys(FB_CHUNKS).length} docs`);
     await batch.commit();
     _fbLastWriteTime = writeTime;
     fbSetStatus('synced');
+
   } catch(err) {
-    console.error('Firebase batch save error:', err);
-    // Batch failed — try saving each chunk individually
+    console.error('Firebase batch save error:', err.message);
+    fbSetStatus('error', err.message);
+
+    // Fallback: save each chunk individually
     try {
       const writeTime = Date.now();
-      const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
+      const stateObj2 = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
+
       for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
         const chunk = {};
-        keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
+        keys.forEach(k => { if(stateObj2[k] !== undefined) chunk[k] = stateObj2[k]; });
         if(!Object.keys(chunk).length) continue;
+
+        // Strip photos from HR chunk
+        if(chunk.employees) chunk.employees = chunk.employees.map(e=>{ const {photo,...r}=e; return r; });
+        if(chunk.supplierInvoices) chunk.supplierInvoices = chunk.supplierInvoices.map(si=>{ const {attachmentData,...r}=si; return r; });
+
         let chunkStr = JSON.stringify(chunk);
-        if(chunkStr.length > 950000) {
+        if(chunkStr.length > 900000) {
           keys.forEach(k => {
-            if(Array.isArray(chunk[k]) && chunk[k].length > 100)
-              chunk[k] = chunk[k].slice(-500);
+            if(Array.isArray(chunk[k]) && chunk[k].length > 200)
+              chunk[k] = chunk[k].slice(-800);
           });
           chunkStr = JSON.stringify(chunk);
         }
+
         try {
           await db.doc(docPath).set({
             data: chunkStr,
@@ -788,15 +830,17 @@ async function _fbDoSave(snapshotOrData) {
             updatedBy: window.currentUser?.name||'System',
             deviceId: FB_DEVICE_ID
           });
-        } catch(chunkErr) {
-          console.error(`Chunk ${docPath} save error:`, chunkErr.message);
+          console.log(`✓ Saved ${docPath.split('/').pop()} (${Math.round(chunkStr.length/1024)}KB)`);
+        } catch(e) {
+          console.error(`✗ Failed ${docPath.split('/').pop()}: ${e.message}`);
+          toast(`⚠ Could not save ${docPath.split('/').pop()}: ${e.message}`, 'error', 5000);
         }
       }
       _fbLastWriteTime = writeTime;
       fbSetStatus('synced');
     } catch(err2) {
       fbSetStatus('error', err2.message);
-      console.error('Firebase individual save error:', err2);
+      console.error('Individual chunk save failed:', err2);
     }
   }
 }
