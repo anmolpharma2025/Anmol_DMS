@@ -672,7 +672,28 @@ if(typeof firebase !== 'undefined') {
 const FB_DOC      = 'companies/anmol';
 const FB_META_DOC = 'companies/anmol_meta';
 
-// ── CHUNK DEFINITIONS — split state across multiple Firestore docs ─────────────
+// ── SIZE DIAGNOSTIC — call diagnoseSizes() in browser console ────────────────
+function diagnoseSizes() {
+  console.log('=== STATE SIZE DIAGNOSIS ===');
+  let total = 0;
+  const sizes = {};
+  Object.keys(state).forEach(k => {
+    try {
+      const s = JSON.stringify(state[k]).length;
+      sizes[k] = s;
+      total += s;
+      if(s > 10000) console.warn(`  ${k}: ${Math.round(s/1024)}KB (${Array.isArray(state[k])?state[k].length+' records':''})`);
+      else console.log(`  ${k}: ${s} bytes`);
+    } catch(e) {}
+  });
+  console.log(`TOTAL: ${Math.round(total/1024)}KB`);
+  console.log('Sorted by size:');
+  Object.entries(sizes).sort((a,b)=>b[1]-a[1]).forEach(([k,v])=>
+    console.log(`  ${k}: ${Math.round(v/1024)}KB`)
+  );
+  return sizes;
+}
+window.diagnoseSizes = diagnoseSizes;
 // Each chunk = one Firestore document (max ~900KB each)
 const FB_CHUNKS = {
   'companies/anmol_chunk_journal':    ['journal'],
@@ -725,56 +746,53 @@ async function _fbDoSave(snapshotOrData) {
   try {
     fbSetStatus('saving');
     const writeTime = Date.now();
-    const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
+    const raw = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
 
-    // Strip large binary data that shouldn't be in Firestore
-    // Employee photos → should be in Firebase Storage, not Firestore
-    if(stateObj.employees) {
-      stateObj.employees = stateObj.employees.map(e => {
-        if(e.photo && e.photo.length > 5000) {
-          const { photo, ...rest } = e; // remove photo from Firestore copy
-          return rest;
-        }
-        return e;
-      });
-    }
-    // Strip base64 attachments from supplier invoices (should use Storage URLs)
-    if(stateObj.supplierInvoices) {
-      stateObj.supplierInvoices = stateObj.supplierInvoices.map(si => {
-        if(si.attachmentData && si.attachmentData.length > 5000) {
-          const { attachmentData, ...rest } = si;
-          return rest;
-        }
-        return si;
-      });
-    }
+    // Deep-clean state before chunking — remove all large binary data
+    const stateObj = JSON.parse(JSON.stringify(raw)); // deep copy
+    // Strip employee photos (largest offender — each photo can be 50-200KB)
+    if(stateObj.employees) stateObj.employees = stateObj.employees.map(e => {
+      const { photo, faceEncoding, photoData, ...rest } = e; return rest;
+    });
+    // Strip base64 attachments from supplier invoices
+    if(stateObj.supplierInvoices) stateObj.supplierInvoices = stateObj.supplierInvoices.map(si => {
+      const { attachmentData, ...rest } = si; return rest;
+    });
+    // Strip face photos from attendance records
+    if(stateObj.attendance) stateObj.attendance = stateObj.attendance.map(a => {
+      const { photo, facePhoto, snapshot, ...rest } = a; return rest;
+    });
 
     const batch = db.batch();
-    let batchSize = 0;
 
     for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
       const chunk = {};
       keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
       if(!Object.keys(chunk).length) continue;
 
+      // Trim arrays if too large — keep most recent records
       let chunkStr = JSON.stringify(chunk);
-      const chunkKB = Math.round(chunkStr.length/1024);
-      console.log(`Chunk ${docPath.split('/').pop()}: ${chunkKB}KB`);
+      const KB = Math.round(chunkStr.length/1024);
+      console.log(`Chunk ${docPath.split('/').pop()}: ${KB}KB`);
 
-      // If still too large, trim oldest records
-      if(chunkStr.length > 900000) {
-        console.warn(`⚠ Chunk too large (${chunkKB}KB), trimming...`);
+      if(chunkStr.length > 800000) {
+        console.warn(`⚠ Chunk too large (${KB}KB) — trimming`);
         keys.forEach(k => {
-          if(Array.isArray(chunk[k]) && chunk[k].length > 200) {
-            chunk[k] = chunk[k].slice(-800);
-            console.warn(`  Trimmed ${k} to 800 records`);
+          if(Array.isArray(chunk[k])) {
+            // Trim to latest 300 records for large arrays
+            if(chunk[k].length > 300) { chunk[k] = chunk[k].slice(-300); console.warn(`  Trimmed ${k}: ${chunk[k].length}`); }
           }
         });
         chunkStr = JSON.stringify(chunk);
         console.warn(`  After trim: ${Math.round(chunkStr.length/1024)}KB`);
       }
 
-      batchSize += chunkStr.length;
+      if(chunkStr.length > 1000000) {
+        console.error(`✗ Chunk ${docPath.split('/').pop()} still too large (${Math.round(chunkStr.length/1024)}KB) — skipping`);
+        toast(`⚠ ${docPath.split('/').pop()} chunk too large — run diagnoseSizes() in console`, 'error', 6000);
+        continue;
+      }
+
       batch.set(db.doc(docPath), {
         data: chunkStr,
         updatedAt: writeTime,
@@ -783,57 +801,15 @@ async function _fbDoSave(snapshotOrData) {
       });
     }
 
-    console.log(`Total batch size: ${Math.round(batchSize/1024)}KB across ${Object.keys(FB_CHUNKS).length} docs`);
     await batch.commit();
     _fbLastWriteTime = writeTime;
     fbSetStatus('synced');
+    console.log('✅ All chunks saved');
 
   } catch(err) {
     console.error('Firebase batch save error:', err.message);
     fbSetStatus('error', err.message);
-
-    // Fallback: save each chunk individually
-    try {
-      const writeTime = Date.now();
-      const stateObj2 = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
-
-      for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
-        const chunk = {};
-        keys.forEach(k => { if(stateObj2[k] !== undefined) chunk[k] = stateObj2[k]; });
-        if(!Object.keys(chunk).length) continue;
-
-        // Strip photos from HR chunk
-        if(chunk.employees) chunk.employees = chunk.employees.map(e=>{ const {photo,...r}=e; return r; });
-        if(chunk.supplierInvoices) chunk.supplierInvoices = chunk.supplierInvoices.map(si=>{ const {attachmentData,...r}=si; return r; });
-
-        let chunkStr = JSON.stringify(chunk);
-        if(chunkStr.length > 900000) {
-          keys.forEach(k => {
-            if(Array.isArray(chunk[k]) && chunk[k].length > 200)
-              chunk[k] = chunk[k].slice(-800);
-          });
-          chunkStr = JSON.stringify(chunk);
-        }
-
-        try {
-          await db.doc(docPath).set({
-            data: chunkStr,
-            updatedAt: writeTime,
-            updatedBy: window.currentUser?.name||'System',
-            deviceId: FB_DEVICE_ID
-          });
-          console.log(`✓ Saved ${docPath.split('/').pop()} (${Math.round(chunkStr.length/1024)}KB)`);
-        } catch(e) {
-          console.error(`✗ Failed ${docPath.split('/').pop()}: ${e.message}`);
-          toast(`⚠ Could not save ${docPath.split('/').pop()}: ${e.message}`, 'error', 5000);
-        }
-      }
-      _fbLastWriteTime = writeTime;
-      fbSetStatus('synced');
-    } catch(err2) {
-      fbSetStatus('error', err2.message);
-      console.error('Individual chunk save failed:', err2);
-    }
+    toast(`Cloud save failed: ${err.message}`, 'error', 5000);
   }
 }
 
