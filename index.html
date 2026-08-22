@@ -4112,18 +4112,39 @@ function approveJournalEntry(groupId) {
   let found = 0;
   state.journal.forEach(l => {
     if((l.group||l.id||l.groupId)===groupId) {
-      l.approved    = true;
-      l.approvedBy  = currentUser?.name||'';
-      l.approvedAt  = today();
+      l.approved   = true;
+      l.approvedBy = currentUser?.name||'';
+      l.approvedAt = today();
       found++;
     }
   });
   if(!found) { alert('No journal lines found for entry '+groupId); return; }
   auditLog('APPROVE','Journal',groupId,{description:`Approved journal entry ${groupId} by ${currentUser?.name}`});
-  // Save immediately to localStorage first so render reads the approved state
-  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
-  // Then push to Firebase — use immediate save (bypass debounce timer)
-  _fbDoSave(state);
+
+  // Serialize state NOW — before any async — so the approved flag is captured
+  const serialized = JSON.stringify(state);
+
+  // Save to localStorage immediately
+  try { localStorage.setItem('anmolpharma', serialized); } catch(e) {}
+
+  // Push to Firebase immediately using the already-serialized string
+  if(db) {
+    fbSetStatus('saving');
+    const writeTime = Date.now();
+    db.doc(FB_DOC).set({
+      data:      serialized,
+      updatedAt: writeTime,
+      updatedBy: currentUser?.name||'System',
+      deviceId:  FB_DEVICE_ID
+    }).then(()=>{
+      _fbLastWriteTime = writeTime;
+      fbSetStatus('synced');
+    }).catch(err=>{
+      fbSetStatus('error', err.message);
+      console.error('Approve save error:', err);
+    });
+  }
+
   render();
   toast(`✅ Entry ${groupId} approved and locked.`);
 }
