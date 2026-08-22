@@ -706,7 +706,7 @@ async function _doFbSave(stateData) {
 }
 
 async function _fbDoSave(stateData) {
-  if(!db) return;
+  if(!db) { fbSetStatus('idle','No connection'); return; }
   try {
     fbSetStatus('saving');
     const writeTime = Date.now();
@@ -714,10 +714,10 @@ async function _fbDoSave(stateData) {
       data:      JSON.stringify(stateData),
       updatedAt: writeTime,
       updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
-      deviceId:  FB_DEVICE_ID   // ← tag with THIS device's unique ID
+      deviceId:  FB_DEVICE_ID
     });
     _fbLastWriteTime = writeTime;
-    fbSetStatus('saved');
+    fbSetStatus('synced'); // ← was 'saved', now matches what listener expects
   } catch(err) {
     fbSetStatus('error', err.message);
     console.error('Firebase save error:', err);
@@ -770,16 +770,22 @@ function fbListen() {
     if(!doc.exists || !doc.data() || !doc.data().data) return;
 
     const remoteDeviceId = doc.data().deviceId;
-    // Skip if this update came from THIS exact device (same tab/session)
-    if(remoteDeviceId === FB_DEVICE_ID) return;
-    // Skip if we saved very recently (within 3 seconds) — prevents race condition
-    const remoteTime = doc.data().updatedAt || 0;
-    if(_fbLastWriteTime && remoteTime <= _fbLastWriteTime) return;
+    const remoteTime     = doc.data().updatedAt || 0;
+
+    // If this update came from THIS device — just confirm status as synced, don't re-merge
+    if(remoteDeviceId === FB_DEVICE_ID) {
+      _fbLastWriteTime = remoteTime;
+      fbSetStatus('synced');
+      return;
+    }
+
+    // Skip stale updates older than our last write
+    if(_fbLastWriteTime && remoteTime < _fbLastWriteTime) return;
 
     try {
       const remote = JSON.parse(doc.data().data);
       const by = doc.data().updatedBy || 'another device';
-      const currentPage = state.page;  // use local state variable directly
+      const currentPage = state.page;
 
       // Merge remote into state preserving local approved/cancelled journal flags
       const localApproved  = {};
@@ -793,14 +799,14 @@ function fbListen() {
         if(key === 'journal') {
           state.journal = (remote.journal||[]).map(l => ({
             ...l,
-            ...(localApproved[l.id]  || (l.approved  ? { approved:l.approved, approvedBy:l.approvedBy, approvedAt:l.approvedAt }   : {})),
-            ...(localCancelled[l.id] || (l.cancelled ? { cancelled:l.cancelled, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt } : {})),
+            ...(localApproved[l.id]  || {}),
+            ...(localCancelled[l.id] || {}),
           }));
         } else {
           state[key] = remote[key];
         }
       });
-      state.page = currentPage;  // preserve current page
+      state.page = currentPage;
 
       if(typeof recomputeBalances === 'function') recomputeBalances();
       try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
