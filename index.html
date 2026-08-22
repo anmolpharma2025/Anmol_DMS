@@ -680,6 +680,150 @@ if(typeof firebase !== 'undefined') {
 const FB_DOC      = 'companies/anmol';
 const FB_META_DOC = 'companies/anmol_meta';
 
+// ── CHUNK DEFINITIONS — split state across multiple Firestore docs ─────────────
+// Each chunk = one Firestore document (max ~900KB each)
+const FB_CHUNKS = {
+  'companies/anmol_chunk_accounting': [
+    'journal','invoices','salesReturns','collections','deposits',
+    'supplierInvoices','purchaseOrders','purchaseRequests','purchases',
+    'expenses','accounts'
+  ],
+  'companies/anmol_chunk_sales': [
+    'salesOrders','customers','suppliers'
+  ],
+  'companies/anmol_chunk_inventory': [
+    'inventory','inventoryMovements','inventoryTransfers'
+  ],
+  'companies/anmol_chunk_hr': [
+    'employees','attendance','payrolls','leaves','performances',
+    'trainings','disciplinary','empDocuments','announcements'
+  ],
+  'companies/anmol': [
+    // Core/small data stays in main doc
+    'page','settings','branches','lapsing'
+  ]
+};
+
+// Keys that belong to each chunk (reverse map)
+function getChunkDoc(key) {
+  for(const [doc, keys] of Object.entries(FB_CHUNKS)) {
+    if(keys.includes(key)) return doc;
+  }
+  return 'companies/anmol'; // default to main doc
+}
+
+// Get all state keys that go into a specific chunk doc
+function getChunkKeys(doc) {
+  return FB_CHUNKS[doc] || [];
+}
+
+// ── CHUNKED SAVE ──────────────────────────────────────────────────────────────
+function fbSave(stateData) {
+  // Compress photos first if needed
+  const emps = stateData.employees || [];
+  const needsCompress = emps.some(e=>e.photo&&e.photo.length>10000);
+  if(needsCompress) {
+    Promise.all(emps.map(async e=>{
+      if(e.photo&&e.photo.length>10000) e.photo=await compressPhoto(e.photo);
+    })).then(()=>_doFbSave(stateData));
+  } else {
+    _doFbSave(stateData);
+  }
+}
+
+async function _doFbSave(stateData) {
+  if(!db) return;
+  if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
+  const snapshot = JSON.stringify(stateData);
+  _fbSyncTimer = setTimeout(() => _fbDoSave(snapshot), 500);
+}
+
+async function _fbDoSave(snapshotOrData) {
+  if(!db) { fbSetStatus('idle','No connection'); return; }
+  try {
+    fbSetStatus('saving');
+    const writeTime = Date.now();
+    const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
+    const batch = db.batch();
+
+    for(const [docPath, keys] of Object.entries(FB_CHUNKS)) {
+      const chunk = {};
+      keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
+      // Skip empty chunks
+      if(!Object.keys(chunk).length) continue;
+      const chunkStr = JSON.stringify(chunk);
+      // Warn if chunk is too large
+      if(chunkStr.length > 900000) {
+        console.warn(`Chunk ${docPath} is ${chunkStr.length} bytes — may be too large`);
+      }
+      const ref = db.doc(docPath);
+      batch.set(ref, {
+        data:      chunkStr,
+        updatedAt: writeTime,
+        updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
+        deviceId:  FB_DEVICE_ID
+      });
+    }
+
+    await batch.commit();
+    _fbLastWriteTime = writeTime;
+    fbSetStatus('synced');
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase save error:', err);
+    // If batch fails (e.g. chunk still too large), try stripping photos and retry
+    if(err.message && err.message.includes('longer than')) {
+      toast('⚠ Data too large — compressing photos and retrying…', 'warning');
+      const stateObj = typeof snapshotOrData === 'string' ? JSON.parse(snapshotOrData) : snapshotOrData;
+      (stateObj.employees||[]).forEach(e=>{ if(e.photo) delete e.photo; });
+      (stateObj.inventory||[]).forEach(i=>{ if(i.photo) delete i.photo; });
+      setTimeout(()=>_fbDoSave(stateObj), 500);
+    }
+  }
+}
+
+// ── CHUNKED LOAD ──────────────────────────────────────────────────────────────
+async function fbLoad() {
+  if(!db) return null;
+  try {
+    fbSetStatus('loading');
+    // Load all chunks in parallel
+    const chunkDocs = Object.keys(FB_CHUNKS);
+    const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get()));
+
+    let merged = {};
+    let latestTime = 0;
+
+    snaps.forEach((snap, i) => {
+      if(!snap.exists || !snap.data() || !snap.data().data) return;
+      try {
+        const chunk = JSON.parse(snap.data().data);
+        Object.assign(merged, chunk);
+        const t = snap.data().updatedAt || 0;
+        if(t > latestTime) latestTime = t;
+      } catch(e) { console.warn('Chunk parse error:', chunkDocs[i], e); }
+    });
+
+    // Fallback: if main doc has a full 'data' field (old format), use it
+    const mainSnap = snaps[chunkDocs.indexOf('companies/anmol')];
+    if(mainSnap?.exists && mainSnap.data()?.data) {
+      try {
+        const mainData = JSON.parse(mainSnap.data().data);
+        // If main doc has journal (old format), merge it in
+        if(mainData.journal && !merged.journal) Object.assign(merged, mainData);
+      } catch(e) {}
+    }
+
+    _fbLastWriteTime = latestTime;
+    fbSetStatus('loaded');
+    return Object.keys(merged).length ? merged : null;
+  } catch(err) {
+    fbSetStatus('error', err.message);
+    console.error('Firebase load error:', err);
+    return null;
+  }
+}
+
 // Unique ID for THIS browser tab/device session — survives page reloads
 if(!sessionStorage.getItem('_fbDeviceId')) {
   sessionStorage.setItem('_fbDeviceId', 'dev_' + Math.random().toString(36).slice(2) + '_' + Date.now());
@@ -702,22 +846,26 @@ function fbSave(stateData) {
 async function _doFbSave(stateData) {
   if(!db) return;
   if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
-  _fbSyncTimer = setTimeout(() => _fbDoSave(stateData), 500);
+  // Snapshot the data NOW as a string so mutations during the 500ms delay don't affect what gets saved
+  const snapshot = JSON.stringify(stateData);
+  _fbSyncTimer = setTimeout(() => _fbDoSave(snapshot), 500);
 }
 
-async function _fbDoSave(stateData) {
+async function _fbDoSave(snapshotOrData) {
   if(!db) { fbSetStatus('idle','No connection'); return; }
   try {
     fbSetStatus('saving');
     const writeTime = Date.now();
+    // Accept either a pre-serialized string or an object
+    const data = typeof snapshotOrData === 'string' ? snapshotOrData : JSON.stringify(snapshotOrData);
     await db.doc(FB_DOC).set({
-      data:      JSON.stringify(stateData),
+      data:      data,
       updatedAt: writeTime,
       updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
       deviceId:  FB_DEVICE_ID
     });
     _fbLastWriteTime = writeTime;
-    fbSetStatus('synced'); // ← was 'saved', now matches what listener expects
+    fbSetStatus('synced');
   } catch(err) {
     fbSetStatus('error', err.message);
     console.error('Firebase save error:', err);
@@ -761,67 +909,76 @@ async function fbLoad() {
 }
 
 // ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
+let _fbUnsubscribers = [];
+
 function fbListen() {
   if(!db || _fbListening) return;
   _fbListening = true;
-  if(_fbUnsubscribe) _fbUnsubscribe();
+  // Unsubscribe all previous listeners
+  _fbUnsubscribers.forEach(fn=>fn());
+  _fbUnsubscribers = [];
 
-  _fbUnsubscribe = db.doc(FB_DOC).onSnapshot(doc => {
-    if(!doc.exists || !doc.data() || !doc.data().data) return;
+  const chunkDocs = Object.keys(FB_CHUNKS);
 
-    const remoteDeviceId = doc.data().deviceId;
-    const remoteTime     = doc.data().updatedAt || 0;
+  chunkDocs.forEach(docPath => {
+    const unsub = db.doc(docPath).onSnapshot(doc => {
+      if(!doc.exists || !doc.data() || !doc.data().data) return;
 
-    // If this update came from THIS device — just confirm status as synced, don't re-merge
-    if(remoteDeviceId === FB_DEVICE_ID) {
-      _fbLastWriteTime = remoteTime;
-      fbSetStatus('synced');
-      return;
-    }
+      const remoteDeviceId = doc.data().deviceId;
+      const remoteTime     = doc.data().updatedAt || 0;
 
-    // Skip stale updates older than our last write
-    if(_fbLastWriteTime && remoteTime < _fbLastWriteTime) return;
+      // If this update came from THIS device — just confirm status
+      if(remoteDeviceId === FB_DEVICE_ID) {
+        _fbLastWriteTime = Math.max(_fbLastWriteTime, remoteTime);
+        fbSetStatus('synced');
+        return;
+      }
 
-    try {
-      const remote = JSON.parse(doc.data().data);
-      const by = doc.data().updatedBy || 'another device';
-      const currentPage = state.page;
+      // Skip stale updates
+      if(_fbLastWriteTime && remoteTime < _fbLastWriteTime) return;
 
-      // Merge remote into state preserving local approved/cancelled journal flags
-      const localApproved  = {};
-      const localCancelled = {};
-      (state.journal||[]).forEach(l => {
-        if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
-        if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
-      });
+      try {
+        const chunk = JSON.parse(doc.data().data);
+        const by = doc.data().updatedBy || 'another device';
+        const currentPage = state.page;
 
-      Object.keys(remote).forEach(key => {
-        if(key === 'journal') {
-          state.journal = (remote.journal||[]).map(l => ({
-            ...l,
-            ...(localApproved[l.id]  || {}),
-            ...(localCancelled[l.id] || {}),
-          }));
-        } else {
-          state[key] = remote[key];
-        }
-      });
-      state.page = currentPage;
+        // Merge chunk into state preserving local approved/cancelled flags
+        const localApproved  = {};
+        const localCancelled = {};
+        (state.journal||[]).forEach(l => {
+          if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
+          if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
+        });
 
-      if(typeof recomputeBalances === 'function') recomputeBalances();
-      try { localStorage.setItem('anmolpharma', doc.data().data); } catch(e) {}
-      if(typeof render === 'function') render();
+        Object.keys(chunk).forEach(key => {
+          if(key === 'journal') {
+            state.journal = (chunk.journal||[]).map(l => ({
+              ...l,
+              ...(localApproved[l.id]  || {}),
+              ...(localCancelled[l.id] || {}),
+            }));
+          } else {
+            state[key] = chunk[key];
+          }
+        });
+        state.page = currentPage;
 
-      fbSetStatus('synced');
-      showFbToast(`Updated by ${by}`);
-    } catch(e) {
-      console.error('Firebase real-time sync error:', e);
-    }
-  }, err => {
-    _fbListening = false;
-    console.error('Firebase listener error:', err);
-    fbSetStatus('idle', 'Reconnecting…');
-    setTimeout(() => { _fbListening = false; fbListen(); }, 5000);
+        if(typeof recomputeBalances === 'function') recomputeBalances();
+        try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+        if(typeof render === 'function') render();
+
+        fbSetStatus('synced');
+        showFbToast(`Updated by ${by}`);
+      } catch(e) {
+        console.error('Firebase real-time sync error:', e);
+      }
+    }, err => {
+      _fbListening = false;
+      console.error('Firebase listener error:', err);
+      fbSetStatus('idle', 'Reconnecting…');
+      setTimeout(() => { _fbListening = false; fbListen(); }, 5000);
+    });
+    _fbUnsubscribers.push(unsub);
   });
 }
 let _fbMetaTimer = null;
@@ -1002,37 +1159,32 @@ async function fbForceRefresh() {
   if(!db) { fbSetStatus('error', 'Firebase not connected'); return; }
   fbSetStatus('loading');
   try {
-    const doc = await db.doc(FB_DOC).get({ source: 'server' });
-    if(doc.exists && doc.data() && doc.data().data) {
-      const remote = JSON.parse(doc.data().data);
+    const chunkDocs = Object.keys(FB_CHUNKS);
+    const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get({ source: 'server' })));
+    let merged = {};
+    snaps.forEach((snap,i) => {
+      if(!snap.exists || !snap.data()?.data) return;
+      try { Object.assign(merged, JSON.parse(snap.data().data)); } catch(e) {}
+    });
+
+    if(Object.keys(merged).length) {
       const currentPage = state.page;
-
-      // Merge remote into state — but preserve local approved/cancelled flags
-      // on journal entries that may not have been pushed yet
-      Object.keys(remote).forEach(key => {
-        if(key === 'journal') {
-          // Build a map of local approved/cancelled states by line ID
-          const localApproved   = {};
-          const localCancelled  = {};
-          (state.journal||[]).forEach(l => {
-            if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
-            if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
-          });
-          // Apply remote journal but restore local approved/cancelled where present
-          state.journal = (remote.journal||[]).map(l => {
-            const localA = localApproved[l.id];
-            const localC = localCancelled[l.id];
-            return {
-              ...l,
-              ...(localA || (l.approved  ? { approved:l.approved, approvedBy:l.approvedBy, approvedAt:l.approvedAt }   : {})),
-              ...(localC || (l.cancelled ? { cancelled:l.cancelled, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt } : {})),
-            };
-          });
-        } else {
-          state[key] = remote[key];
-        }
+      // Preserve local approved/cancelled
+      const localApproved  = {};
+      const localCancelled = {};
+      (state.journal||[]).forEach(l => {
+        if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
+        if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
       });
-
+      Object.keys(merged).forEach(key => {
+        if(key==='journal') {
+          state.journal = (merged.journal||[]).map(l=>({
+            ...l,
+            ...(localApproved[l.id]||{}),
+            ...(localCancelled[l.id]||{}),
+          }));
+        } else { state[key]=merged[key]; }
+      });
       state.page = currentPage;
       recomputeBalances();
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
@@ -4121,13 +4273,16 @@ function approveJournalEntry(groupId) {
   if(!found) { alert('No journal lines found for entry '+groupId); return; }
   auditLog('APPROVE','Journal',groupId,{description:`Approved journal entry ${groupId} by ${currentUser?.name}`});
 
-  // Serialize state NOW — before any async — so the approved flag is captured
+  // Cancel ANY pending debounced save — prevents old state from overwriting approval
+  if(_fbSyncTimer) { clearTimeout(_fbSyncTimer); _fbSyncTimer = null; }
+
+  // Serialize state NOW with approved:true captured
   const serialized = JSON.stringify(state);
 
   // Save to localStorage immediately
   try { localStorage.setItem('anmolpharma', serialized); } catch(e) {}
 
-  // Push to Firebase immediately using the already-serialized string
+  // Push directly to Firebase with the serialized string — bypass debounce
   if(db) {
     fbSetStatus('saving');
     const writeTime = Date.now();
@@ -4139,14 +4294,15 @@ function approveJournalEntry(groupId) {
     }).then(()=>{
       _fbLastWriteTime = writeTime;
       fbSetStatus('synced');
+      toast(`✅ Entry ${groupId} approved and saved to cloud.`);
     }).catch(err=>{
       fbSetStatus('error', err.message);
       console.error('Approve save error:', err);
+      toast(`⚠ Approved locally but cloud save failed: ${err.message}`, 'error');
     });
   }
 
   render();
-  toast(`✅ Entry ${groupId} approved and locked.`);
 }
 
 function editJournalEntry(groupId, type) {
