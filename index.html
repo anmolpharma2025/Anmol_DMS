@@ -4372,36 +4372,17 @@ function approveJournalEntry(groupId) {
   if(!found) { alert('No journal lines found for entry '+groupId); return; }
   auditLog('APPROVE','Journal',groupId,{description:`Approved journal entry ${groupId} by ${currentUser?.name}`});
 
-  // Cancel ANY pending debounced save — prevents old state from overwriting approval
+  // Cancel any pending debounced save
   if(_fbSyncTimer) { clearTimeout(_fbSyncTimer); _fbSyncTimer = null; }
 
-  // Serialize state NOW with approved:true captured
-  const serialized = JSON.stringify(state);
-
   // Save to localStorage immediately
-  try { localStorage.setItem('anmolpharma', serialized); } catch(e) {}
+  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
 
-  // Push directly to Firebase with the serialized string — bypass debounce
-  if(db) {
-    fbSetStatus('saving');
-    const writeTime = Date.now();
-    db.doc(FB_DOC).set({
-      data:      serialized,
-      updatedAt: writeTime,
-      updatedBy: currentUser?.name||'System',
-      deviceId:  FB_DEVICE_ID
-    }).then(()=>{
-      _fbLastWriteTime = writeTime;
-      fbSetStatus('synced');
-      toast(`✅ Entry ${groupId} approved and saved to cloud.`);
-    }).catch(err=>{
-      fbSetStatus('error', err.message);
-      console.error('Approve save error:', err);
-      toast(`⚠ Approved locally but cloud save failed: ${err.message}`, 'error');
-    });
-  }
+  // Use chunked save — NOT single document write
+  _fbDoSave(state);
 
   render();
+  toast(`✅ Entry ${groupId} approved and saving to cloud…`);
 }
 
 function editJournalEntry(groupId, type) {
