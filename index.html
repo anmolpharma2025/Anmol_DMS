@@ -683,25 +683,15 @@ const FB_META_DOC = 'companies/anmol_meta';
 // ── CHUNK DEFINITIONS — split state across multiple Firestore docs ─────────────
 // Each chunk = one Firestore document (max ~900KB each)
 const FB_CHUNKS = {
-  'companies/anmol_chunk_accounting': [
-    'journal','invoices','salesReturns','collections','deposits',
-    'supplierInvoices','purchaseOrders','purchaseRequests','purchases',
-    'expenses','accounts'
-  ],
-  'companies/anmol_chunk_sales': [
-    'salesOrders','customers','suppliers'
-  ],
-  'companies/anmol_chunk_inventory': [
-    'inventory','inventoryMovements','inventoryTransfers'
-  ],
-  'companies/anmol_chunk_hr': [
-    'employees','attendance','payrolls','leaves','performances',
-    'trainings','disciplinary','empDocuments','announcements'
-  ],
-  'companies/anmol': [
-    // Core/small data stays in main doc
-    'page','settings','branches','lapsing'
-  ]
+  'companies/anmol_chunk_journal':    ['journal'],
+  'companies/anmol_chunk_invoices':   ['invoices','salesReturns','salesOrders'],
+  'companies/anmol_chunk_payables':   ['supplierInvoices','purchaseOrders','purchaseRequests','purchases','expenses'],
+  'companies/anmol_chunk_collections':['collections','deposits','accounts'],
+  'companies/anmol_chunk_sales':      ['customers','suppliers'],
+  'companies/anmol_chunk_inventory':  ['inventory','inventoryMovements','inventoryTransfers'],
+  'companies/anmol_chunk_hr':         ['employees','attendance','leaves','performances','trainings','disciplinary','empDocuments','announcements'],
+  'companies/anmol_chunk_payroll':    ['payrolls'],
+  'companies/anmol':                  ['page','settings','branches','lapsing'],
 };
 
 // Keys that belong to each chunk (reverse map)
@@ -751,8 +741,20 @@ async function _fbDoSave(snapshotOrData) {
       const chunk = {};
       keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
       if(!Object.keys(chunk).length) continue;
+      let chunkStr = JSON.stringify(chunk);
+      // If chunk too large, trim oldest records from arrays
+      if(chunkStr.length > 950000) {
+        console.warn(`Chunk ${docPath} is ${chunkStr.length} bytes — trimming...`);
+        keys.forEach(k => {
+          if(Array.isArray(chunk[k]) && chunk[k].length > 100) {
+            chunk[k] = chunk[k].slice(-500); // keep latest 500 records
+          }
+        });
+        chunkStr = JSON.stringify(chunk);
+        console.warn(`After trim: ${chunkStr.length} bytes`);
+      }
       batch.set(db.doc(docPath), {
-        data: JSON.stringify(chunk),
+        data: chunkStr,
         updatedAt: writeTime,
         updatedBy: (typeof window.currentUser !== 'undefined' && window.currentUser) ? window.currentUser.name : 'System',
         deviceId: FB_DEVICE_ID
@@ -771,9 +773,17 @@ async function _fbDoSave(snapshotOrData) {
         const chunk = {};
         keys.forEach(k => { if(stateObj[k] !== undefined) chunk[k] = stateObj[k]; });
         if(!Object.keys(chunk).length) continue;
+        let chunkStr = JSON.stringify(chunk);
+        if(chunkStr.length > 950000) {
+          keys.forEach(k => {
+            if(Array.isArray(chunk[k]) && chunk[k].length > 100)
+              chunk[k] = chunk[k].slice(-500);
+          });
+          chunkStr = JSON.stringify(chunk);
+        }
         try {
           await db.doc(docPath).set({
-            data: JSON.stringify(chunk),
+            data: chunkStr,
             updatedAt: writeTime,
             updatedBy: window.currentUser?.name||'System',
             deviceId: FB_DEVICE_ID
