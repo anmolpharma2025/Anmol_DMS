@@ -1017,7 +1017,7 @@ async function fbLoad() {
 }
 
 // ── REAL-TIME LISTENER ────────────────────────────────────────────────────────
-let _fbUnsubscribers = [];
+// _fbUnsubscribers declared above
 
 function fbListen() {
   if(!db || _fbListening) return;
