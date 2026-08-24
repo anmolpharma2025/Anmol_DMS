@@ -703,7 +703,7 @@ window.diagnoseSizes = diagnoseSizes;
 // ── FIREBASE SAVE/LOAD — Subcollection approach (no 1MB size limit) ─────────
 // Each state array stored as individual Firestore documents in subcollections
 const FB_BASE = 'companies/anmol';
-const FB_META = 'companies/anmol/state/meta';
+const FB_META = 'companies/anmol_state_meta'; // separate document, not subcollection
 
 const FB_COLLECTIONS = [
   'journal','invoices','salesOrders','salesReturns',
@@ -714,6 +714,10 @@ const FB_COLLECTIONS = [
   'performances','trainings','disciplinary','empDocuments','announcements','accounts'
 ];
 const FB_META_KEYS = ['page','settings','branches','lapsing','auditLog'];
+
+// Helper — collection path for a state key
+// Pattern: anmol_data_{key} — all top-level collections, always odd segments
+const colPath = key => `anmol_data_${key}`;
 
 function fbSave(stateData) {
   if(_fbSyncTimer) clearTimeout(_fbSyncTimer);
@@ -732,7 +736,7 @@ async function _fbDoSave(stateData) {
     for(const key of FB_COLLECTIONS) {
       const arr = data[key];
       if(!Array.isArray(arr)||!arr.length) continue;
-      const colRef = db.collection(`${FB_BASE}/state/${key}`);
+      const colRef = db.collection(colPath(key));
       for(let i=0; i<arr.length; i+=400) {
         const batch = db.batch();
         arr.slice(i,i+400).forEach(item => {
@@ -767,7 +771,7 @@ async function fbLoad() {
     const merged = {};
     const results = await Promise.all(
       FB_COLLECTIONS.map(key =>
-        db.collection(`${FB_BASE}/state/${key}`).get()
+        db.collection(colPath(key)).get()
           .then(snap=>({key, docs:snap.docs.map(d=>{const{_t,...r}=d.data();return r;})}))
           .catch(()=>({key,docs:[]}))
       )
@@ -819,8 +823,7 @@ function fbListen() {
   _fbListening = true;
   _fbUnsubscribers.forEach(fn=>fn());
   _fbUnsubscribers = [];
-  const unsub = db.doc(FB_META).onSnapshot(async doc=>{
-    if(!doc.exists||!doc.data()) return;
+  const unsub = db.doc(FB_META).onSnapshot(async doc=>{    if(!doc.exists||!doc.data()) return;
     const rid = doc.data().deviceId, rt = doc.data().updatedAt||0;
     if(rid===FB_DEVICE_ID) { _fbLastWriteTime=rt; fbSetStatus('synced'); return; }
     if(_fbLastWriteTime&&rt<_fbLastWriteTime) return;
