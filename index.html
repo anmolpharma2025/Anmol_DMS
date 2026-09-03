@@ -13768,7 +13768,7 @@ function renderOrderLines(prefix) {
     return `<tr id="${prefix}-line-row-${i}">
     <td style="position:relative;min-width:180px">
       <input type="text" id="${prefix}-item-inp-${i}"
-        value="${item?item.name:l.desc||''}" placeholder="Search or type item…"
+        value="${String(item?item.name:(l.desc||'')).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" placeholder="Search or type item…"
         autocomplete="off"
         oninput="filterItemDrop('${prefix}',${i},this.value)"
         onfocus="showItemDrop('${prefix}',${i})"
@@ -13791,19 +13791,39 @@ function buildItemDrop(prefix, i, isSale) {
   const items = state.inventory||[];
   const dd = document.getElementById(`${prefix}-item-dd-${i}`);
   if(!dd) return;
+
+  // Escape for safe use inside an HTML attribute
+  const esc = s => String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const priceOf = it => {
+    const v = parseFloat(isSale ? it.salePrice : it.costPrice);
+    return isNaN(v) ? 0 : v;
+  };
+
   dd.innerHTML = items.map(it=>`
-    <div class="item-opt" data-id="${it.id}" data-name="${it.name}" data-price="${isSale?it.salePrice:it.costPrice}" data-unit="${it.unit||''}"
-      onmousedown="selectItemLine('${prefix}',${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${isSale?it.salePrice:it.costPrice},'${it.unit||''}')"
+    <div class="item-opt" data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-price="${priceOf(it)}" data-unit="${esc(it.unit||'')}"
       style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
       onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
-      <div style="font-weight:500">${it.name}</div>
-      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · ₱${(isSale?it.salePrice:it.costPrice)||0}</div>
+      <div style="font-weight:500">${esc(it.name)}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${esc(it.unit||'')} · ₱${priceOf(it)}</div>
     </div>`).join('') +
-  `<div class="item-add-opt" onmousedown="addNewItemFromLine('${prefix}',${i})"
+  `<div class="item-add-opt"
     style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
     onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
     ➕ Add new inventory item…
   </div>`;
+
+  // Bind handlers in JS — avoids any quoting/escaping issues in inline attributes
+  dd.querySelectorAll('.item-opt').forEach(opt => {
+    opt.onmousedown = (e) => {
+      e.preventDefault();
+      selectItemLine(prefix, i, opt.dataset.id, opt.dataset.name,
+        parseFloat(opt.dataset.price)||0, opt.dataset.unit||'');
+    };
+  });
+  const addOpt = dd.querySelector('.item-add-opt');
+  if(addOpt) addOpt.onmousedown = (e) => { e.preventDefault(); addNewItemFromLine(prefix, i); };
 }
 
 function filterItemDrop(prefix, i, q) {
