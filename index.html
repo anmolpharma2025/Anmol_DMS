@@ -742,7 +742,17 @@ async function _fbDoSave(stateData) {
         arr.slice(i,i+400).forEach(item => {
           if(!item||!item.id) return;
           const docId = String(item.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
-          const {photo,faceEncoding,photoData,attachmentData,snapshot:_s,facePhoto,...clean} = item;
+          // Each record is now its own Firestore document, so photos are fine to keep.
+          // Only drop a field if it alone would blow the 1MB per-document limit.
+          const clean = {};
+          Object.keys(item).forEach(f => {
+            const v = item[f];
+            if(typeof v === 'string' && v.length > 700000) {
+              console.warn(`Skipping oversized field "${f}" on ${key}/${docId} (${Math.round(v.length/1024)}KB)`);
+              return;
+            }
+            clean[f] = v;
+          });
           batch.set(colRef.doc(docId), {...clean, _t: writeTime});
         });
         await batch.commit();
@@ -762,6 +772,76 @@ async function _fbDoSave(stateData) {
     console.error('Firebase save error:', err.message);
     toast('Cloud save failed: '+err.message, 'error', 5000);
   }
+}
+
+// ── PHOTO RECOVERY ────────────────────────────────────────────────────────────
+// Restores employee photos from this browser's localStorage backup, if present.
+// Run recoverPhotos() in the console on a device that still shows the photos.
+function recoverPhotos() {
+  let backup = null;
+  try { backup = JSON.parse(localStorage.getItem('anmolpharma')||'null'); } catch(e) {}
+  if(!backup || !Array.isArray(backup.employees)) {
+    console.log('No local backup found in this browser.');
+    return 0;
+  }
+  const byId = {};
+  backup.employees.forEach(e => { if(e && e.id) byId[String(e.id)] = e; });
+  let restored = 0;
+  (state.employees||[]).forEach(e => {
+    const b = byId[String(e.id)];
+    if(b && b.photo && !e.photo) { e.photo = b.photo; restored++; }
+  });
+  if(restored) {
+    save();
+    render();
+    console.log(`Restored ${restored} employee photo(s) and pushed to cloud.`);
+    if(typeof toast==='function') toast(`Restored ${restored} employee photo(s)`);
+  } else {
+    console.log('Nothing to restore — no photos found in the local backup.');
+  }
+  return restored;
+}
+window.recoverPhotos = recoverPhotos;
+
+// ── SAFE REMOTE MERGE ─────────────────────────────────────────────────────────
+// Never let a remote record that is missing media overwrite a local one that has it.
+const MEDIA_FIELDS = ['photo','photoData','facePhoto','faceEncoding','attachmentData','signature','encryptedSig'];
+
+function mergeRemoteArray(key, remoteArr, localArr) {
+  if(!Array.isArray(remoteArr)) return remoteArr;
+  const localById = {};
+  (localArr||[]).forEach(r => { if(r && r.id != null) localById[String(r.id)] = r; });
+  return remoteArr.map(r => {
+    if(!r || r.id == null) return r;
+    const local = localById[String(r.id)];
+    if(!local) return r;
+    const restored = {...r};
+    MEDIA_FIELDS.forEach(f => {
+      if((restored[f] === undefined || restored[f] === '') && local[f]) restored[f] = local[f];
+    });
+    return restored;
+  });
+}
+
+// Applies a remote snapshot onto state, preserving journal approvals and local media
+function applyRemoteState(remote) {
+  if(!remote) return;
+  const currentPage = state.page;
+  const la = {}, lc = {};
+  (state.journal||[]).forEach(l => {
+    if(l.approved)  la[l.id] = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
+    if(l.cancelled) lc[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
+  });
+  Object.keys(remote).forEach(key => {
+    if(key === 'journal') {
+      state.journal = (remote.journal||[]).map(l => ({...l, ...(la[l.id]||{}), ...(lc[l.id]||{})}));
+    } else if(Array.isArray(remote[key])) {
+      state[key] = mergeRemoteArray(key, remote[key], state[key]);
+    } else {
+      state[key] = remote[key];
+    }
+  });
+  state.page = currentPage;
 }
 
 async function fbLoad() {
@@ -830,16 +910,7 @@ function fbListen() {
     showFbToast('Syncing…');
     const remote = await fbLoad();
     if(remote) {
-      const cp=state.page, la={}, lc={};
-      (state.journal||[]).forEach(l=>{
-        if(l.approved) la[l.id]={approved:true,approvedBy:l.approvedBy,approvedAt:l.approvedAt};
-        if(l.cancelled) lc[l.id]={cancelled:true,cancelReason:l.cancelReason,cancelledBy:l.cancelledBy,cancelledAt:l.cancelledAt};
-      });
-      Object.keys(remote).forEach(key=>{
-        if(key==='journal') state.journal=(remote.journal||[]).map(l=>({...l,...(la[l.id]||{}),...(lc[l.id]||{})}));
-        else state[key]=remote[key];
-      });
-      state.page=cp;
+      applyRemoteState(remote);
       if(typeof recomputeBalances==='function') recomputeBalances();
       try{localStorage.setItem('anmolpharma',JSON.stringify(state));}catch(e){}
       if(typeof render==='function') render();
@@ -858,16 +929,7 @@ async function fbForceRefresh() {
   fbSetStatus('loading');
   const remote = await fbLoad();
   if(remote) {
-    const cp=state.page, la={}, lc={};
-    (state.journal||[]).forEach(l=>{
-      if(l.approved) la[l.id]={approved:true,approvedBy:l.approvedBy,approvedAt:l.approvedAt};
-      if(l.cancelled) lc[l.id]={cancelled:true,cancelReason:l.cancelReason,cancelledBy:l.cancelledBy,cancelledAt:l.cancelledAt};
-    });
-    Object.keys(remote).forEach(key=>{
-      if(key==='journal') state.journal=(remote.journal||[]).map(l=>({...l,...(la[l.id]||{}),...(lc[l.id]||{})}));
-      else state[key]=remote[key];
-    });
-    state.page=cp;
+    applyRemoteState(remote);
     recomputeBalances();
     try{localStorage.setItem('anmolpharma',JSON.stringify(state));}catch(e){}
     await fbLoadMeta(); render();
@@ -1840,9 +1902,7 @@ function showAppScreen() {
   // Load latest data from Firebase then start real-time listener
   Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
     if(remoteState) {
-      const currentPage = state.page;
-      Object.keys(remoteState).forEach(key => { state[key] = remoteState[key]; });
-      state.page = currentPage;
+      applyRemoteState(remoteState);
       recomputeBalances();
       try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
       render();
@@ -2851,9 +2911,63 @@ function auditLog(action, module, recordId, details={}, before=null, after=null)
 // Mobile attendance sync removed
 
 function save() {
-  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+  try {
+    localStorage.setItem('anmolpharma', JSON.stringify(state));
+    window._lastLocalSaveOk = true;
+  } catch(e) {
+    window._lastLocalSaveOk = false;
+    console.error('localStorage save FAILED:', e.name, e.message);
+    if(!window._quotaWarned) {
+      window._quotaWarned = true;
+      if(typeof toast === 'function')
+        toast('⚠ Local storage is full — changes may not survive a refresh. Run clearLocalCache() in the console.', 'error', 8000);
+    }
+  }
   fbSave(state);
 }
+
+// Frees localStorage by dropping the pre-update backup copy
+function clearLocalCache() {
+  try {
+    localStorage.removeItem('anmolpharma_pre_update_backup');
+    localStorage.setItem('anmolpharma', JSON.stringify(state));
+    console.log('Local cache rewritten successfully.');
+    window._quotaWarned = false;
+    return true;
+  } catch(e) {
+    console.error('Still failing:', e.message);
+    return false;
+  }
+}
+window.clearLocalCache = clearLocalCache;
+
+// Reports where each employee photo currently exists
+async function checkPhotos() {
+  console.log('=== EMPLOYEE PHOTO CHECK ===');
+  let local = {};
+  try {
+    const d = JSON.parse(localStorage.getItem('anmolpharma')||'{}');
+    (d.employees||[]).forEach(e => { if(e.id) local[String(e.id)] = !!e.photo; });
+  } catch(e) {}
+
+  let remote = {};
+  if(db) {
+    try {
+      const snap = await db.collection(colPath('employees')).get();
+      snap.docs.forEach(doc => { const r = doc.data(); remote[String(r.id)] = !!r.photo; });
+    } catch(e) { console.warn('Could not read cloud employees:', e.message); }
+  }
+
+  (state.employees||[]).forEach(e => {
+    const id = String(e.id);
+    console.log(
+      `${(e.name||id).padEnd(24)} memory:${e.photo?'YES':'no '}  localStorage:${local[id]?'YES':'no '}  cloud:${remote[id]===undefined?'(missing doc)':(remote[id]?'YES':'no ')}`
+    );
+  });
+  console.log('localStorage size:', Math.round((localStorage.getItem('anmolpharma')||'').length/1024)+'KB');
+  console.log('Last local save OK:', window._lastLocalSaveOk !== false);
+}
+window.checkPhotos = checkPhotos;
 function load() {
   try {
     const d = localStorage.getItem('anmolpharma');
