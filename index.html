@@ -19242,6 +19242,43 @@ function renderAttendance(c, ta) {
   _renderAttendanceInner(c, ta); // render immediately with current data too
 }
 
+// ── ATTENDANCE ↔ EMPLOYEE MATCHING ───────────────────────────────────────────
+// Strict, exact matching only. Substring/partial matching caused records to be
+// attributed to the wrong employee (e.g. "E12" matching employee "E1").
+function attRecordBelongsTo(rec, emp) {
+  if(!rec || !emp) return false;
+  const norm = v => String(v==null?'':v).trim().toLowerCase();
+
+  // 1. Exact employee ID match — the only reliable signal
+  if(rec.empId != null && emp.id != null && norm(rec.empId) === norm(emp.id)) return true;
+
+  // 2. Records saved with the name in the empId field (older mobile records)
+  if(rec.empId && emp.name && norm(rec.empId) === norm(emp.name)) return true;
+
+  // 3. Exact name match — only when the record carries no usable ID,
+  //    otherwise a stale name could override a correct ID.
+  const recHasId = rec.empId != null && String(rec.empId).trim() !== '';
+  if(!recHasId && rec.empName && emp.name && norm(rec.empName) === norm(emp.name)) return true;
+
+  return false;
+}
+
+// True when two attendance records are the same person on the same day
+function sameAttendanceRecord(a, b) {
+  if(!a || !b) return false;
+  const norm = v => String(v==null?'':v).trim().toLowerCase();
+  if(a.id && b.id && norm(a.id) === norm(b.id)) return true;
+  if(norm(a.date) !== norm(b.date) || !a.date) return false;
+
+  const aId = norm(a.empId), bId = norm(b.empId);
+  if(aId && bId) return aId === bId;              // both have IDs — must be equal
+
+  const aName = norm(a.empName), bName = norm(b.empName);
+  if(aName && bName) return aName === bName;      // fall back to names, both present
+
+  return false;                                   // never collapse on empty values
+}
+
 async function syncMobileAttendance() {
   try {
     if(!db) return;
@@ -19251,10 +19288,7 @@ async function syncMobileAttendance() {
     snap.docs.forEach(doc=>{
       const r = doc.data();
       if(!r.empId || !r.date) return;
-      const exists = (state.attendance||[]).some(a=>
-        a.id===r.id ||
-        (a.date===r.date && (a.empId===r.empId || a.empName===r.empName))
-      );
+      const exists = (state.attendance||[]).some(a=>sameAttendanceRecord(a, r));
       if(!exists) {
         if(!state.attendance) state.attendance=[];
         state.attendance.push({
@@ -19271,9 +19305,7 @@ async function syncMobileAttendance() {
         changed = true;
       } else {
         // Record already here — fill in anything the mobile app added later (e.g. clock-out)
-        const local = (state.attendance||[]).find(a=>
-          a.id===r.id || (a.date===r.date && (a.empId===r.empId || a.empName===r.empName))
-        );
+        const local = (state.attendance||[]).find(a=>sameAttendanceRecord(a, r));
         if(local) {
           if(r.timeOut && !local.timeOut) { local.timeOut = r.timeOut; changed = true; }
           if(r.hoursWorked   && !local.hoursWorked)   { local.hoursWorked   = r.hoursWorked;   changed = true; }
@@ -19313,11 +19345,8 @@ function _renderAttendanceInner(c, ta) {
   <tbody>
   ${allRecords.length===0?`<tr><td colspan="10">${emptyState('ti-clock','No Attendance Records','Attendance will appear here once logged or verified via face recognition.','Log Attendance','showLogAttendance()')}</td></tr>`:''}
   ${[...allRecords].sort((a,b)=>(b.date+b.timeIn).localeCompare(a.date+a.timeIn)).map(a=>{
-    const emp = emps.find(e=>
-      String(e.id)===String(a.empId) ||
-      (a.empName && e.name.trim().toLowerCase()===a.empName.trim().toLowerCase()) ||
-      String(e.name)===String(a.empId)
-    ) || {name:a.empName||a.empId||'Unknown', department:'—'};
+    const emp = emps.find(e=>attRecordBelongsTo(a, e))
+      || {name:a.empName||a.empId||'Unknown', department:'—'};
     return `<tr>
       <td class="mono" style="font-size:12px">${a.date}</td>
       <td style="font-weight:500">${emp.name}</td>
@@ -19359,13 +19388,7 @@ function _renderAttendanceInner(c, ta) {
   <thead><tr><th>Employee</th><th>Dept</th><th>Time In</th><th>Time Out</th><th style="text-align:right">Hours</th><th style="text-align:right">OT</th><th>Status</th><th>Verified</th><th>Location</th><th>Remarks</th><th>Actions</th></tr></thead>
   <tbody>
   ${emps.map(emp=>{
-    const rec = dayRecords.find(a=>
-      String(a.empId)===String(emp.id) ||
-      String(a.empId)===String(emp.name) ||
-      (a.empName && a.empName.trim().toLowerCase()===emp.name.trim().toLowerCase()) ||
-      (a.empId && emp.id && String(a.empId).includes(String(emp.id))) ||
-      (a.empId && emp.name && a.empId.trim().toLowerCase()===emp.name.trim().toLowerCase())
-    );
+    const rec = dayRecords.find(a=>attRecordBelongsTo(a, emp));
     if(!rec) return `<tr style="background:rgba(239,68,68,0.04)">
       <td style="font-weight:500">
         <div style="display:flex;align-items:center;gap:8px">
@@ -19434,7 +19457,7 @@ function markAbsent(empId, date) {
 function markAllAbsent(date) {
   const emps = state.employees||[];
   const recs = (state.attendance||[]).filter(a=>a.date===date);
-  const missing = emps.filter(e=>!recs.find(r=>r.empId===e.id));
+  const missing = emps.filter(e=>!recs.find(r=>attRecordBelongsTo(r, e)));
   if(!missing.length) { alert('All employees already have a record for this date.'); return; }
   if(!confirm(`Mark ${missing.length} employee${missing.length>1?'s':''} with no record as Absent on ${date}?\n\n${missing.map(e=>e.name).join(', ')}`)) return;
   if(!state.attendance) state.attendance=[];
@@ -20081,8 +20104,7 @@ function runAutoGeneratePayroll() {
     const empAtt = allAtt.filter(a=>{
       if(a.date<from||a.date>to) return false;
       if(a.status!=='present') return false;
-      return a.empId===emp.id || a.empId===emp.name ||
-        (a.empName&&a.empName.trim().toLowerCase()===emp.name.trim().toLowerCase());
+      return attRecordBelongsTo(a, emp);
     });
 
     // Also count approved with-pay leaves as present
@@ -20091,8 +20113,7 @@ function runAutoGeneratePayroll() {
       const e2= l.endDate||l.to||'';
       if(l.status!=='approved') return false;
       if(l.withPay===false) return false;
-      return (l.empId===emp.id||l.empId===emp.name||(l.empName&&l.empName===emp.name)) &&
-        s<=to && e2>=from;
+      return attRecordBelongsTo(l, emp) && s<=to && e2>=from;
     });
 
     // Count leave days within period

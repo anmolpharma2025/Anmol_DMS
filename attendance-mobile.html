@@ -1013,9 +1013,7 @@ async function renderMyPayslips() {
   try {
     const allPayrolls = await erpRead('payrolls');
     const payrolls = allPayrolls.filter(p=>
-      p.empId===selectedEmp?.id ||
-      p.empId===selectedEmp?.name ||
-      (p.empName&&p.empName===selectedEmp?.name)
+      recordBelongsTo(p, selectedEmp||{})
     ).sort((a,b)=>(b.period||'').localeCompare(a.period||''));
 
     if(cnt) cnt.textContent = payrolls.length+' payslip'+(payrolls.length!==1?'s':'');
@@ -1144,9 +1142,7 @@ async function renderMyLeaves() {
   try {
     const allLeaves = await erpRead('leaves');
     const leaves = allLeaves.filter(l=>
-      l.empId===selectedEmp?.id ||
-      l.empId===selectedEmp?.name ||
-      (l.empName&&l.empName===selectedEmp?.name)
+      recordBelongsTo(l, selectedEmp||{})
     ).sort((a,b)=>(b.appliedOn||b.filedOn||'').localeCompare(a.appliedOn||a.filedOn||''));
 
     if(!leaves.length) {
@@ -1565,6 +1561,17 @@ async function recordAttendance(verified, confidence) {
 // ══════════════════════════════════════════════════════════════════════
 // The ERP stores each array as its own Firestore collection:
 //   anmol_data_attendance, anmol_data_leaves, anmol_data_payrolls, ...
+// Strict record→employee matching (mirrors the ERP)
+function recordBelongsTo(rec, emp) {
+  if(!rec || !emp) return false;
+  const norm = v => String(v==null?'':v).trim().toLowerCase();
+  if(rec.empId != null && emp.id != null && norm(rec.empId) === norm(emp.id)) return true;
+  if(rec.empId && emp.name && norm(rec.empId) === norm(emp.name)) return true;
+  const recHasId = rec.empId != null && String(rec.empId).trim() !== '';
+  if(!recHasId && rec.empName && emp.name && norm(rec.empName) === norm(emp.name)) return true;
+  return false;
+}
+
 const erpCol = key => `anmol_data_${key}`;
 
 // Read a whole ERP collection as an array
@@ -2032,7 +2039,7 @@ async function loadTodayStatus() {
       const erpAtt = await erpRead('attendance');
       const td = today();
       todayRecord = erpAtt.find(r=>
-        r.date===td && (r.empId===selectedEmp.id || r.empId===selectedEmp.name || r.empName===selectedEmp.name)
+        r.date===td && recordBelongsTo(r, selectedEmp)
       ) || null;
     }
   } catch(e) { todayRecord=null; console.error('loadTodayStatus:',e); }
@@ -2095,9 +2102,7 @@ async function loadAttendanceRecords() {
     try {
       const erpState = { attendance: await erpRead('attendance') };
       (erpState.attendance||[]).forEach(r=>{
-        const match = r.empId===selectedEmp.id ||
-          r.empId===selectedEmp.name ||
-          (r.empName&&r.empName.trim().toLowerCase()===selectedEmp.name.trim().toLowerCase());
+        const match = recordBelongsTo(r, selectedEmp);
         if(match && !records.find(x=>x.id===r.id || (x.date===r.date&&x.timeIn===r.timeIn))) {
           records.push(r);
         }
