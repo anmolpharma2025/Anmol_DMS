@@ -19269,6 +19269,17 @@ async function syncMobileAttendance() {
           source: 'mobile_app'
         });
         changed = true;
+      } else {
+        // Record already here — fill in anything the mobile app added later (e.g. clock-out)
+        const local = (state.attendance||[]).find(a=>
+          a.id===r.id || (a.date===r.date && (a.empId===r.empId || a.empName===r.empName))
+        );
+        if(local) {
+          if(r.timeOut && !local.timeOut) { local.timeOut = r.timeOut; changed = true; }
+          if(r.hoursWorked   && !local.hoursWorked)   { local.hoursWorked   = r.hoursWorked;   changed = true; }
+          if(r.overtimeHours && !local.overtimeHours) { local.overtimeHours = r.overtimeHours; changed = true; }
+          if(r.locTagOut && !local.locTagOut) { local.locTagOut = r.locTagOut; changed = true; }
+        }
       }
     });
     if(changed) { save(); render(); }
