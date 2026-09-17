@@ -656,10 +656,23 @@ if(typeof firebase !== 'undefined') {
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
     try { window.fbStorage = firebase.storage(); } catch(e) {}
-    // Try anon auth in background — not required for open rules
+    // Anonymous auth — required by the Storage rules (request.auth != null)
     try {
-      if(firebase.auth) firebase.auth().signInAnonymously().catch(()=>{});
-    } catch(e) {}
+      if(firebase.auth) {
+        window._fbAuthPromise = new Promise((resolve, reject) => {
+          const auth = firebase.auth();
+          auth.onAuthStateChanged(user => { if(user) resolve(user); });
+          auth.signInAnonymously().catch(err => {
+            console.error('Anonymous auth FAILED:', err.code, err.message);
+            if(err.code === 'auth/operation-not-allowed') {
+              console.error('→ Enable Anonymous sign-in: Firebase Console → Authentication → Sign-in method');
+            }
+            reject(err);
+          });
+        });
+        window._fbAuthPromise.catch(()=>{}); // avoid unhandled rejection noise
+      }
+    } catch(e) { console.warn('Auth SDK unavailable:', e); }
   } catch(e) {
     try { db = firebase.firestore(); } catch(e2) {}
     if(!db) console.warn('Firebase init error:', e);
@@ -802,6 +815,204 @@ function recoverPhotos() {
   return restored;
 }
 window.recoverPhotos = recoverPhotos;
+
+// ── FILE ATTACHMENTS (Firebase Cloud Storage) ────────────────────────────────
+// Scanned invoices go to Cloud Storage, not Firestore. Firestore keeps only the
+// download URL (~100 bytes) so bulk loads stay fast.
+
+const ATTACH_MAX_BYTES   = 10 * 1024 * 1024; // reject anything over 10MB outright
+const ATTACH_COMPRESS_PX = 1600;             // long edge after compression
+const ATTACH_QUALITY     = 0.72;
+
+// Shrink an image File before upload. PDFs pass through untouched.
+function compressImageFile(file) {
+  return new Promise(resolve => {
+    if(!file || !file.type.startsWith('image/')) { resolve(file); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        const MAX = ATTACH_COMPRESS_PX;
+        if(w > h) { if(w > MAX) { h = Math.round(h*MAX/w); w = MAX; } }
+        else      { if(h > MAX) { w = Math.round(w*MAX/h); h = MAX; } }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        cv.toBlob(blob => {
+          if(!blob || blob.size >= file.size) { resolve(file); return; }
+          resolve(new File([blob], file.name.replace(/\.[^.]+$/,'') + '.jpg', { type:'image/jpeg' }));
+        }, 'image/jpeg', ATTACH_QUALITY);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
+// Waits until anonymous sign-in has completed. Storage rules require
+// request.auth != null, so uploading before this resolves gets rejected.
+async function ensureAuthReady(timeoutMs = 8000) {
+  if(typeof firebase === 'undefined' || !firebase.auth) return null;
+  const current = firebase.auth().currentUser;
+  if(current) return current;
+  if(!window._fbAuthPromise) {
+    try { await firebase.auth().signInAnonymously(); } catch(e) {
+      throw new Error('Not signed in to Firebase — ' + e.message);
+    }
+    return firebase.auth().currentUser;
+  }
+  return await Promise.race([
+    window._fbAuthPromise,
+    new Promise((_, rej) => setTimeout(() =>
+      rej(new Error('Timed out waiting for Firebase sign-in.')), timeoutMs))
+  ]);
+}
+
+// Upload a file to Cloud Storage and return its download URL
+async function uploadToStorage(file, path) {
+  if(!window.fbStorage) throw new Error('Cloud Storage is not enabled for this project.');
+
+  try { await ensureAuthReady(); }
+  catch(e) { throw new Error('Sign-in required before upload. ' + e.message); }
+
+  try {
+    const ref  = window.fbStorage.ref(path);
+    const snap = await ref.put(file);
+    return await snap.ref.getDownloadURL();
+  } catch(err) {
+    if(err.code === 'storage/unauthorized')
+      throw new Error('Storage rules rejected the upload. Check that Anonymous sign-in is enabled and the Storage rules are published.');
+    if(err.code === 'storage/unknown')
+      throw new Error('Cloud Storage is not set up for this project (Firebase Console → Storage → Get started).');
+    throw err;
+  }
+}
+
+// Compress, validate, then upload a supplier-invoice attachment
+async function uploadAttachment(file, siId) {
+  if(!file) return '';
+  if(file.size > ATTACH_MAX_BYTES) {
+    throw new Error(`File is ${Math.round(file.size/1024/1024)}MB — the limit is 10MB.`);
+  }
+  const finalFile = await compressImageFile(file);
+  const safeName  = finalFile.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+  const path      = `supplier-invoices/${siId}/${Date.now()}_${safeName}`;
+  const url       = await uploadToStorage(finalFile, path);
+  console.log(`Attachment uploaded: ${Math.round(file.size/1024)}KB → ${Math.round(finalFile.size/1024)}KB`);
+  return url;
+}
+
+// Verifies plan, auth and Storage rules. Run checkStorage() in the console.
+async function checkStorage() {
+  console.log('=== CLOUD STORAGE CHECK ===');
+
+  if(typeof firebase === 'undefined')       { console.log('❌ Firebase SDK not loaded'); return; }
+  if(typeof firebase.storage !== 'function'){ console.log('❌ Storage SDK not loaded'); return; }
+  if(!window.fbStorage)                     { console.log('❌ firebase.storage() failed to initialise'); return; }
+  console.log('✅ Storage SDK loaded');
+
+  let user = null;
+  try {
+    user = await ensureAuthReady();
+    console.log('✅ Signed in — uid:', user ? user.uid : '(none)', user && user.isAnonymous ? '(anonymous)' : '');
+  } catch(e) {
+    console.log('❌ Auth failed:', e.message);
+    console.log('   → Firebase Console → Authentication → Sign-in method → enable Anonymous');
+    return;
+  }
+
+  try {
+    const ref = window.fbStorage.ref('_diagnostic/plancheck.txt');
+    await ref.putString('ok ' + new Date().toISOString());
+    const url = await ref.getDownloadURL();
+    console.log('✅ Write succeeded — you are on the BLAZE plan and rules allow writes');
+    console.log('   URL:', url);
+    try { await ref.delete(); console.log('✅ Cleanup done'); } catch(e) {}
+    console.log('\nAttachments will work. Safe to upload supplier invoices.');
+  } catch(err) {
+    console.log('❌ Write failed:', err.code || '', err.message);
+    if(err.code === 'storage/unauthorized')
+      console.log('   → Rules rejected it. Publish your Storage rules, or confirm Anonymous sign-in is on.');
+    else if(err.code === 'storage/unknown')
+      console.log('   → Storage not provisioned. This usually means the project is still on SPARK.');
+  }
+}
+window.checkStorage = checkStorage;
+
+// Escapes free text for use inside an inline handler: on...="fn('<TEXT>')"
+// Handles both layers — the JS string literal and the HTML attribute.
+function jsq(s) {
+  return String(s==null?'':s)
+    .replace(/\\/g,'\\\\')
+    .replace(/'/g,"\\'")
+    .replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;')
+    .replace(/\r?\n/g,'\\n');
+}
+// Escapes text for use as an HTML attribute value or body text
+function esc(s) {
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function jsq_anchor_marker(){}
+// ── AI RESPONSE PARSING ──────────────────────────────────────────────────────
+// Pulls JSON out of a model reply that may include prose, markdown fences,
+// or a trailing explanation. Throws with the real reason when it cannot.
+function parseAIJson(data, label) {
+  label = label || 'document';
+
+  // 1. Surface API-level errors instead of hiding them
+  if(!data) throw new Error('No response from the AI service. Check your internet connection.');
+  if(data.error) {
+    const m = data.error.message || JSON.stringify(data.error);
+    console.error('AI API error:', data.error);
+    throw new Error('The AI service returned an error:\n\n' + m);
+  }
+
+  const blocks = Array.isArray(data.content) ? data.content : [];
+  const raw = blocks.map(b => b && b.text ? b.text : '').join('').trim();
+  console.log('AI raw response for ' + label + ':', raw);
+
+  if(!raw) {
+    const stop = data.stop_reason ? ' (stop reason: ' + data.stop_reason + ')' : '';
+    throw new Error('The AI returned an empty response' + stop + '. Try a smaller or clearer image.');
+  }
+
+  // 2. Strip markdown fences
+  let s = raw.replace(/```+\s*json/gi, '').replace(/```+/g, '').trim();
+
+  // 3. Take the outermost {...} block, ignoring braces inside strings
+  const start = s.indexOf('{');
+  if(start === -1) {
+    throw new Error('The AI did not return any data for this ' + label + '.\n\nIt replied:\n' + raw.slice(0,300));
+  }
+  let depth = 0, inStr = false, escNext = false, end = -1;
+  for(let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if(escNext) { escNext = false; continue; }
+    if(ch === '\\') { escNext = true; continue; }
+    if(ch === '"') { inStr = !inStr; continue; }
+    if(inStr) continue;
+    if(ch === '{') depth++;
+    else if(ch === '}') { depth--; if(depth === 0) { end = i; break; } }
+  }
+  if(end === -1) {
+    throw new Error('The AI response was cut off before it finished.\n\nThis usually means the document has too many line items. Try scanning one page at a time.');
+  }
+
+  try {
+    return JSON.parse(s.slice(start, end + 1));
+  } catch(err) {
+    console.error('JSON parse failed. Raw response:', raw);
+    throw new Error('Could not read the AI response for this ' + label + '.\n\n' + err.message +
+                    '\n\nIt replied:\n' + raw.slice(0,300));
+  }
+}
 
 // ── SAFE REMOTE MERGE ─────────────────────────────────────────────────────────
 // Never let a remote record that is missing media overwrite a local one that has it.
@@ -4413,7 +4624,7 @@ function showAddJournal(type, prefill) {
         onblur="setTimeout(hidePayeeDropdown,200)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();checkPayeeAndPrompt();}if(event.key==='Escape')document.getElementById('je-payee-dropdown').style.display='none'">
       <div id="je-payee-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border-mid);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:500;max-height:220px;overflow-y:auto;margin-top:2px">
-        ${(state.suppliers||[]).map(s=>`<div class="payee-opt" data-value="${s.name}" onclick="selectPayee('${s.name.replace(/'/g,"\\'")}')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">${s.name}</div>`).join('')}
+        ${(state.suppliers||[]).map(s=>`<div class="payee-opt" data-value="${esc(s.name)}" onclick="selectPayee('${jsq(s.name)}')" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border-light)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">${s.name}</div>`).join('')}
         <div class="payee-opt payee-add" onclick="addNewPayeeFromDV()" style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">➕ Add new supplier…</div>
       </div>
     </div>
@@ -5681,7 +5892,7 @@ function renderInvLines() {
     return `<tr>
       <td style="padding:4px 6px;vertical-align:top;position:relative;min-width:180px">
         <input type="text" id="inv-item-inp-${i}"
-          value="${linkedItem?linkedItem.name:(l.desc||'')}" placeholder="Search or type item…"
+          value="${String(linkedItem?linkedItem.name:(l.desc||'')).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" placeholder="Search or type item…"
           autocomplete="off"
           oninput="filterInvItemDrop(${i},this.value)"
           onfocus="showInvItemDrop(${i})"
@@ -5720,19 +5931,34 @@ function buildInvItemDrop(i) {
   const items = state.inventory||[];
   const dd = document.getElementById(`inv-item-dd-${i}`);
   if(!dd) return;
+
+  const esc = s => String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const priceOf = it => { const v=parseFloat(it.salePrice); return isNaN(v)?0:v; };
+
   dd.innerHTML = items.map(it=>`
-    <div class="inv-item-opt" data-id="${it.id}" data-name="${it.name}"
-      onmousedown="selectInvItem(${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${it.salePrice||0})"
+    <div class="inv-item-opt" data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-price="${priceOf(it)}"
       style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
       onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
-      <div style="font-weight:500">${it.name}</div>
-      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · Sale: ₱${it.salePrice||0} · Stock: ${it.qty||0}</div>
+      <div style="font-weight:500">${esc(it.name)}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${esc(it.unit||'')} · Sale: ₱${priceOf(it)} · Stock: ${it.qty||0}</div>
     </div>`).join('') +
-  `<div onmousedown="addNewItemFromInv(${i})"
+  `<div class="inv-item-add"
     style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
     onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
     ➕ Add new inventory item…
   </div>`;
+
+  // Bind in JS so nothing in an item name can break parsing
+  dd.querySelectorAll('.inv-item-opt').forEach(opt=>{
+    opt.onmousedown = e => {
+      e.preventDefault();
+      selectInvItem(i, opt.dataset.id, opt.dataset.name, parseFloat(opt.dataset.price)||0);
+    };
+  });
+  const add = dd.querySelector('.inv-item-add');
+  if(add) add.onmousedown = e => { e.preventDefault(); addNewItemFromInv(i); };
 }
 
 function filterInvItemDrop(i, q) {
@@ -13767,18 +13993,13 @@ If a field is not visible or unclear, use null or empty string. For lines, extra
       })
     });
 
-    const data = await res.json();
-    const text = (data.content||[]).map(b=>b.text||'').join('');
-
-    // Parse JSON from response
-    let extracted;
-    try {
-      // Strip any markdown fences if present
-      const clean = text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
-      extracted = JSON.parse(clean);
-    } catch(e) {
-      throw new Error('Could not parse AI response. Please try a clearer image.\n\nResponse: ' + text.slice(0,200));
+    if(!res.ok) {
+      const body = await res.text();
+      console.error('Worker HTTP', res.status, body);
+      throw new Error('The AI service is unavailable (HTTP ' + res.status + ').\n\n' + body.slice(0,200));
     }
+    const data = await res.json();
+    const extracted = parseAIJson(data, 'sales order');
 
     // Populate the form
     if(extracted.customer) {
@@ -14448,7 +14669,8 @@ async function saveSI() {
       attachmentUrl = await uploadAttachment(file, id);
       attachmentName = file.name;
     } catch(e) {
-      toast('⚠ File upload failed. Invoice saved without attachment.','warning',4000);
+      console.error('Attachment upload failed:', e);
+      if(!confirm(`Could not upload the attachment:\n\n${e.message}\n\nSave the invoice without it?`)) return;
     }
   }
 
@@ -15214,7 +15436,7 @@ async function runScanPO() {
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
-        max_tokens:2000,
+        max_tokens:4000,
         messages:[{
           role:'user',
           content:[
@@ -15255,19 +15477,31 @@ Rules:
       })
     });
 
-    const data = await response.json();
-    const raw = (data.content||[]).map(b=>b.text||'').join('').trim();
-
-    // Parse JSON — strip any markdown fences
-    let extracted;
-    try {
-      const clean = raw.replace(/```json|```/g,'').trim();
-      extracted = JSON.parse(clean);
-    } catch(e) {
-      throw new Error('Could not parse AI response. Please try a clearer image.');
+    if(!response.ok) {
+      const body = await response.text();
+      console.error('Worker HTTP', response.status, body);
+      throw new Error('The AI service is unavailable (HTTP ' + response.status + ').\n\n' + body.slice(0,200));
     }
+    const data = await response.json();
+    const extracted = parseAIJson(data, 'purchase order');
 
     if(!extracted.items?.length) throw new Error('No items found in the document. Please try a clearer image.');
+
+    // Guard: is this actually a CUSTOMER's PO addressed to us?
+    // If the document names our own company as the supplier, then we are the
+    // seller — this belongs in Sales Orders, not Purchase Orders.
+    const ourName = (getCompanyProfile().name || 'ANMOL PHARMACEUTICALS US CORP.').toLowerCase();
+    const key = ourName.replace(/[^a-z]/g,'').slice(0,12);
+    const scannedSupplier = (extracted.supplier || '').toLowerCase().replace(/[^a-z]/g,'');
+    if(key && scannedSupplier.includes(key)) {
+      closeModal();
+      alert('This looks like a customer\u2019s Purchase Order addressed to you.\n\n' +
+            'The document lists "' + (extracted.supplier||'') + '" as the supplier, which is your own company. ' +
+            'That means you are the seller here, so this should be recorded as a SALES ORDER \u2014 not a Purchase Order.\n\n' +
+            'Opening the Sales Order form instead. Use "Scan Customer PO" there to fill it in.');
+      go('salesorders');
+      return;
+    }
 
     // Check if supplier exists, prompt to add if not
     const supplierName = extracted.supplier || '';
@@ -15702,8 +15936,8 @@ async function confirmReceivePO(id) {
       attachmentUrl = await uploadAttachment(window._recvFile, siId);
       attachmentName = window._recvFile.name;
     } catch(e) {
-      console.warn('Attachment upload failed, saving without file:', e);
-      toast('⚠ File upload failed. Invoice saved without attachment.','warning',4000);
+      console.error('Attachment upload failed:', e);
+      if(!confirm(`Could not upload the attachment:\n\n${e.message}\n\nContinue receiving without it?`)) return;
     }
   }
 
@@ -16000,19 +16234,27 @@ function buildPOItemDrop(i) {
   const items = state.inventory||[];
   const dd = document.getElementById(`po-item-dd-${i}`);
   if(!dd) return;
+  const priceOf = it => { const v=parseFloat(it.costPrice); return isNaN(v)?0:v; };
+
   dd.innerHTML = items.map(it=>`
-    <div class="po-item-opt" data-id="${it.id}" data-name="${it.name}" data-price="${it.costPrice||0}"
-      onmousedown="selectPOItem(${i},'${it.id}','${it.name.replace(/'/g,"\\'")}',${it.costPrice||0})"
+    <div class="po-item-opt" data-id="${esc(it.id)}" data-name="${esc(it.name)}" data-price="${priceOf(it)}"
       style="padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:0.5px solid var(--border-light)"
       onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
-      <div style="font-weight:500">${it.name}</div>
-      <div style="font-size:10px;color:var(--text-tertiary)">${it.unit||''} · Cost: ₱${it.costPrice||0}</div>
+      <div style="font-weight:500">${esc(it.name)}</div>
+      <div style="font-size:10px;color:var(--text-tertiary)">${esc(it.unit||'')} · Cost: ₱${priceOf(it)} · Stock: ${it.qty||0}</div>
     </div>`).join('') +
-  `<div onmousedown="addNewItemFromPO(${i})"
+  `<div class="po-item-add"
     style="padding:7px 12px;cursor:pointer;font-size:12px;color:var(--accent);font-weight:500;border-top:1px solid var(--border-mid)"
     onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
     ➕ Add new inventory item…
   </div>`;
+
+  dd.querySelectorAll('.po-item-opt').forEach(opt=>{
+    opt.onmousedown = ev => { ev.preventDefault();
+      selectPOItem(i, opt.dataset.id, opt.dataset.name, parseFloat(opt.dataset.price)||0); };
+  });
+  const add = dd.querySelector('.po-item-add');
+  if(add) add.onmousedown = ev => { ev.preventDefault(); addNewItemFromPO(i); };
 }
 
 function filterPOItemDrop(i, q) {
@@ -17026,7 +17268,7 @@ function renderChatPanel() {
     const initials=u.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
     const hue=[...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
     const unread=getDMUnread(u.name);
-    return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}');renderChatPanel()"
+    return `<div id="chat-dm-${u.name.replace(/\s+/g,'_')}" onclick="switchChatChannel('dm','${jsq(u.name)}');renderChatPanel()"
       style="padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);font-size:12px;${unread>0?'background:var(--accent-bg);font-weight:600':''}" onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background=_chatRecipient==='${u.name}'?'var(--bg-card)':${unread>0?'\'var(--accent-bg)\'':'\'\''}">
       <div style="position:relative;flex-shrink:0">
         <div style="width:22px;height:22px;border-radius:50%;background:hsl(${hue},55%,42%);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff">${initials}</div>
@@ -17093,7 +17335,7 @@ function renderChat(c, ta) {
         const hue = [...u.name].reduce((h,ch)=>h+ch.charCodeAt(0),0)%360;
         const unread = getDMUnread(u.name);
         const key = u.name.replace(/\s+/g,'_');
-        return `<div id="chat-dm-${key}" onclick="switchChatChannel('dm','${u.name.replace(/'/g,"\\'")}');renderChatContent()"
+        return `<div id="chat-dm-${key}" onclick="switchChatChannel('dm','${jsq(u.name)}');renderChatContent()"
           style="padding:7px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;border-radius:var(--radius-sm);margin:0 6px;font-size:13px;${unread>0?'background:var(--accent-bg);font-weight:600;':''}"
           onmouseover="this.style.background='var(--bg-card)'" onmouseout="this.style.background='${unread>0?'var(--accent-bg)':''}'">
           <div style="position:relative">
@@ -17323,10 +17565,10 @@ function renderChatMessages(msgs) {
       const att = m.attachment;
       if(att.isImage) {
         return `<div style="margin-top:5px">
-          <img src="${att.data}" alt="${att.name}" style="max-width:180px;max-height:160px;border-radius:6px;cursor:pointer;display:block;border:1px solid rgba(255,255,255,0.2)" onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',this.src)" title="Click to preview">
+          <img src="${att.data}" alt="${esc(att.name)}" style="max-width:180px;max-height:160px;border-radius:6px;cursor:pointer;display:block;border:1px solid rgba(255,255,255,0.2)" onclick="previewChatFile('${jsq(att.name)}','${att.type}',this.src)" title="Click to preview">
           <div style="font-size:10px;opacity:0.7;margin-top:3px;display:flex;gap:8px">
-            <span style="cursor:pointer" onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',this.parentElement.previousElementSibling.src)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</span>
-            <span style="cursor:pointer" onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',this.parentElement.previousElementSibling.src)"><i class="ti ti-download" style="font-size:10px"></i> Download</span>
+            <span style="cursor:pointer" onclick="previewChatFile('${jsq(att.name)}','${att.type}',this.parentElement.previousElementSibling.src)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</span>
+            <span style="cursor:pointer" onclick="downloadChatFile('${jsq(att.name)}',this.parentElement.previousElementSibling.src)"><i class="ti ti-download" style="font-size:10px"></i> Download</span>
           </div>
         </div>`;
       }
@@ -17338,8 +17580,8 @@ function renderChatMessages(msgs) {
           <div style="font-size:10px;opacity:0.7">${(att.size/1024).toFixed(1)}KB</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
-          <button onclick="previewChatFile('${att.name.replace(/'/g,"\\'")}','${att.type}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--accent)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</button>
-          <button onclick="downloadChatFile('${att.name.replace(/'/g,"\\'")}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--text-secondary)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-download" style="font-size:10px"></i> Save</button>
+          <button onclick="previewChatFile('${jsq(att.name)}','${att.type}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--accent)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-eye" style="font-size:10px"></i> Preview</button>
+          <button onclick="downloadChatFile('${jsq(att.name)}',\`${att.data}\`)" style="background:none;border:1px solid ${isMe?'rgba(255,255,255,0.4)':'var(--border-mid)'};border-radius:4px;cursor:pointer;color:${isMe?'#fff':'var(--text-secondary)'};font-size:10px;padding:2px 6px;font-family:var(--font)"><i class="ti ti-download" style="font-size:10px"></i> Save</button>
         </div>
       </div>`;
     })() : '';
@@ -17358,7 +17600,7 @@ function renderChatMessages(msgs) {
     <div style="display:flex;align-items:center;gap:6px">
       <span style="font-size:10px;color:var(--text-tertiary)">${timeStr}</span>
       ${isMe?`
-        ${!m.attachment?`<button onclick="editChatMsg('${m.id}','${(m.text||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n')}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:10px;padding:0" title="Edit"><i class="ti ti-pencil"></i></button>`:''}
+        ${!m.attachment?`<button onclick="editChatMsg('${m.id}','${jsq(m.text||'')}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:10px;padding:0" title="Edit"><i class="ti ti-pencil"></i></button>`:''}
         <button onclick="deleteChatMsg('${m.id}')" style="background:none;border:none;cursor:pointer;color:var(--text-tertiary);font-size:10px;padding:0" title="Delete"><i class="ti ti-trash"></i></button>
       `:''}
     </div>
@@ -17424,13 +17666,13 @@ function previewChatFile(name, type, data) {
       <i class="ti ti-file" style="font-size:60px;color:var(--accent);display:block;margin-bottom:16px"></i>
       <div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:8px">${name}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:20px">This file type cannot be previewed in the browser.</div>
-      <button onclick="downloadChatFile('${name.replace(/'/g,"\\'")}',\`${data}\`)" class="btn primary" style="padding:10px 24px"><i class="ti ti-download"></i> Download to Open</button>
+      <button onclick="downloadChatFile('${jsq(name)}',\`${data}\`)" class="btn primary" style="padding:10px 24px"><i class="ti ti-download"></i> Download to Open</button>
     </div>`;
   }
 
   overlay.innerHTML = `
     <div style="position:absolute;top:16px;right:16px;display:flex;gap:8px">
-      <button onclick="downloadChatFile('${name.replace(/'/g,"\\'")}',\`${data}\`)" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:8px 14px;color:#fff;cursor:pointer;font-size:13px;font-family:var(--font);display:flex;align-items:center;gap:6px"><i class="ti ti-download"></i> Download</button>
+      <button onclick="downloadChatFile('${jsq(name)}',\`${data}\`)" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:8px 14px;color:#fff;cursor:pointer;font-size:13px;font-family:var(--font);display:flex;align-items:center;gap:6px"><i class="ti ti-download"></i> Download</button>
       <button onclick="document.getElementById('chat-file-preview').remove()" style="background:rgba(255,255,255,0.15);border:none;border-radius:8px;padding:8px 14px;color:#fff;cursor:pointer;font-size:20px;font-family:var(--font)">×</button>
     </div>
     <div style="color:rgba(255,255,255,0.6);font-size:12px;position:absolute;top:22px;left:20px">${name}</div>
