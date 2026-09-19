@@ -1342,22 +1342,33 @@ async function captureAndVerify() {
     const video  = document.getElementById('cam-video');
     const canvas = document.getElementById('cam-canvas');
     const ctx    = canvas.getContext('2d');
-    // Match what the user sees: zoomed out to 65%, mirrored horizontally
-    const scale  = 0.65;
-    const sw     = video.videoWidth  * scale;
-    const sh     = video.videoHeight * scale;
-    const sx     = (video.videoWidth  - sw) / 2;
-    const sy     = (video.videoHeight - sh) / 2;
-    // Draw mirrored + cropped
+
+    if(!video.videoWidth) { throw new Error('Camera is not ready yet. Wait a moment and try again.'); }
+
+    // Capture exactly what the viewer sees: the video is displayed with
+    // object-fit:cover and mirrored, so centre-crop to the canvas aspect ratio.
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const target = canvas.width / canvas.height;   // 1:1
+    let sw, sh, sx, sy;
+    if(vw / vh > target) { sh = vh; sw = vh * target; }   // wider than tall
+    else                 { sw = vw; sh = vw / target; }
+    sx = (vw - sw) / 2;
+    sy = (vh - sh) / 2;
+
     ctx.save();
     ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
+    ctx.scale(-1, 1);                                // mirror, matching the preview
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     ctx.restore();
     const liveBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    const storedBase64 = selectedEmp.photo.includes(',')
-      ? selectedEmp.photo.split(',')[1]
-      : selectedEmp.photo;
+
+    // Stored photo — read its real media type, do not assume JPEG
+    const storedRaw   = String(selectedEmp.photo || '');
+    const mtMatch     = storedRaw.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+    const storedMedia = mtMatch ? mtMatch[1] : 'image/jpeg';
+    const storedBase64 = storedRaw.includes(',') ? storedRaw.split(',')[1] : storedRaw;
+    if(!storedBase64) throw new Error('The reference photo for ' + selectedEmp.name + ' is empty. Re-upload it in the ERP.');
+    console.log('Reference photo:', storedMedia, Math.round(storedBase64.length/1024)+'KB  |  live capture:', Math.round(liveBase64.length/1024)+'KB');
 
     // Call Claude AI via Cloudflare Worker
     const res = await fetch(WORKER_URL, {
@@ -1369,7 +1380,7 @@ async function captureAndVerify() {
         messages: [{
           role: 'user',
           content: [
-            { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:storedBase64 } },
+            { type:'image', source:{ type:'base64', media_type:storedMedia, data:storedBase64 } },
             { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:liveBase64   } },
             { type:'text', text:`You are a lenient biometric attendance verification system for a small business.
 
@@ -1394,9 +1405,18 @@ MATCH: NO_MATCH 30%`
       })
     });
 
-    const data  = await res.json();
+    if(!res.ok) {
+      const t = await res.text();
+      throw new Error('AI service unavailable (HTTP ' + res.status + '). ' + t.slice(0,140));
+    }
+    const data = await res.json();
+    if(data.error) {
+      console.error('AI API error:', data.error);
+      throw new Error('AI error: ' + (data.error.message || JSON.stringify(data.error)).slice(0,160));
+    }
     const reply = (data.content||[]).map(b=>b.text||'').join('').trim().toUpperCase();
-    console.log('AI reply:', reply);
+    console.log('AI reply:', reply || '(empty)');
+    if(!reply) throw new Error('The AI returned no answer' + (data.stop_reason?' (stop reason: '+data.stop_reason+')':'') + '.');
 
     const isLive  = reply.includes('LIVENESS: LIVE') || (!reply.includes('LIVENESS: SPOOF') && reply.includes('MATCH'));
     const isSpoof = reply.includes('LIVENESS: SPOOF');
