@@ -757,15 +757,16 @@ async function _fbDoSave(stateData) {
           const docId = String(item.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
           // Each record is now its own Firestore document, so photos are fine to keep.
           // Only drop a field if it alone would blow the 1MB per-document limit.
-          const clean = {};
-          Object.keys(item).forEach(f => {
-            const v = item[f];
+          // Firestore rejects any document containing `undefined` anywhere,
+          // including inside nested arrays. A JSON round-trip strips those
+          // recursively; the replacer also drops single fields over 700KB.
+          const clean = JSON.parse(JSON.stringify(item, (f, v) => {
             if(typeof v === 'string' && v.length > 700000) {
               console.warn(`Skipping oversized field "${f}" on ${key}/${docId} (${Math.round(v.length/1024)}KB)`);
-              return;
+              return undefined;
             }
-            clean[f] = v;
-          });
+            return v;
+          }));
           batch.set(colRef.doc(docId), {...clean, _t: writeTime});
         });
         await batch.commit();
@@ -971,6 +972,10 @@ function parseAIJson(data, label) {
   if(data.error) {
     const m = data.error.message || JSON.stringify(data.error);
     console.error('AI API error:', data.error);
+    if(/credit balance|insufficient|quota|billing/i.test(m))
+      throw new Error('The AI service has run out of credit.\n\n' +
+        'Document scanning and face verification will not work until the Anthropic API account is topped up ' +
+        'at console.anthropic.com under Billing.\n\nYou can still enter this document manually.');
     throw new Error('The AI service returned an error:\n\n' + m);
   }
 
@@ -1013,6 +1018,62 @@ function parseAIJson(data, label) {
                     '\n\nIt replied:\n' + raw.slice(0,300));
   }
 }
+
+// Diagnostic — run checkInvoices() in the console
+async function checkInvoices() {
+  const inv = state.invoices || [];
+  console.log('=== INVOICE CHECK ===');
+  console.log('Invoices in memory:', inv.length);
+  const bad = inv.filter(i => !i || !i.date || !i.customer || !i.id);
+  console.log('Missing date, customer or id:', bad.length);
+  bad.slice(0,8).forEach((i,n) => {
+    console.log(`  [${n+1}] id=${i&&i.id}  fields present:`, i ? Object.keys(i).join(', ') : '(null record)');
+  });
+
+  if(db) {
+    try {
+      const snap = await db.collection(colPath('invoices')).get();
+      const cloud = snap.docs.map(d => d.data());
+      const cloudBad = cloud.filter(i => !i.date || !i.customer);
+      console.log('\nInvoices in cloud:', cloud.length, '| missing date/customer:', cloudBad.length);
+      cloudBad.slice(0,5).forEach(i => console.log('  cloud id=' + i.id + '  fields:', Object.keys(i).join(', ')));
+    } catch(e) { console.warn('Could not read cloud invoices:', e.message); }
+  }
+
+  try {
+    const local = JSON.parse(localStorage.getItem('anmolpharma')||'{}').invoices || [];
+    const good = local.filter(i => i && i.date && i.customer).length;
+    console.log('\nlocalStorage invoices:', local.length, '| complete:', good);
+    if(good > inv.length - bad.length)
+      console.log('→ localStorage holds more complete invoices than memory. Run repairInvoices() to restore them.');
+  } catch(e) {}
+  return { total: inv.length, broken: bad.length };
+}
+window.checkInvoices = checkInvoices;
+
+// Restores missing invoice fields from this browser's local backup, matching by id
+function repairInvoices() {
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem('anmolpharma')||'{}').invoices || []; } catch(e) {}
+  const byId = {};
+  local.forEach(i => { if(i && i.id) byId[String(i.id)] = i; });
+  let fixed = 0;
+  (state.invoices||[]).forEach(i => {
+    const b = i && byId[String(i.id)];
+    if(!b) return;
+    let changed = false;
+    ['date','customer','due','amount','vatBase','vat','status','lines','terms'].forEach(f => {
+      if((i[f] === undefined || i[f] === null || i[f] === '') && b[f] !== undefined && b[f] !== '') {
+        i[f] = b[f]; changed = true;
+      }
+    });
+    if(changed) fixed++;
+  });
+  if(fixed) { save(); render(); }
+  console.log(fixed ? `Repaired ${fixed} invoice(s) and saved to cloud.` : 'Nothing to repair from the local backup.');
+  return fixed;
+}
+window.repairInvoices = repairInvoices;
 
 // ── SAFE REMOTE MERGE ─────────────────────────────────────────────────────────
 // Never let a remote record that is missing media overwrite a local one that has it.
@@ -3323,10 +3384,10 @@ function filterTable() {
             const base=inv.vatBase!=null?inv.vatBase:inv.amount;
             const vat=inv.vat!=null?inv.vat:0;
             return `<tr>
-              <td class="mono">${inv.id}</td><td>${inv.date}</td>
+              <td class="mono">${inv.id}</td><td>${inv.date||'<span style="color:var(--red)">no date</span>'}</td>
               <td style="font-size:11px;color:${inv.terms==='cod'?'var(--green)':'var(--accent)'}">${inv.terms?paymentTermsLabel(inv.terms):'Net 30'}</td>
               <td style="${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?'color:var(--red);font-weight:500':''}">${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}</td>
-              <td>${inv.customer}</td>
+              <td>${inv.customer||'<span style="color:var(--red)">no customer</span>'}</td>
               <td style="text-align:right;color:var(--text-secondary)">${fmt(base)}</td>
               <td style="text-align:right;color:var(--accent);font-weight:500">${fmt(vat)}</td>
               <td style="text-align:right;font-weight:500">${fmt(inv.amount||0)}</td>
@@ -15480,6 +15541,10 @@ Rules:
     if(!response.ok) {
       const body = await response.text();
       console.error('Worker HTTP', response.status, body);
+      if(/credit balance|insufficient|quota|billing/i.test(body))
+        throw new Error('The AI service has run out of credit.\n\n' +
+          'Top up the Anthropic API account at console.anthropic.com under Billing.\n\n' +
+          'You can still create this purchase order manually.');
       throw new Error('The AI service is unavailable (HTTP ' + response.status + ').\n\n' + body.slice(0,200));
     }
     const data = await response.json();
