@@ -807,7 +807,7 @@ async function _fbDoSave(stateData) {
 // Run recoverPhotos() in the console on a device that still shows the photos.
 function recoverPhotos() {
   let backup = null;
-  try { backup = JSON.parse(localStorage.getItem('anmolpharma')||'null'); } catch(e) {}
+  backup = lsReadState();
   if(!backup || !Array.isArray(backup.employees)) {
     console.log('No local backup found in this browser.');
     return 0;
@@ -1055,7 +1055,7 @@ async function checkInvoices() {
   }
 
   try {
-    const local = JSON.parse(localStorage.getItem('anmolpharma')||'{}').invoices || [];
+    const local = (lsReadState()||{}).invoices || [];
     const good = local.filter(i => i && i.date && i.customer).length;
     console.log('\nlocalStorage invoices:', local.length, '| complete:', good);
     if(good > inv.length - bad.length)
@@ -1068,7 +1068,7 @@ window.checkInvoices = checkInvoices;
 // Restores missing invoice fields from this browser's local backup, matching by id
 function repairInvoices() {
   let local = [];
-  try { local = JSON.parse(localStorage.getItem('anmolpharma')||'{}').invoices || []; } catch(e) {}
+  local = (lsReadState()||{}).invoices || [];
   const byId = {};
   local.forEach(i => { if(i && i.id) byId[String(i.id)] = i; });
   let fixed = 0;
@@ -1152,6 +1152,7 @@ function mergeRemoteArray(key, remoteArr, localArr) {
   (localArr||[]).forEach(r => { if(r && r.id != null) localById[String(r.id)] = r; });
 
   const seen = new Set();
+  let restoredFields = 0;
   const out = remoteArr.map(r => {
     if(!r || r.id == null) return r;
     const id = String(r.id);
@@ -1163,8 +1164,9 @@ function mergeRemoteArray(key, remoteArr, localArr) {
     Object.keys(local).forEach(f => {
       const rv = r[f];
       const lv = local[f];
-      if((rv === undefined || rv === null || rv === '') && lv !== undefined && lv !== null && lv !== '')
-        merged[f] = lv;
+      if((rv === undefined || rv === null || rv === '') && lv !== undefined && lv !== null && lv !== '') {
+        merged[f] = lv; restoredFields++;
+      }
     });
     return merged;
   });
@@ -1176,12 +1178,14 @@ function mergeRemoteArray(key, remoteArr, localArr) {
     if(r && r.id != null && !seen.has(String(r.id))) { out.push(r); kept++; }
   });
   if(kept) console.log(`merge ${key}: kept ${kept} local-only record(s) not yet in the cloud`);
+  window._mergeUnsynced = (window._mergeUnsynced||0) + kept + restoredFields;
   return out;
 }
 
 // Applies a remote snapshot onto state, preserving journal approvals and local media
 function applyRemoteState(remote) {
-  if(!remote) return;
+  window._mergeUnsynced = 0;
+  if(!remote) return 0;
   const currentPage = state.page;
   const la = {}, lc = {};
   (state.journal||[]).forEach(l => {
@@ -1198,6 +1202,16 @@ function applyRemoteState(remote) {
     }
   });
   state.page = currentPage;
+  return window._mergeUnsynced || 0;
+}
+
+// After merging, push anything the cloud was missing so it is no longer device-only
+function pushUnsyncedIfAny(count, where) {
+  if(!count) return false;
+  console.log(`${where}: ${count} record/field change(s) exist only on this device — uploading to cloud`);
+  if(typeof showFbToast === 'function') showFbToast(`Uploading ${count} change(s) the cloud was missing…`);
+  fbSave(state);
+  return true;
 }
 
 async function fbLoad() {
@@ -1268,7 +1282,7 @@ function fbListen() {
     if(remote) {
       applyRemoteState(remote);
       if(typeof recomputeBalances==='function') recomputeBalances();
-      try{localStorage.setItem('anmolpharma',JSON.stringify(state));}catch(e){}
+      lsScheduleWrite();
       if(typeof render==='function') render();
       fbSetStatus('synced'); showFbToast('Updated ✓');
     }
@@ -1285,11 +1299,11 @@ async function fbForceRefresh() {
   fbSetStatus('loading');
   const remote = await fbLoad();
   if(remote) {
-    applyRemoteState(remote);
+    const unsynced = applyRemoteState(remote);
     recomputeBalances();
-    try{localStorage.setItem('anmolpharma',JSON.stringify(state));}catch(e){}
+    lsScheduleWrite();
     await fbLoadMeta(); render();
-    fbSetStatus('synced'); showFbToast('Refreshed ✓');
+    if(!pushUnsyncedIfAny(unsynced, 'Sync')) { fbSetStatus('synced'); showFbToast('Refreshed ✓ — everything is in the cloud'); }
   } else { fbSetStatus('idle'); showFbToast('No cloud data found'); }
 }
 
@@ -1467,72 +1481,6 @@ function showFbToast(msg) {
 }
 
 // Manual force-refresh from Firestore (click the cloud badge in topbar)
-async function fbForceRefresh() {
-  if(!db) { fbSetStatus('error', 'Firebase not connected'); return; }
-  fbSetStatus('loading');
-  try {
-    // Try chunk documents first
-    const chunkDocs = Object.keys(FB_CHUNKS);
-    const snaps = await Promise.all(chunkDocs.map(d => db.doc(d).get({ source:'server' })));
-    let merged = {};
-    let hasChunkData = false;
-
-    snaps.forEach((snap,i) => {
-      if(!snap.exists || !snap.data()?.data) return;
-      try {
-        const chunk = JSON.parse(snap.data().data);
-        if(Object.keys(chunk).length > 0) hasChunkData = true;
-        Object.assign(merged, chunk);
-      } catch(e) {}
-    });
-
-    // Fall back to legacy single document if no chunks
-    if(!hasChunkData) {
-      const mainSnap = await db.doc('companies/anmol').get({ source:'server' });
-      if(mainSnap.exists && mainSnap.data()?.data) {
-        merged = JSON.parse(mainSnap.data().data);
-        hasChunkData = true;
-        showFbToast('Loaded from legacy format — will migrate on next change');
-      }
-    }
-
-    if(hasChunkData && Object.keys(merged).length) {
-      const currentPage = state.page;
-      // Preserve local approved/cancelled
-      const localApproved  = {};
-      const localCancelled = {};
-      (state.journal||[]).forEach(l => {
-        if(l.approved)  localApproved[l.id]  = { approved:true, approvedBy:l.approvedBy, approvedAt:l.approvedAt };
-        if(l.cancelled) localCancelled[l.id] = { cancelled:true, cancelReason:l.cancelReason, cancelledBy:l.cancelledBy, cancelledAt:l.cancelledAt };
-      });
-      Object.keys(merged).forEach(key => {
-        if(key==='journal') {
-          state.journal = (merged.journal||[]).map(l=>({
-            ...l,
-            ...(localApproved[l.id]||{}),
-            ...(localCancelled[l.id]||{}),
-          }));
-        } else { state[key]=merged[key]; }
-      });
-      state.page = currentPage;
-      recomputeBalances();
-      try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
-      await fbLoadMeta();
-      render();
-      fbSetStatus('synced');
-      showFbToast('Refreshed from cloud ✓');
-    } else {
-      fbSetStatus('idle');
-      showFbToast('No cloud data found — using local data');
-    }
-  } catch(e) {
-    console.error('Force refresh error:', e);
-    fbSetStatus('idle');
-    showFbToast('Could not reach cloud — showing local data');
-    _fbListening = false;
-    fbListen();
-  }
-}
 
 const fmt = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtS = n => (n < 0 ? '-' : '') + fmt(n);
@@ -2258,9 +2206,10 @@ function showAppScreen() {
   // Load latest data from Firebase then start real-time listener
   Promise.all([fbLoad(), fbLoadMeta()]).then(([remoteState]) => {
     if(remoteState) {
-      applyRemoteState(remoteState);
+      const unsyncedAtStart = applyRemoteState(remoteState);
+      setTimeout(() => pushUnsyncedIfAny(unsyncedAtStart, 'Startup'), 1500);
       recomputeBalances();
-      try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+      lsScheduleWrite();
       render();
     }
     _fbMetaLoadedOnce = true;
@@ -3266,27 +3215,122 @@ function auditLog(action, module, recordId, details={}, before=null, after=null)
 
 // Mobile attendance sync removed
 
-function save() {
+// ══════════════════════════════════════════════════════════════════════════════
+// LOCAL STORAGE LAYER — compressed, verified, never blocks typing
+// ══════════════════════════════════════════════════════════════════════════════
+// Browsers cap localStorage near 5MB per site. Data is compressed (~9x on real
+// data) before storing. Rules this layer guarantees:
+//   • Reads understand BOTH the old plain-JSON format and the new compressed one.
+//   • Every compressed write is decompressed and compared before it is kept;
+//     on any mismatch the plain JSON is stored instead.
+//   • Compression costs ~1s, so routine saves are deferred to idle time and
+//     always flushed before the page is hidden or closed.
+//   • The compression library is embedded, so reading your own data never
+//     depends on an external server.
+
+/* lz-string v1.5.0 — MIT licence — https://github.com/pieroxy/lz-string */
+var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",e={};function t(r,o){if(!e[r]){e[r]={};for(var n=0;n<r.length;n++)e[r][r.charAt(n)]=n}return e[r][o]}var i={compressToBase64:function(r){if(null==r)return"";var n=i._compress(r,6,function(r){return o.charAt(r)});switch(n.length%4){default:case 0:return n;case 1:return n+"===";case 2:return n+"==";case 3:return n+"="}},decompressFromBase64:function(r){return null==r?"":""==r?null:i._decompress(r.length,32,function(n){return t(o,r.charAt(n))})},compressToUTF16:function(o){return null==o?"":i._compress(o,15,function(o){return r(o+32)})+" "},decompressFromUTF16:function(r){return null==r?"":""==r?null:i._decompress(r.length,16384,function(o){return r.charCodeAt(o)-32})},compressToUint8Array:function(r){for(var o=i.compress(r),n=new Uint8Array(2*o.length),e=0,t=o.length;e<t;e++){var s=o.charCodeAt(e);n[2*e]=s>>>8,n[2*e+1]=s%256}return n},decompressFromUint8Array:function(o){if(null==o)return i.decompress(o);for(var n=new Array(o.length/2),e=0,t=n.length;e<t;e++)n[e]=256*o[2*e]+o[2*e+1];var s=[];return n.forEach(function(o){s.push(r(o))}),i.decompress(s.join(""))},compressToEncodedURIComponent:function(r){return null==r?"":i._compress(r,6,function(r){return n.charAt(r)})},decompressFromEncodedURIComponent:function(r){return null==r?"":""==r?null:(r=r.replace(/ /g,"+"),i._decompress(r.length,32,function(o){return t(n,r.charAt(o))}))},compress:function(o){return i._compress(o,16,function(o){return r(o)})},_compress:function(r,o,n){if(null==r)return"";var e,t,i,s={},u={},a="",p="",c="",l=2,f=3,h=2,d=[],m=0,v=0;for(i=0;i<r.length;i+=1)if(a=r.charAt(i),Object.prototype.hasOwnProperty.call(s,a)||(s[a]=f++,u[a]=!0),p=c+a,Object.prototype.hasOwnProperty.call(s,p))c=p;else{if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++),s[p]=f++,c=String(a)}if(""!==c){if(Object.prototype.hasOwnProperty.call(u,c)){if(c.charCodeAt(0)<256){for(e=0;e<h;e++)m<<=1,v==o-1?(v=0,d.push(n(m)),m=0):v++;for(t=c.charCodeAt(0),e=0;e<8;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}else{for(t=1,e=0;e<h;e++)m=m<<1|t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t=0;for(t=c.charCodeAt(0),e=0;e<16;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1}0==--l&&(l=Math.pow(2,h),h++),delete u[c]}else for(t=s[c],e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;0==--l&&(l=Math.pow(2,h),h++)}for(t=2,e=0;e<h;e++)m=m<<1|1&t,v==o-1?(v=0,d.push(n(m)),m=0):v++,t>>=1;for(;;){if(m<<=1,v==o-1){d.push(n(m));break}v++}return d.join("")},decompress:function(r){return null==r?"":""==r?null:i._decompress(r.length,32768,function(o){return r.charCodeAt(o)})},_decompress:function(o,n,e){var t,i,s,u,a,p,c,l=[],f=4,h=4,d=3,m="",v=[],g={val:e(0),position:n,index:1};for(t=0;t<3;t+=1)l[t]=t;for(s=0,a=Math.pow(2,2),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;c=r(s);break;case 2:return""}for(l[3]=c,i=c,v.push(c);;){if(g.index>o)return"";for(s=0,a=Math.pow(2,d),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;switch(c=s){case 0:for(s=0,a=Math.pow(2,8),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 1:for(s=0,a=Math.pow(2,16),p=1;p!=a;)u=g.val&g.position,g.position>>=1,0==g.position&&(g.position=n,g.val=e(g.index++)),s|=(u>0?1:0)*p,p<<=1;l[h++]=r(s),c=h-1,f--;break;case 2:return v.join("")}if(0==f&&(f=Math.pow(2,d),d++),l[c])m=l[c];else{if(c!==h)return null;m=i+i.charAt(0)}v.push(m),l[h++]=i+m.charAt(0),i=m,0==--f&&(f=Math.pow(2,d),d++)}}};return i}();"function"==typeof define&&define.amd?define(function(){return LZString}):"undefined"!=typeof module&&null!=module?module.exports=LZString:"undefined"!=typeof angular&&null!=angular&&angular.module("LZString",[]).factory("LZString",function(){return LZString});
+
+const LS_KEY    = 'anmolpharma';
+const LS_MARKER = 'LZ1:';            // plain JSON always begins with "{" — no ambiguity
+
+// Decode a stored value (compressed or plain) into an object, or null
+function lsDecode(stored) {
+  if(stored == null || stored === '') return null;
   try {
-    localStorage.setItem('anmolpharma', JSON.stringify(state));
+    if(stored.startsWith(LS_MARKER)) {
+      if(typeof LZString === 'undefined') throw new Error('decompressor unavailable');
+      const json = LZString.decompressFromUTF16(stored.slice(LS_MARKER.length));
+      if(json == null || json === '') throw new Error('decompression returned nothing');
+      return JSON.parse(json);
+    }
+    return JSON.parse(stored);
+  } catch(e) {
+    console.error('lsDecode failed:', e.message);
+    return null;
+  }
+}
+
+// Read state (or any key written by lsWriteState)
+function lsReadState(key) {
+  try { return lsDecode(localStorage.getItem(key || LS_KEY)); }
+  catch(e) { console.error('lsReadState:', e.message); return null; }
+}
+
+// Encode an object for storage. Compresses and PROVES the round-trip before use.
+function lsEncode(obj) {
+  const json = JSON.stringify(obj);
+  if(typeof LZString !== 'undefined') {
+    try {
+      const packed = LZString.compressToUTF16(json);
+      if(LZString.decompressFromUTF16(packed) === json) {
+        return { value: LS_MARKER + packed, compressed: true, raw: json.length, stored: packed.length + LS_MARKER.length };
+      }
+      console.warn('Compression round-trip mismatch — storing plain JSON instead.');
+    } catch(e) { console.warn('Compression failed — storing plain JSON:', e.message); }
+  }
+  return { value: json, compressed: false, raw: json.length, stored: json.length };
+}
+
+// Write immediately. Returns true on success.
+function lsWriteState(obj, key) {
+  let enc;
+  try { enc = lsEncode(obj); } catch(e) { console.error('lsEncode:', e.message); return false; }
+  try {
+    localStorage.setItem(key || LS_KEY, enc.value);
     window._lastLocalSaveOk = true;
+    window._lastLocalSize = enc.stored;
+    return true;
   } catch(e) {
     window._lastLocalSaveOk = false;
-    console.error('localStorage save FAILED:', e.name, e.message);
+    console.error('localStorage write FAILED:', e.name, e.message,
+                  '| needed', Math.round(enc.stored/1024)+'K chars', enc.compressed?'(compressed)':'(plain)');
     if(!window._quotaWarned) {
       window._quotaWarned = true;
       if(typeof toast === 'function')
-        toast('⚠ Local storage is full — changes may not survive a refresh. Run clearLocalCache() in the console.', 'error', 8000);
+        toast('⚠ Local storage is full — changes may not survive a refresh. Your cloud copy is unaffected.', 'error', 8000);
     }
+    return false;
   }
-  fbSave(state);
+}
+
+// Deferred write: coalesces rapid saves, runs when the browser is idle.
+let _lsTimer = null, _lsDirty = false;
+function lsScheduleWrite() {
+  _lsDirty = true;
+  if(_lsTimer) clearTimeout(_lsTimer);
+  _lsTimer = setTimeout(() => {
+    _lsTimer = null;
+    const run = () => lsFlush();
+    if('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2500 });
+    else run();
+  }, 1200);
+}
+
+// Write now if anything is pending. Safe to call repeatedly.
+function lsFlush() {
+  if(_lsTimer) { clearTimeout(_lsTimer); _lsTimer = null; }
+  if(!_lsDirty) return true;
+  const ok = lsWriteState(state);
+  if(ok) _lsDirty = false;
+  return ok;
+}
+
+// Never lose a pending write when the tab is hidden, switched away or closed.
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') lsFlush(); });
+window.addEventListener('pagehide', lsFlush);
+window.addEventListener('beforeunload', lsFlush);
+
+function save() {
+  lsScheduleWrite();   // compressed local copy, written at idle time
+  fbSave(state);       // cloud copy
 }
 
 // Frees localStorage by dropping the pre-update backup copy
 function clearLocalCache() {
   try {
     localStorage.removeItem('anmolpharma_pre_update_backup');
-    localStorage.setItem('anmolpharma', JSON.stringify(state));
+    if(!lsWriteState(state)) throw new Error('write failed');
     console.log('Local cache rewritten successfully.');
     window._quotaWarned = false;
     return true;
@@ -3302,7 +3346,7 @@ async function checkPhotos() {
   console.log('=== EMPLOYEE PHOTO CHECK ===');
   let local = {};
   try {
-    const d = JSON.parse(localStorage.getItem('anmolpharma')||'{}');
+    const d = lsReadState() || {};
     (d.employees||[]).forEach(e => { if(e.id) local[String(e.id)] = !!e.photo; });
   } catch(e) {}
 
@@ -3320,29 +3364,26 @@ async function checkPhotos() {
       `${(e.name||id).padEnd(24)} memory:${e.photo?'YES':'no '}  localStorage:${local[id]?'YES':'no '}  cloud:${remote[id]===undefined?'(missing doc)':(remote[id]?'YES':'no ')}`
     );
   });
-  console.log('localStorage size:', Math.round((localStorage.getItem('anmolpharma')||'').length/1024)+'KB');
+  { const s=localStorage.getItem(LS_KEY)||''; console.log('localStorage size:', Math.round(s.length/1024)+'K chars', s.startsWith(LS_MARKER)?'(compressed)':'(plain)'); }
   console.log('Last local save OK:', window._lastLocalSaveOk !== false);
 }
 window.checkPhotos = checkPhotos;
 function load() {
-  try {
-    const d = localStorage.getItem('anmolpharma');
-    if(d) {
-      const p = JSON.parse(d);
-      state = {...state, ...p, page: state.page};
-    } else {
-      // No data found — check if we have a pre-update backup to restore
-      const backup = localStorage.getItem('anmolpharma_pre_update_backup');
-      if(backup) {
-        const p = JSON.parse(backup);
-        state = {...state, ...p, page: state.page};
-        // Restore it as the main data
-        localStorage.setItem('anmolpharma', backup);
-        console.log('Restored data from pre-update backup');
-      }
-    }
-  } catch(e) {}
-  // Always recompute balances on load to fix any stale data
+  let p = lsReadState(LS_KEY);          // understands compressed and plain formats
+  let source = 'local';
+  if(!p) {
+    // Main copy missing or unreadable — fall back to the pre-update backup
+    p = lsReadState('anmolpharma_pre_update_backup');
+    source = 'pre-update backup';
+    if(p) lsWriteState(p, LS_KEY);      // restore it as the main copy
+  }
+  if(p && typeof p === 'object') {
+    state = {...state, ...p, page: state.page};
+    const raw = localStorage.getItem(LS_KEY) || '';
+    console.log(`Loaded from ${source} — ${raw.startsWith(LS_MARKER)?'compressed':'plain'} format, ${Math.round(raw.length/1024)}K chars`);
+    // Migrate an old plain-JSON copy to the compressed format once, at idle time
+    if(!raw.startsWith(LS_MARKER)) lsScheduleWrite();
+  }
   recomputeBalances();
 }
 load();
@@ -4652,7 +4693,7 @@ function approveJournalEntry(groupId) {
   if(_fbSyncTimer) { clearTimeout(_fbSyncTimer); _fbSyncTimer = null; }
 
   // Save to localStorage immediately
-  try { localStorage.setItem('anmolpharma', JSON.stringify(state)); } catch(e) {}
+  lsScheduleWrite();
 
   // Use chunked save — NOT single document write
   _fbDoSave(state);
@@ -11182,29 +11223,6 @@ function saveMovement(itemId) {
   toast(`${type==='in'?'Added':'Removed'} ${qty} ${it.unit||''} ${type==='in'?'to':'from'} ${branchName}`);
 }
 
-function showReceiveFromPO() {
-  const eligiblePOs = (state.purchaseOrders||[]).filter(po=>po.status==='approved');
-  if(!eligiblePOs.length) {
-    alert('No approved Purchase Orders available to receive.\nApprove a PO first in the Purchase Orders tab.');
-    return;
-  }
-  const poOpts = eligiblePOs.map(po=>{
-    const poTotal = po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
-    return `<option value="${po.id}">${po.id} — ${po.supplier} (${po.lines.length} items · ${fmt(poTotal)})</option>`;
-  }).join('');
-
-  showModal(`
-<div class="modal-head"><h3><i class="ti ti-package-import" style="margin-right:6px;color:var(--green)"></i>Receive Inventory from PO</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div class="form-group"><label>Select Purchase Order</label>
-  <select id="recv-po-sel" style="width:100%;padding:9px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font)">
-    <option value="">— select PO —</option>${poOpts}
-  </select>
-</div>
-<div style="display:flex;gap:8px;justify-content:flex-end">
-  <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="openReceivePOFromInventory()"><i class="ti ti-arrow-right"></i>Continue</button>
-</div>`);
-}
 
 function openReceivePOFromInventory() {
   const poId = document.getElementById('recv-po-sel')?.value;
@@ -11235,12 +11253,6 @@ ${po.lines.map(l=>{
 }).join('')}`;
 }
 
-function confirmReceivePO() {
-  const poId = document.getElementById('recv-po').value;
-  if(!poId) { alert('Please select a Purchase Order.'); return; }
-  receivePO(poId);
-  closeModal();
-}
 
 function showAddMovement() {
   const itemOpts = state.inventory.map(it=>`<option value="${it.id}">${it.id} — ${it.name} (${it.qty} ${it.unit})</option>`).join('');
@@ -14222,12 +14234,6 @@ If a field is not visible or unclear, use null or empty string. For lines, extra
   input.value = ''; // reset file input
 }
 
-function orderLineTableHtml(prefix) {
-  return `<table class="je-lines">
-    <thead><tr><th style="width:40%">Item</th><th style="width:10%">Qty</th><th style="width:20%">Unit Price</th><th style="width:20%;text-align:right">Total</th><th style="width:10%"></th></tr></thead>
-    <tbody id="${prefix}-lines-body"></tbody>
-  </table>`;
-}
 
 function getOrderLines(prefix) {
   if(prefix==='so') return window._soLines;
@@ -14481,20 +14487,9 @@ function updatePOTotals() {
   });
 }
 
-function loadInvoiceForReturn() {
-  const invId = document.getElementById('ret-inv')?.value;
-  if(!invId) { window._retLines = [{itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}]; renderOrderLines('ret'); return; }
-  const inv = state.invoices.find(i=>i.id===invId);
-  if(!inv) return;
-  const custSel = document.getElementById('ret-cust');
-  if(custSel && inv.customer) custSel.value = inv.customer;
-  window._retLines = (inv.lines||[]).map(l=>({...l, qty:1}));
-  renderOrderLines('ret');
-}
 
 function addSOLine() { window._soLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}); renderOrderLines('so'); }
 function removeSOLine(i) { if(window._soLines.length>1){ window._soLines.splice(i,1); renderOrderLines('so'); } }
-function addPOLine() { window._poLines.push({itemId:'',desc:'',qty:1,unitPrice:0,lineTotal:0}); renderOrderLines('po'); }
 function removePOLine(i) { if(window._poLines.length>1){ window._poLines.splice(i,1); renderOrderLines('po'); } }
 function removeOrderLine(prefix, i) {
   if(prefix==='so') removeSOLine(i);
@@ -16989,6 +16984,7 @@ async function applyUpdate() {
       const session = localStorage.getItem('anmolpharma_session');
       if(session) localStorage.setItem('anmolpharma_update_session', session);
       // Save current data as extra backup just in case
+      lsFlush();   // write any pending change before copying
       const currentData = localStorage.getItem('anmolpharma');
       if(currentData) localStorage.setItem('anmolpharma_pre_update_backup', currentData);
       localStorage.setItem('anmolpharma_just_updated', '1');
@@ -19866,58 +19862,8 @@ function filterAttHistory() {
   document.querySelectorAll('#att-history-table tbody tr').forEach(r=>{ r.style.display=(!q||r.textContent.toLowerCase().includes(q))?'':'none'; });
 }
 
-function showEditAttendance(id) {
-  const rec = (state.attendance||[]).find(a=>a.id===id);
-  if(!rec) return;
-  const emp = (state.employees||[]).find(e=>e.id===rec.empId)||{name:rec.empName||rec.empId};
-  showModal(`
-<div class="modal-head"><h3><i class="ti ti-clock-edit" style="margin-right:6px;color:var(--accent)"></i>Edit Attendance — ${emp.name}</h3><button class="close-btn" onclick="closeModal()">×</button></div>
-<div class="form-row">
-  <div class="form-group"><label>Date</label><input type="date" id="att-date" value="${rec.date}"></div>
-  <div class="form-group"><label>Status</label>
-    <select id="att-status" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">
-      <option value="present" ${rec.status==='present'?'selected':''}>Present</option>
-      <option value="absent" ${rec.status==='absent'?'selected':''}>Absent</option>
-      <option value="leave" ${rec.status==='leave'?'selected':''}>On Leave</option>
-      <option value="holiday" ${rec.status==='holiday'?'selected':''}>Holiday</option>
-    </select>
-  </div>
-</div>
-<div class="form-row">
-  <div class="form-group"><label>Time In</label><input type="time" id="att-timein" value="${rec.timeIn||''}"></div>
-  <div class="form-group"><label>Time Out</label><input type="time" id="att-timeout" value="${rec.timeOut||''}"></div>
-</div>
-<div class="form-row">
-  <div class="form-group"><label>Hours Worked</label><input type="number" id="att-hours" value="${rec.hoursWorked||0}" min="0" step="0.25"></div>
-  <div class="form-group"><label>Overtime Hours</label><input type="number" id="att-ot" value="${rec.overtimeHours||0}" min="0" step="0.25"></div>
-</div>
-<div class="form-group"><label>Notes</label><input type="text" id="att-notes" value="${rec.notes||''}" placeholder="Reason or remarks"></div>
-<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-  <button class="btn" onclick="closeModal()">Cancel</button>
-  <button class="btn primary" onclick="saveEditAttendance('${id}')"><i class="ti ti-check"></i>Save</button>
-</div>`);
-}
 
-function saveEditAttendance(id) {
-  const rec = (state.attendance||[]).find(a=>a.id===id);
-  if(!rec) return;
-  rec.date=document.getElementById('att-date').value;
-  rec.status=document.getElementById('att-status').value;
-  rec.timeIn=document.getElementById('att-timein').value;
-  rec.timeOut=document.getElementById('att-timeout').value;
-  rec.hoursWorked=parseFloat(document.getElementById('att-hours').value)||0;
-  rec.overtimeHours=parseFloat(document.getElementById('att-ot').value)||0;
-  rec.notes=document.getElementById('att-notes').value.trim();
-  stampUpdate(rec);
-  auditLog('UPDATE','Attendance',id,{description:`Updated attendance for ${rec.empId} on ${rec.date}`});
-  save(); closeModal(); render();
-}
 
-function deleteAttendance(id) {
-  if(!confirm('Delete this attendance record?')) return;
-  state.attendance=(state.attendance||[]).filter(a=>a.id!==id);
-  save(); render();
-}
 
 
 function deleteAttendance(id) { if(!requireAdmin("delete attendance records")) return;
@@ -22265,7 +22211,7 @@ function saveBackup() {
     const backup = {
       version: APP_VERSION,
       timestamp: new Date().toISOString(),
-      data: JSON.parse(localStorage.getItem('anmolpharma')||'{}'),
+      data: lsReadState() || state,
       company: JSON.parse(localStorage.getItem(COMPANY_KEY)||'{}'),
       branches: JSON.parse(localStorage.getItem('anmolpharma_branches')||'[]'),
       users: JSON.parse(localStorage.getItem(USERS_KEY)||'[]'),
@@ -22342,7 +22288,7 @@ function runRestore() {
   if(!confirm('Are you sure? ALL current data will be replaced with this backup.')) return;
   try {
     const bk = window._restoreData;
-    if(bk.data)        localStorage.setItem('anmolpharma', JSON.stringify(bk.data));
+    if(bk.data && !lsWriteState(bk.data)) throw new Error('Could not write the restored data to local storage.');
     if(bk.company)     localStorage.setItem(COMPANY_KEY, JSON.stringify(bk.company));
     if(bk.branches)    localStorage.setItem('anmolpharma_branches', JSON.stringify(bk.branches));
     if(bk.users)       localStorage.setItem(USERS_KEY, JSON.stringify(bk.users));
