@@ -739,6 +739,41 @@ function fbSave(stateData) {
 }
 async function _doFbSave(s) { return _fbDoSave(s); }
 
+// ── CHANGE TRACKING ───────────────────────────────────────────────────────────
+// Every save used to upload every record. With thousands of records that is
+// slow and costs a Firestore write per record per save. We now upload only
+// records whose content actually changed.
+//
+// Safety rule: a record is skipped ONLY when its content is byte-identical to
+// what the cloud is known to hold. Anything uncertain is written.
+
+const _fbDocHash = Object.create(null);   // "collection/docId" -> stable JSON
+
+// Key order must not affect the comparison — Firestore returns fields in its
+// own order, so sort keys at every level before comparing.
+function stableStr(v) {
+  if(v === null || typeof v !== 'object') return JSON.stringify(v);
+  if(Array.isArray(v)) return '[' + v.map(stableStr).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stableStr(v[k])).join(',') + '}';
+}
+
+// Record what the cloud holds, so the next save can tell what changed.
+function fbSeedHashes(key, records) {
+  (records||[]).forEach(r => {
+    if(!r || r.id == null) return;
+    const docId = String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
+    const { _t, ...rest } = r;
+    _fbDocHash[key + '/' + docId] = stableStr(rest);
+  });
+}
+
+// Forget everything — the next save then re-uploads all records.
+function fbResetHashes() {
+  Object.keys(_fbDocHash).forEach(k => delete _fbDocHash[k]);
+  console.log('Change tracking cleared — the next save will re-upload everything.');
+}
+window.fbResetHashes = fbResetHashes;
+
 async function _fbDoSave(stateData) {
   if(!db) { fbSetStatus('idle'); return; }
   fbSetStatus('saving');
@@ -748,38 +783,54 @@ async function _fbDoSave(stateData) {
     const updatedBy = window.currentUser?.name||'System';
 
     const failed = [];
+    let written = 0, skipped = 0;
+
     for(const key of FB_COLLECTIONS) {
       const arr = data[key];
       if(!Array.isArray(arr)||!arr.length) continue;
       const colRef = db.collection(colPath(key));
+
+      // Work out which records actually changed
+      const pending = [];
+      arr.forEach(item => {
+        if(!item||item.id == null) return;
+        const docId = String(item.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
+        // Firestore rejects `undefined` anywhere, including inside nested arrays.
+        // A JSON round-trip strips those; the replacer also drops single fields
+        // over 700KB, which would breach the 1MB per-document limit.
+        const clean = JSON.parse(JSON.stringify(item, (f, v) => {
+          if(typeof v === 'string' && v.length > 700000) {
+            console.warn(`Skipping oversized field "${f}" on ${key}/${docId} (${Math.round(v.length/1024)}KB)`);
+            return undefined;
+          }
+          return v;
+        }));
+        const sig = stableStr(clean);
+        if(_fbDocHash[key + '/' + docId] === sig) { skipped++; return; }  // unchanged
+        pending.push({ docId, clean, sig });
+      });
+
+      if(!pending.length) continue;
+
       try {
-      for(let i=0; i<arr.length; i+=400) {
-        const batch = db.batch();
-        arr.slice(i,i+400).forEach(item => {
-          if(!item||!item.id) return;
-          const docId = String(item.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
-          // Each record is now its own Firestore document, so photos are fine to keep.
-          // Only drop a field if it alone would blow the 1MB per-document limit.
-          // Firestore rejects any document containing `undefined` anywhere,
-          // including inside nested arrays. A JSON round-trip strips those
-          // recursively; the replacer also drops single fields over 700KB.
-          const clean = JSON.parse(JSON.stringify(item, (f, v) => {
-            if(typeof v === 'string' && v.length > 700000) {
-              console.warn(`Skipping oversized field "${f}" on ${key}/${docId} (${Math.round(v.length/1024)}KB)`);
-              return undefined;
-            }
-            return v;
-          }));
-          batch.set(colRef.doc(docId), {...clean, _t: writeTime});
-        });
-        await batch.commit();
-      }
+        for(let i=0; i<pending.length; i+=400) {
+          const slice = pending.slice(i, i+400);
+          const batch = db.batch();
+          slice.forEach(x => batch.set(colRef.doc(x.docId), {...x.clean, _t: writeTime}));
+          await batch.commit();
+          // Only remember it after the write is confirmed
+          slice.forEach(x => { _fbDocHash[key + '/' + x.docId] = x.sig; });
+          written += slice.length;
+        }
       } catch(colErr) {
-        // Isolate the failure — one bad collection must not stop the others saving
+        // Isolate the failure, and do not record these as saved — they retry next time
         console.error(`Save failed for "${key}":`, colErr.message);
         failed.push(key + ': ' + colErr.message);
       }
     }
+
+    if(written || skipped)
+      console.log(`Cloud save: ${written} record(s) uploaded, ${skipped} unchanged`);
 
     if(failed.length) {
       fbSetStatus('error', failed.length + ' collection(s) failed');
@@ -1226,7 +1277,11 @@ async function fbLoad() {
           .catch(()=>({key,docs:[]}))
       )
     );
-    results.forEach(({key,docs})=>{ if(docs.length) merged[key]=docs; });
+    results.forEach(({key,docs})=>{
+      if(docs.length) merged[key]=docs;
+      // Remember exactly what the cloud holds so the next save uploads only changes
+      fbSeedHashes(key, docs);
+    });
 
     try {
       const ms = await db.doc(FB_META).get();
