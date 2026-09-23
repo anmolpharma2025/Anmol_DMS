@@ -1164,7 +1164,7 @@ function downloadBackup() {
 }
 window.downloadBackup = downloadBackup;
 
-// Restores a backup file. Merges non-destructively, then saves to the cloud.
+// Restores a backup file. Offers merge (safe) or replace (for a cleaned file).
 function restoreBackup() {
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = '.json,application/json';
@@ -1175,22 +1175,67 @@ function restoreBackup() {
       try {
         const payload = JSON.parse(rd.result);
         const src = payload.state || payload;
-        const counts = Object.keys(src).filter(k=>Array.isArray(src[k]))
-          .map(k=>`${k}: ${src[k].length}`).join('\n');
-        if(!confirm('Restore this backup?\n\nExported: ' + (payload.exportedAt||'unknown') +
-                    '\n\n' + counts + '\n\nRecords are merged — nothing on this device is deleted.')) return;
+        const counts = Object.keys(src).filter(k=>Array.isArray(src[k]) && src[k].length)
+          .map(k=>`  ${k}: ${src[k].length}  (now ${(state[k]||[]).length})`).join('\n');
+        const replace = confirm(
+          'Restore this backup?\n\n' + (payload.note ? payload.note + '\n\n' : '') +
+          'Exported: ' + (payload.exportedAt||'unknown') + '\n\n' + counts +
+          '\n\nOK      = REPLACE — use the file exactly as it is (for a cleaned file)\n' +
+          'Cancel  = MERGE — add to what is here, delete nothing');
+        if(replace && !confirm('REPLACE will discard records on this device that are not in the file.\n\nA backup of the current data downloads first. Continue?')) return;
+        if(replace) downloadBackup();
         Object.keys(src).forEach(k => {
-          if(Array.isArray(src[k])) state[k] = mergeRemoteArray(k, src[k], state[k]);
-          else if(state[k] === undefined) state[k] = src[k];
+          if(Array.isArray(src[k])) state[k] = replace ? src[k] : mergeRemoteArray(k, src[k], state[k]);
+          else if(!replace || state[k] === undefined) state[k] = src[k];
         });
-        recomputeBalances(); save(); render();
-        toast('✅ Backup restored and saving to cloud.');
+        recomputeBalances();
+        fbResetHashes();          // cloud must be re-checked against the new data
+        save(); render();
+        toast(replace ? '✅ Data replaced. Now run cleanCloudExtras() to remove the old copies from the cloud.'
+                      : '✅ Backup merged.', 'success', 9000);
       } catch(e) { alert('Could not read that backup file: ' + e.message); }
     };
     rd.readAsText(f);
   };
   inp.click();
 }
+
+// Deletes cloud records that no longer exist on this device.
+// Normal saves never delete, so this is the only way to clear removed records.
+async function cleanCloudExtras(dryRun) {
+  if(!db) { alert('No cloud connection.'); return; }
+  console.log(dryRun===false ? '=== CLEANING CLOUD ===' : '=== DRY RUN — nothing will be deleted ===');
+  let total = 0; const plan = [];
+  for(const key of FB_COLLECTIONS) {
+    const localIds = new Set((state[key]||[]).filter(r=>r&&r.id!=null)
+      .map(r=>String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100)));
+    let snap; try { snap = await db.collection(colPath(key)).get(); } catch(e) { continue; }
+    const extra = snap.docs.filter(doc => !localIds.has(doc.id));
+    if(extra.length) { plan.push({key, extra}); total += extra.length; console.log(`  ${key}: ${extra.length} extra in cloud`); }
+  }
+  if(!total) { console.log('Cloud matches this device — nothing to remove.'); toast('Cloud is already clean.'); return 0; }
+  if(dryRun !== false) {
+    console.log(`\n${total} record(s) would be deleted. Run cleanCloudExtras(false) to do it.`);
+    return total;
+  }
+  if(!confirm(`Delete ${total} record(s) from the cloud that are not on this device?\n\nA backup downloads first.`)) return 0;
+  downloadBackup();
+  let done = 0;
+  for(const {key, extra} of plan) {
+    for(let i=0;i<extra.length;i+=400) {
+      const batch = db.batch();
+      extra.slice(i,i+400).forEach(doc => batch.delete(doc.ref));
+      try { await batch.commit(); done += Math.min(400, extra.length-i); }
+      catch(e) { console.error(`delete failed for ${key}:`, e.message); }
+    }
+    console.log(`  ${key}: cleaned`);
+  }
+  fbResetHashes();
+  console.log(`Removed ${done} record(s) from the cloud.`);
+  toast(`✅ Removed ${done} outdated record(s) from the cloud.`);
+  return done;
+}
+window.cleanCloudExtras = cleanCloudExtras;
 window.restoreBackup = restoreBackup;
 
 // ── SAFE REMOTE MERGE ─────────────────────────────────────────────────────────
