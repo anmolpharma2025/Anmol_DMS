@@ -22362,15 +22362,48 @@ function showRestoreBackup() {
       try {
         const bk = JSON.parse(ev.target.result);
         const ts = bk.timestamp ? new Date(bk.timestamp).toLocaleString('en-PH') : 'Unknown';
-        const inv = bk.data?.invoices?.length || 0;
-        const emp = bk.data?.employees?.length || 0;
-        const pr  = bk.data?.payrolls?.length || 0;
+        const bd = bk.data || {};
+        const LABEL = {
+          journal:'Journal entries', invoices:'Invoices', salesOrders:'Sales orders',
+          salesReturns:'Sales returns', collections:'Collections', deposits:'Deposits',
+          supplierInvoices:'Supplier invoices', purchaseOrders:'Purchase orders',
+          purchaseRequests:'Purchase requests', purchases:'Purchases', expenses:'Expenses',
+          accounts:'Chart of accounts', customers:'Customers', suppliers:'Suppliers',
+          inventory:'Inventory items', inventoryMovements:'Stock movements',
+          inventoryTransfers:'Branch transfers', employees:'Employees',
+          attendance:'Attendance records', payrolls:'Payroll records', leaves:'Leave records',
+          performances:'Performance', trainings:'Training', disciplinary:'Disciplinary',
+          empDocuments:'Employee documents', announcements:'Announcements'
+        };
+        // Show EVERY record type in the file, so nothing is replaced unseen
+        const rows = Object.keys(bd)
+          .filter(k => Array.isArray(bd[k]) && bd[k].length)
+          .sort((a,b) => bd[b].length - bd[a].length)
+          .map(k => {
+            const now = Array.isArray(state[k]) ? state[k].length : 0;
+            const diff = bd[k].length - now;
+            const tag = diff === 0 ? '' :
+              `<span style="color:${diff<0?'var(--red)':'var(--green)'};font-size:11px"> (${diff>0?'+':''}${diff})</span>`;
+            return `<div style="display:flex;justify-content:space-between;padding:1px 0">
+              <span>${LABEL[k]||k}</span>
+              <span><strong>${bd[k].length}</strong> <span style="color:var(--text-tertiary);font-size:11px">now ${now}</span>${tag}</span>
+            </div>`;
+          }).join('');
+        const totalIn  = Object.keys(bd).filter(k=>Array.isArray(bd[k])).reduce((s,k)=>s+bd[k].length,0);
+        const totalNow = Object.keys(bd).filter(k=>Array.isArray(bd[k])).reduce((s,k)=>s+(Array.isArray(state[k])?state[k].length:0),0);
+        const extras = ['company','branches','users','sheetsConfig'].filter(k=>bk[k]);
         document.getElementById('restore-preview').innerHTML = `
 <div style="padding:10px 12px;background:var(--bg-primary);border-radius:var(--radius-md);border:1px solid var(--border-light)">
-  <div style="font-weight:600;margin-bottom:6px;color:var(--text-primary)">Backup details:</div>
+  <div style="font-weight:600;margin-bottom:4px;color:var(--text-primary)">Backup details:</div>
   <div>Version: <strong>v${bk.version||'unknown'}</strong></div>
   <div>Created: <strong>${ts}</strong></div>
-  <div>Invoices: <strong>${inv}</strong> &nbsp;·&nbsp; Employees: <strong>${emp}</strong> &nbsp;·&nbsp; Payrolls: <strong>${pr}</strong></div>
+  ${bk.note?`<div style="margin-top:4px;color:var(--accent);font-size:12px">${bk.note}</div>`:''}
+  <div style="margin-top:8px;font-weight:600;font-size:12px;color:var(--text-secondary)">Everything this file will restore:</div>
+  <div style="max-height:220px;overflow-y:auto;font-size:12px;margin-top:4px;padding-right:4px">${rows||'<em>No records found in this file.</em>'}</div>
+  <div style="display:flex;justify-content:space-between;border-top:1px solid var(--border-light);margin-top:6px;padding-top:5px;font-weight:700;font-size:12px">
+    <span>TOTAL RECORDS</span><span>${totalIn.toLocaleString()} <span style="color:var(--text-tertiary);font-weight:400">now ${totalNow.toLocaleString()}</span></span>
+  </div>
+  ${extras.length?`<div style="font-size:11px;color:var(--text-secondary);margin-top:5px">Also included: ${extras.join(', ')}</div>`:''}
   <div style="margin-top:6px;color:var(--green);font-weight:500"><i class="ti ti-check"></i> Valid backup file — ready to restore</div>
 </div>`;
         window._restoreData = bk;
