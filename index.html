@@ -829,8 +829,42 @@ async function _fbDoSave(stateData) {
       }
     }
 
-    if(written || skipped)
-      console.log(`Cloud save: ${written} record(s) uploaded, ${skipped} unchanged`);
+    // ── Propagate deletions ───────────────────────────────────────────────
+    // _fbDocHash lists what the cloud is known to hold. Anything there that is
+    // no longer in the local array was deleted here, so remove it from the cloud.
+    // Without this, deleting a record locally has no effect — a refresh brings
+    // it straight back from Firestore.
+    let deleted = 0;
+    for(const key of FB_COLLECTIONS) {
+      const arr = data[key];
+      if(!Array.isArray(arr)) continue;
+      const liveIds = new Set(arr.filter(r=>r&&r.id!=null)
+        .map(r=>String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100)));
+      const gone = Object.keys(_fbDocHash)
+        .filter(h => h.startsWith(key + '/'))
+        .map(h => h.slice(key.length + 1))
+        .filter(id => !liveIds.has(id));
+      if(!gone.length) continue;
+      // Guard against a bug wiping a collection: large removals must be explicit
+      if(gone.length > 200) {
+        console.warn(`${key}: ${gone.length} records are missing locally — too many to remove automatically. ` +
+                     `Run cleanCloudExtras(false) if that is intended.`);
+        continue;
+      }
+      try {
+        const colRef = db.collection(colPath(key));
+        for(let i=0; i<gone.length; i+=400) {
+          const batch = db.batch();
+          gone.slice(i,i+400).forEach(id => batch.delete(colRef.doc(id)));
+          await batch.commit();
+          gone.slice(i,i+400).forEach(id => { delete _fbDocHash[key + '/' + id]; });
+          deleted += Math.min(400, gone.length - i);
+        }
+      } catch(e) { console.error(`Delete failed for "${key}":`, e.message); }
+    }
+
+    if(written || skipped || deleted)
+      console.log(`Cloud save: ${written} uploaded, ${deleted} deleted, ${skipped} unchanged`);
 
     if(failed.length) {
       fbSetStatus('error', failed.length + ' collection(s) failed');
@@ -1154,9 +1188,14 @@ function _shapeOf(r) {
   if(has('costPrice','salePrice'))                 return 'inventory';
   if(has('item','qty') && k.has('ref'))            return 'inventoryMovements';
   if(any('debit','credit') || k.has('group'))      return 'journal';
+  // Supplier invoices and purchase orders both carry supplier + lines,
+  // so check the fields unique to each before falling back.
+  if(any('supplierInvNo','payments','vatTreatment','subtotal')) return 'supplierInvoices';
+  if(any('prRef','purchaseType','paymentTerms','supplierInvoiceNo')) return 'purchaseOrders';
   if(k.has('supplier') && k.has('lines'))          return 'purchaseOrders';
   if(k.has('deliveryDate') && k.has('customer'))   return 'salesOrders';
   if(k.has('customer') && any('due','vatBase'))    return 'invoices';
+  if(any('orNo','receiptNo') || (k.has('customer') && any('mode','invoice') && !k.has('lines'))) return 'collections';
   if(k.has('empId') && any('timeIn','timeOut'))    return 'attendance';
   if(k.has('balance') && k.has('name') && !k.has('type')) return 'contact';
   return null;   // unknown — never moved
@@ -1185,6 +1224,18 @@ function repairData(apply) {
         const elsewhere = HOME.filter(k2 => k2 !== key && index[k2][String(r.id)]);
         if(elsewhere.length) target = elsewhere[0];
       }
+      // No counterpart, but the record clearly belongs elsewhere — MOVE it there
+      // rather than leave it rendering as blank rows in the wrong tab.
+      if(!target && s && s !== key && HOME.indexOf(s) !== -1) {
+        if(apply) {
+          if(!Array.isArray(state[s])) state[s] = [];
+          state[s].push(r);
+          index[s][String(r.id)] = r;
+        }
+        const lbl2 = key + ' → ' + s + '  (moved, no duplicate existed)';
+        moves[lbl2] = (moves[lbl2]||0) + 1;
+        return;                       // drop from this array, now lives in the right one
+      }
       if(!target) { keep.push(r); return; }
       const home = index[target][String(r.id)];
       Object.keys(r).forEach(f => {                      // merge, never overwrite
@@ -1199,7 +1250,18 @@ function repairData(apply) {
   });
 
   const before = Object.keys(state).filter(k=>Array.isArray(state[k])).reduce((s,k)=>s+state[k].length,0);
-  const after  = Object.keys(plan).reduce((s,k)=>s+plan[k].length,0);
+  let after = Object.keys(plan).reduce((s,k)=>s+plan[k].length,0);
+  // records relocated into arrays that were not themselves rebuilt still count
+  Object.keys(state).forEach(k => { if(Array.isArray(state[k]) && !(k in plan)) after += state[k].length; });
+
+  // Refuse to run if any array would be emptied — that means a rule is wrong
+  const emptied = Object.keys(plan).filter(k =>
+    Array.isArray(state[k]) && state[k].length > 0 && plan[k].length === 0);
+  if(emptied.length) {
+    console.error('ABORTED — these arrays would be emptied, which means a classification rule is wrong:', emptied.join(', '));
+    console.error('Nothing has been changed. Please report this.');
+    return -1;
+  }
 
   console.log(apply ? '=== REPAIRING ===' : '=== DRY RUN — nothing changed ===');
   Object.entries(moves).sort((a,b)=>b[1]-a[1]).forEach(([k,v]) => console.log(`  ${String(v).padStart(5)}  ${k}`));
