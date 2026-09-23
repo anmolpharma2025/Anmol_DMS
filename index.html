@@ -1140,6 +1140,90 @@ function repairInvoices() {
 }
 window.repairInvoices = repairInvoices;
 
+// ── DATA REPAIR ───────────────────────────────────────────────────────────────
+// Records have ended up in the wrong arrays (customers inside journal, and so on).
+// A record is removed from an array ONLY when its shape belongs elsewhere AND a
+// record with the same id already exists there. Fields present only on the stray
+// copy are merged into the proper one first, so no information is discarded.
+
+function _shapeOf(r) {
+  if(!r || typeof r !== 'object') return null;
+  const k = new Set(Object.keys(r));
+  const has = (...f) => f.every(x => k.has(x));
+  const any = (...f) => f.some(x => k.has(x));
+  if(has('costPrice','salePrice'))                 return 'inventory';
+  if(has('item','qty') && k.has('ref'))            return 'inventoryMovements';
+  if(any('debit','credit') || k.has('group'))      return 'journal';
+  if(k.has('supplier') && k.has('lines'))          return 'purchaseOrders';
+  if(k.has('deliveryDate') && k.has('customer'))   return 'salesOrders';
+  if(k.has('customer') && any('due','vatBase'))    return 'invoices';
+  if(k.has('empId') && any('timeIn','timeOut'))    return 'attendance';
+  if(k.has('balance') && k.has('name') && !k.has('type')) return 'contact';
+  return null;   // unknown — never moved
+}
+
+function repairData(apply) {
+  const HOME = ['journal','invoices','salesOrders','purchaseOrders','supplierInvoices',
+                'purchaseRequests','inventory','inventoryMovements','customers','suppliers',
+                'employees','attendance','collections','accounts'];
+  const index = {};
+  HOME.forEach(k => { index[k] = {}; (state[k]||[]).forEach(r => { if(r && r.id != null) index[k][String(r.id)] = r; }); });
+
+  const REQ = { journal:['date','amount'], invoices:['date','customer'] };
+  const moves = {}; let enriched = 0; const plan = {};
+
+  Object.keys(state).forEach(key => {
+    if(!Array.isArray(state[key])) return;
+    const keep = [];
+    state[key].forEach(r => {
+      if(!r || typeof r !== 'object' || r.id == null) { keep.push(r); return; }
+      let s = _shapeOf(r);
+      if(s === 'contact') s = index.suppliers[String(r.id)] && !index.customers[String(r.id)] ? 'suppliers' : 'customers';
+      let target = (s && s !== key && index[s] && index[s][String(r.id)]) ? s : null;
+      // Also catch records that cannot render here and live elsewhere under the same id
+      if(!target && REQ[key] && REQ[key].some(f => r[f] === undefined || r[f] === null || r[f] === '')) {
+        const elsewhere = HOME.filter(k2 => k2 !== key && index[k2][String(r.id)]);
+        if(elsewhere.length) target = elsewhere[0];
+      }
+      if(!target) { keep.push(r); return; }
+      const home = index[target][String(r.id)];
+      Object.keys(r).forEach(f => {                      // merge, never overwrite
+        const v = r[f];
+        if(v === undefined || v === null || v === '' ) return;
+        if(home[f] === undefined || home[f] === null || home[f] === '') { if(apply) home[f] = v; enriched++; }
+      });
+      const lbl = key + ' → ' + target;
+      moves[lbl] = (moves[lbl]||0) + 1;
+    });
+    plan[key] = keep;
+  });
+
+  const before = Object.keys(state).filter(k=>Array.isArray(state[k])).reduce((s,k)=>s+state[k].length,0);
+  const after  = Object.keys(plan).reduce((s,k)=>s+plan[k].length,0);
+
+  console.log(apply ? '=== REPAIRING ===' : '=== DRY RUN — nothing changed ===');
+  Object.entries(moves).sort((a,b)=>b[1]-a[1]).forEach(([k,v]) => console.log(`  ${String(v).padStart(5)}  ${k}`));
+  console.log(`  fields recovered into the proper record: ${enriched}`);
+  console.log('\n  records before:', before.toLocaleString(), ' after:', after.toLocaleString(),
+              ' removed:', (before-after).toLocaleString());
+  Object.keys(plan).forEach(k => {
+    if(plan[k].length !== state[k].length)
+      console.log(`    ${k}: ${state[k].length} -> ${plan[k].length}`);
+  });
+
+  if(!apply) { console.log('\nRun repairData(true) to apply. A backup downloads first.'); return before-after; }
+
+  downloadBackup();
+  Object.keys(plan).forEach(k => { state[k] = plan[k]; });
+  recomputeBalances();
+  fbResetHashes();
+  save(); render();
+  console.log('\nDone. Now run cleanCloudExtras() to clear the old copies from the cloud.');
+  toast(`✅ Repaired — ${(before-after).toLocaleString()} misplaced record(s) removed. Run cleanCloudExtras() next.`, 'success', 10000);
+  return before-after;
+}
+window.repairData = repairData;
+
 // ── FULL BACKUP ───────────────────────────────────────────────────────────────
 // Downloads everything as a single JSON file. Keep these somewhere safe.
 function downloadBackup() {
@@ -1269,10 +1353,19 @@ function mergeRemoteArray(key, remoteArr, localArr) {
 
   // Keep records that exist only on this device — they have not reached the
   // cloud yet. Dropping them here is how unsynced work used to disappear.
-  let kept = 0;
+  // BUT never re-add a record that clearly belongs in a different array:
+  // doing so is what spread misplaced records from one device to all the others.
+  let kept = 0, blocked = 0;
   (localArr||[]).forEach(r => {
-    if(r && r.id != null && !seen.has(String(r.id))) { out.push(r); kept++; }
+    if(!r || r.id == null || seen.has(String(r.id))) return;
+    if(typeof _shapeOf === 'function') {
+      let s = _shapeOf(r);
+      if(s === 'contact') s = 'customers';
+      if(s && s !== key) { blocked++; return; }   // belongs elsewhere — do not spread it
+    }
+    out.push(r); kept++;
   });
+  if(blocked) console.warn(`merge ${key}: ignored ${blocked} record(s) that belong in another array`);
   if(kept) console.log(`merge ${key}: kept ${kept} local-only record(s) not yet in the cloud`);
   window._mergeUnsynced = (window._mergeUnsynced||0) + kept + restoredFields;
   return out;
