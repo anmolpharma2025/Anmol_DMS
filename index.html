@@ -1174,6 +1174,60 @@ function repairInvoices() {
 }
 window.repairInvoices = repairInvoices;
 
+// One-off manual import of the pre-migration documents. Never runs by itself.
+async function importLegacyData() {
+  if(!db) { alert('No cloud connection.'); return; }
+  if(!confirm('Import the OLD pre-migration data?\n\nThis is only for recovering data from before the storage change. ' +
+              'It may reintroduce records that were already cleaned up.\n\nContinue?')) return;
+  let merged = {};
+  try {
+    const leg = await db.doc('companies/anmol').get();
+    if(leg.exists && leg.data()?.data) Object.assign(merged, JSON.parse(leg.data().data));
+  } catch(e) {}
+  for(const cn of ['anmol_chunk_journal','anmol_chunk_invoices','anmol_chunk_payables',
+                   'anmol_chunk_collections','anmol_chunk_sales','anmol_chunk_inventory',
+                   'anmol_chunk_hr','anmol_chunk_payroll']) {
+    try { const cs = await db.doc('companies/' + cn).get();
+          if(cs.exists && cs.data()?.data) Object.assign(merged, JSON.parse(cs.data().data)); } catch(e) {}
+  }
+  const n = Object.keys(merged).filter(k=>Array.isArray(merged[k])).reduce((s,k)=>s+merged[k].length,0);
+  if(!n) { alert('No old data found.'); return; }
+  if(!confirm(`Found ${n.toLocaleString()} old records. Merge them in?`)) return;
+  downloadBackup();
+  applyRemoteState(merged); recomputeBalances(); save(); render();
+  alert('Old data merged. Run repairData() to sort it out.');
+}
+window.importLegacyData = importLegacyData;
+
+// Deletes the obsolete pre-migration documents so they can never be reloaded.
+async function purgeLegacyDocs(apply) {
+  if(!db) { alert('No cloud connection.'); return; }
+  const names = ['anmol','anmol_chunk_journal','anmol_chunk_invoices','anmol_chunk_payables',
+                 'anmol_chunk_collections','anmol_chunk_sales','anmol_chunk_inventory',
+                 'anmol_chunk_hr','anmol_chunk_payroll'];
+  const found = [];
+  for(const n of names) {
+    try { const d = await db.doc('companies/' + n).get();
+          if(d.exists && d.data() && d.data().data)
+            found.push({ n, kb: Math.round(String(d.data().data).length/1024) }); } catch(e) {}
+  }
+  if(!found.length) { console.log('No old documents remain.'); return 0; }
+  console.log(apply===true ? '=== DELETING OLD DOCUMENTS ===' : '=== DRY RUN ===');
+  found.forEach(f => console.log(`  companies/${f.n}  (${f.kb}KB of old data)`));
+  if(apply !== true) { console.log('\nRun purgeLegacyDocs(true) to delete these.'); return found.length; }
+  if(!confirm(`Delete ${found.length} obsolete document(s) holding pre-migration data?\n\n` +
+              'Your current data is NOT affected. A backup downloads first.')) return 0;
+  downloadBackup();
+  for(const f of found) {
+    try { await db.doc('companies/' + f.n).update({ data: firebase.firestore.FieldValue.delete() });
+          console.log(`  cleared companies/${f.n}`); }
+    catch(e) { console.error(`  failed on ${f.n}:`, e.message); }
+  }
+  toast('✅ Old documents cleared — they can no longer reintroduce records.');
+  return found.length;
+}
+window.purgeLegacyDocs = purgeLegacyDocs;
+
 // ── DATA REPAIR ───────────────────────────────────────────────────────────────
 // Records have ended up in the wrong arrays (customers inside journal, and so on).
 // A record is removed from an array ONLY when its shape belongs elsewhere AND a
@@ -1492,27 +1546,17 @@ async function fbLoad() {
       }
     } catch(e) {}
 
+    // NOTE: there is deliberately NO automatic fallback to the old
+    // "companies/anmol" document or the "anmol_chunk_*" documents.
+    // Those still hold the pre-migration data. Falling back to them whenever a
+    // collection read came back empty is what kept re-introducing records into
+    // the wrong arrays. If the collections are genuinely empty we return null
+    // and keep the local copy, which is always safer than reloading old data.
+    // A one-off import is still available manually via importLegacyData().
     if(!Object.keys(merged).length) {
-      try {
-        const leg = await db.doc(FB_BASE).get();
-        if(leg.exists&&leg.data()?.data) {
-          fbSetStatus('loaded');
-          return JSON.parse(leg.data().data);
-        }
-        // Try old chunk docs
-        const chunkNames = ['anmol_chunk_journal','anmol_chunk_invoices','anmol_chunk_payables',
-          'anmol_chunk_collections','anmol_chunk_sales','anmol_chunk_inventory',
-          'anmol_chunk_hr','anmol_chunk_payroll'];
-        let legMerged = {};
-        for(const cn of chunkNames) {
-          try {
-            const cs = await db.doc(`companies/${cn}`).get();
-            if(cs.exists&&cs.data()?.data) Object.assign(legMerged, JSON.parse(cs.data().data));
-          } catch(e) {}
-        }
-        if(Object.keys(legMerged).length) { fbSetStatus('loaded'); return legMerged; }
-      } catch(e) {}
+      console.warn('No records found in the cloud collections. Keeping local data; not falling back to the old documents.');
     }
+
     fbSetStatus(Object.keys(merged).length?'loaded':'idle');
     return Object.keys(merged).length ? merged : null;
   } catch(err) {
