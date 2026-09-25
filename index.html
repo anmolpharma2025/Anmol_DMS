@@ -1418,6 +1418,21 @@ function restoreBackup() {
 
 // Deletes cloud records that no longer exist on this device.
 // Normal saves never delete, so this is the only way to clear removed records.
+// True if a record id exists in ANY local array — used to tell a genuinely
+// missing record apart from a misplaced copy whose original is safely here.
+function _existsAnywhereLocally(docId) {
+  const want = String(docId);
+  for(const k of Object.keys(state)) {
+    const arr = state[k];
+    if(!Array.isArray(arr)) continue;
+    for(const r of arr) {
+      if(!r || r.id == null) continue;
+      if(String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100) === want) return true;
+    }
+  }
+  return false;
+}
+
 async function cleanCloudExtras(dryRun) {
   if(!db) { alert('No cloud connection.'); return; }
   console.log(dryRun===false ? '=== CLEANING CLOUD ===' : '=== DRY RUN — nothing will be deleted ===');
@@ -1438,18 +1453,22 @@ async function cleanCloudExtras(dryRun) {
       // Flag anything recent — a record from the last few days that is in the
       // cloud but not on this device was probably entered on ANOTHER device.
       const cutoff = new Date(Date.now() - 4*86400000).toISOString().slice(0,10);
+      // A record only matters if it exists NOWHERE on this device. A copy sitting
+      // in the wrong cloud collection, whose real record is in the right array
+      // here, is exactly what we are cleaning up — not lost work.
       const recent = extra.filter(doc => {
         const d = doc.data ? doc.data() : {};
         const stamp = String(d.date || d.createdAt || d.dateReceived || '').slice(0,10);
-        return stamp && stamp >= cutoff;
+        if(!stamp || stamp < cutoff) return false;
+        return !_existsAnywhereLocally(doc.id);
       });
       plan.push({key, extra, recent});
       total += extra.length; recentTotal += recent.length;
       console.log(`  ${key}: ${extra.length} extra in cloud` +
-                  (recent.length ? `   ⚠ ${recent.length} of them are recent (last 4 days)` : ''));
+                  (recent.length ? `   ⚠ ${recent.length} recent AND missing from this device` : '   (all exist here in their proper array)'));
       if(recent.length) recent.slice(0,5).forEach(doc => {
         const d = doc.data ? doc.data() : {};
-        console.log(`      recent: ${doc.id}  ${d.date||d.createdAt||''}  ${d.customer||d.supplier||d.desc||d.name||''}`);
+        console.log(`      NOT ON THIS DEVICE: ${doc.id}  ${d.date||d.createdAt||''}  ${d.customer||d.supplier||d.desc||d.name||''}`);
       });
     }
   }
