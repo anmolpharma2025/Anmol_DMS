@@ -1216,7 +1216,23 @@ async function purgeLegacyDocs(apply) {
   found.forEach(f => console.log(`  companies/${f.n}  (${f.kb}KB of old data)`));
   if(apply !== true) { console.log('\nRun purgeLegacyDocs(true) to delete these.'); return found.length; }
   if(!confirm(`Delete ${found.length} obsolete document(s) holding pre-migration data?\n\n` +
-              'Your current data is NOT affected. A backup downloads first.')) return 0;
+              'Your current data is NOT affected.\n\nThe old data itself downloads first, so it is recoverable.')) return 0;
+
+  // Save the legacy content itself before removing it — downloadBackup() only
+  // captures the CURRENT state, which is not what is being deleted here.
+  const archive = { app:'PharmaHub', archivedAt:new Date().toISOString(),
+                    note:'Pre-migration documents, archived before deletion', docs:{} };
+  for(const f of found) {
+    try { const d = await db.doc('companies/' + f.n).get(); archive.docs[f.n] = d.data(); } catch(e) {}
+  }
+  try {
+    const blob = new Blob([JSON.stringify(archive)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'PharmaHub-LEGACY-archive-' + new Date().toISOString().slice(0,16).replace(/[:T]/g,'-') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    console.log('Old data archived to a download before deletion.');
+  } catch(e) { alert('Could not archive the old data — stopping. ' + e.message); return 0; }
   downloadBackup();
   for(const f of found) {
     try { await db.doc('companies/' + f.n).update({ data: firebase.firestore.FieldValue.delete() });
@@ -1410,6 +1426,13 @@ async function cleanCloudExtras(dryRun) {
     const localIds = new Set((state[key]||[]).filter(r=>r&&r.id!=null)
       .map(r=>String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100)));
     let snap; try { snap = await db.collection(colPath(key)).get(); } catch(e) { continue; }
+    // Safety: if this device holds little or nothing for a collection the cloud
+    // has plenty of, the local copy probably failed to load. Never delete then.
+    if(snap.docs.length > 20 && localIds.size < snap.docs.length * 0.25) {
+      console.warn(`  ${key}: SKIPPED — device has ${localIds.size} but cloud has ${snap.docs.length}. ` +
+                   `That looks like the local copy did not load. Refresh and try again.`);
+      continue;
+    }
     const extra = snap.docs.filter(doc => !localIds.has(doc.id));
     if(extra.length) { plan.push({key, extra}); total += extra.length; console.log(`  ${key}: ${extra.length} extra in cloud`); }
   }
