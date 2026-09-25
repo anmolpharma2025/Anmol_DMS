@@ -1421,7 +1421,7 @@ function restoreBackup() {
 async function cleanCloudExtras(dryRun) {
   if(!db) { alert('No cloud connection.'); return; }
   console.log(dryRun===false ? '=== CLEANING CLOUD ===' : '=== DRY RUN — nothing will be deleted ===');
-  let total = 0; const plan = [];
+  let total = 0, recentTotal = 0; const plan = [];
   for(const key of FB_COLLECTIONS) {
     const localIds = new Set((state[key]||[]).filter(r=>r&&r.id!=null)
       .map(r=>String(r.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100)));
@@ -1434,13 +1434,41 @@ async function cleanCloudExtras(dryRun) {
       continue;
     }
     const extra = snap.docs.filter(doc => !localIds.has(doc.id));
-    if(extra.length) { plan.push({key, extra}); total += extra.length; console.log(`  ${key}: ${extra.length} extra in cloud`); }
+    if(extra.length) {
+      // Flag anything recent — a record from the last few days that is in the
+      // cloud but not on this device was probably entered on ANOTHER device.
+      const cutoff = new Date(Date.now() - 4*86400000).toISOString().slice(0,10);
+      const recent = extra.filter(doc => {
+        const d = doc.data ? doc.data() : {};
+        const stamp = String(d.date || d.createdAt || d.dateReceived || '').slice(0,10);
+        return stamp && stamp >= cutoff;
+      });
+      plan.push({key, extra, recent});
+      total += extra.length; recentTotal += recent.length;
+      console.log(`  ${key}: ${extra.length} extra in cloud` +
+                  (recent.length ? `   ⚠ ${recent.length} of them are recent (last 4 days)` : ''));
+      if(recent.length) recent.slice(0,5).forEach(doc => {
+        const d = doc.data ? doc.data() : {};
+        console.log(`      recent: ${doc.id}  ${d.date||d.createdAt||''}  ${d.customer||d.supplier||d.desc||d.name||''}`);
+      });
+    }
   }
   if(!total) { console.log('Cloud matches this device — nothing to remove.'); toast('Cloud is already clean.'); return 0; }
+  if(recentTotal) {
+    console.warn(`\n⚠ ${recentTotal} of these were created in the last 4 days.`);
+    console.warn('  They are in the cloud but NOT on this device — most likely entered on another');
+    console.warn('  device and not yet pulled here. Deleting them would lose that work.');
+    console.warn('  Refresh this device first, or run the clean-up from the device that has them.');
+  }
   if(dryRun !== false) {
-    console.log(`\n${total} record(s) would be deleted. Run cleanCloudExtras(false) to do it.`);
+    console.log(`\n${total} record(s) would be deleted${recentTotal?` (${recentTotal} of them recent)`:''}. ` +
+                'Run cleanCloudExtras(false) to do it.');
     return total;
   }
+  if(recentTotal && !confirm(
+      `WARNING\n\n${recentTotal} of the ${total} record(s) were created in the last 4 days and are not on this device.\n\n` +
+      'They were probably entered elsewhere and would be permanently deleted.\n\n' +
+      'Cancel, refresh this device, and check before continuing.\n\nDelete anyway?')) return 0;
   if(!confirm(`Delete ${total} record(s) from the cloud that are not on this device?\n\nA backup downloads first.`)) return 0;
   downloadBackup();
   let done = 0;
