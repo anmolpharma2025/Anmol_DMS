@@ -489,9 +489,26 @@ function inPd(date){
 async function loadData(){
   document.getElementById('dash').innerHTML = '<div class="loading"><div class="spin"></div><span>Loading…</span></div>';
   try {
-    const doc = await db.doc('companies/anmol').get();
-    if(!doc.exists) throw new Error('No ERP data found.');
-    S = JSON.parse(doc.data().data||'{}');
+    // Read the ERP's per-record collections — the same storage the main app uses.
+    // The old single "companies/anmol" document is NOT used: writing the whole
+    // database back from here is what kept putting records into wrong arrays.
+    const KEYS = ['journal','invoices','salesOrders','salesReturns','collections','deposits',
+      'supplierInvoices','purchaseOrders','purchaseRequests','purchases','expenses',
+      'customers','suppliers','inventory','inventoryMovements','inventoryTransfers',
+      'employees','attendance','payrolls','leaves','performances','trainings',
+      'disciplinary','empDocuments','announcements','accounts'];
+    const results = await Promise.all(KEYS.map(k =>
+      db.collection('anmol_data_' + k).get()
+        .then(s => ({k, docs: s.docs.map(d => { const {_t, ...r} = d.data(); return r; })}))
+        .catch(() => ({k, docs: []}))));
+    S = {};
+    results.forEach(({k, docs}) => { S[k] = docs; });
+    try {
+      const meta = await db.doc('companies/anmol_state_meta').get();
+      if(meta.exists) ['settings','branches'].forEach(k => { if(meta.data()[k]) S[k] = meta.data()[k]; });
+    } catch(e) {}
+    if(!Object.values(S).some(v => Array.isArray(v) && v.length))
+      throw new Error('No ERP data found. Open the main system once so it can sync.');
     document.getElementById('refresh-time').textContent = new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
     render();
   } catch(e) {
@@ -551,12 +568,19 @@ function toast(msg,type='info',ms=3000){
 }
 
 // ── SAVE BACK TO ERP ─────────────────────────────────────────────────────────
-async function saveERP(){
-  await db.doc('companies/anmol').set({
-    data:JSON.stringify(S),
-    updatedAt:Date.now(),
-    updatedBy:'Management Dashboard'
-  });
+// Writes ONE record to its own collection. Never rewrites the whole database.
+async function saveRecord(key, record){
+  if(!record || record.id == null) throw new Error('Nothing to save.');
+  const docId = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
+  // Firestore rejects undefined anywhere, including inside nested arrays
+  const clean = JSON.parse(JSON.stringify(record));
+  await db.collection('anmol_data_' + key).doc(docId).set({ ...clean, _t: Date.now() });
+  // Nudge the main app so open sessions pick the change up
+  try {
+    await db.doc('companies/anmol_state_meta').set({
+      updatedAt: Date.now(), updatedBy: 'Management Dashboard', deviceId: 'mgmt_dashboard'
+    }, { merge: true });
+  } catch(e) {}
 }
 
 // ── HR MODAL ACTIONS ─────────────────────────────────────────────────────────
@@ -587,7 +611,7 @@ async function approveLeave(id, status){
   const l=(S.leaves||[]).find(x=>x.id===id);
   if(!l) return;
   l.status=status; l.approvedBy='Management Dashboard'; l.approvedOn=today();
-  try{await saveERP();toast(`Leave ${status}`,'ok');openLeaves();}
+  try{await saveRecord('leaves', l);toast(`Leave ${status}`,'ok');openLeaves();}
   catch(e){toast('Error: '+e.message,'err');}
 }
 
@@ -638,8 +662,9 @@ async function markAbsentNow(empId, empName){
   if(!S.attendance) S.attendance=[];
   if(S.attendance.find(a=>a.empId===empId&&a.date===todayStr)){toast('Already has a record today','info');return;}
   const id='ATT-'+String(S.attendance.length+1).padStart(4,'0');
-  S.attendance.push({id,empId,empName,date:todayStr,status:'absent',timeIn:'',timeOut:'',hoursWorked:0,overtimeHours:0,notes:'Marked absent via management dashboard'});
-  try{await saveERP();toast(`${empName} marked absent`,'ok');openAbsent();}
+  const rec={id,empId,empName,date:todayStr,status:'absent',timeIn:'',timeOut:'',hoursWorked:0,overtimeHours:0,notes:'Marked absent via management dashboard'};
+  S.attendance.push(rec);
+  try{await saveRecord('attendance', rec);toast(`${empName} marked absent`,'ok');openAbsent();}
   catch(e){toast('Error: '+e.message,'err');}
 }
 
@@ -698,7 +723,7 @@ async function approvePONow(id){
   const po=(S.purchaseOrders||[]).find(p=>p.id===id);
   if(!po) return;
   po.status='approved'; po.approvedBy='Management Dashboard'; po.approvedOn=today();
-  try{await saveERP();toast(`PO ${id} approved`,'ok');openPendingPO();}
+  try{await saveRecord('purchaseOrders', po);toast(`PO ${id} approved`,'ok');openPendingPO();}
   catch(e){toast('Error: '+e.message,'err');}
 }
 

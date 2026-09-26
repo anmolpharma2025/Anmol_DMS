@@ -1407,12 +1407,17 @@ MATCH: NO_MATCH 30%`
 
     if(!res.ok) {
       const t = await res.text();
+      console.error('Worker HTTP', res.status, t);
+      if(/credit balance|insufficient|quota|billing/i.test(t))
+        throw new Error('AI_CREDIT');
       throw new Error('AI service unavailable (HTTP ' + res.status + '). ' + t.slice(0,140));
     }
     const data = await res.json();
     if(data.error) {
       console.error('AI API error:', data.error);
-      throw new Error('AI error: ' + (data.error.message || JSON.stringify(data.error)).slice(0,160));
+      const m = data.error.message || '';
+      if(/credit balance|insufficient|quota|billing/i.test(m)) throw new Error('AI_CREDIT');
+      throw new Error('AI error: ' + m.slice(0,160));
     }
     const reply = (data.content||[]).map(b=>b.text||'').join('').trim().toUpperCase();
     console.log('AI reply:', reply || '(empty)');
@@ -1479,10 +1484,30 @@ MATCH: NO_MATCH 30%`
     }
 
   } catch(err) {
+    console.error('Verification error:', err);
+    const cdEl = document.getElementById('cam-countdown');
+    if(cdEl) cdEl.textContent = '';
+    if(window._countdownTimer) { clearInterval(window._countdownTimer); window._countdownTimer=null; }
+
+    // Face checking is unavailable for a reason the employee cannot fix.
+    // Let them clock in rather than leaving them stuck at the door.
+    if(err.message === 'AI_CREDIT') {
+      oval.className = 'face-oval fail';
+      status.textContent = 'Face check unavailable right now';
+      btn.className = 'cam-btn default';
+      btn.innerHTML = '<i class="ti ti-clock-play"></i>Clock ' + (clockMode==='in'?'In':'Out') + ' Without Verification';
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.onclick  = () => manualClockOverride();
+      toast('Face verification is temporarily unavailable. Please tell your administrator.','warning',6000);
+      return;
+    }
+
     oval.className = 'face-oval fail';
     status.textContent = 'Verification failed: ' + err.message;
     btn.className = 'cam-btn fail';
     btn.innerHTML = '<i class="ti ti-refresh"></i>Try Again';
+    btn.style.display = 'block';
     btn.disabled  = false;
     btn.onclick   = captureAndVerify;
   }
