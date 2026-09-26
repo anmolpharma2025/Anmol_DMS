@@ -1244,6 +1244,38 @@ async function purgeLegacyDocs(apply) {
 }
 window.purgeLegacyDocs = purgeLegacyDocs;
 
+// ── VERSION / UPDATE TOOLS ────────────────────────────────────────────────────
+// Confirms which build a device is actually running. Caching means a device can
+// keep serving an old copy long after a new one is uploaded.
+function whichVersion() {
+  console.log('%cPharmaHub ' + APP_VERSION + '  (build ' + APP_BUILD + ')',
+              'font-size:14px;font-weight:bold;color:#1a3a8f');
+  const expected = ['repairData','cleanCloudExtras','purgeLegacyDocs','lsWriteState','stableStr'];
+  const missing = expected.filter(f => typeof window[f] !== 'function' && typeof eval('typeof '+f) !== 'function');
+  if(missing.length) console.warn('  OLD BUILD — these are missing:', missing.join(', '), '\n  Run forceUpdate().');
+  else console.log('  Up to date — all repair tools present.');
+  return APP_VERSION + ' / ' + APP_BUILD;
+}
+window.whichVersion = whichVersion;
+
+// Clears every cached copy and reloads from the server.
+async function forceUpdate() {
+  console.log('Clearing caches and service workers…');
+  try {
+    if('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for(const r of regs) { await r.unregister(); console.log('  unregistered a service worker'); }
+    }
+    if(window.caches) {
+      const keys = await caches.keys();
+      for(const k of keys) { await caches.delete(k); console.log('  deleted cache', k); }
+    }
+  } catch(e) { console.warn('  ', e.message); }
+  console.log('Reloading…');
+  location.reload(true);
+}
+window.forceUpdate = forceUpdate;
+
 // ── DATA REPAIR ───────────────────────────────────────────────────────────────
 // Records have ended up in the wrong arrays (customers inside journal, and so on).
 // A record is removed from an array ONLY when its shape belongs elsewhere AND a
@@ -3756,6 +3788,7 @@ function load() {
   recomputeBalances();
 }
 load();
+console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // Navigation
 document.querySelectorAll('.nav-item').forEach(el => {
@@ -17274,7 +17307,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
+const APP_BUILD   = '20260926-0811';   // bump on every deploy so devices can be checked
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
 // in the sidebar, and every future index.html you receive will automatically
@@ -22757,7 +22791,7 @@ if (currentUser) {
 // ── SERVICE WORKER ─────────────────────────────────────────────────────────
 if('serviceWorker' in navigator) {
   const swCode = `
-const CACHE = 'anmol-erp-v1';
+const CACHE = 'anmol-erp-${APP_VERSION}-${APP_BUILD}';
 const CORE = ['./', './index.html'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
