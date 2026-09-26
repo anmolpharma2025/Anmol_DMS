@@ -3788,7 +3788,6 @@ function load() {
   recomputeBalances();
 }
 load();
-console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // Navigation
 document.querySelectorAll('.nav-item').forEach(el => {
@@ -17309,6 +17308,7 @@ window.addEventListener('unhandledrejection', function(e) {
 });
 const APP_VERSION = '1.1.0';
 const APP_BUILD   = '20260926-0811';   // bump on every deploy so devices can be checked
+console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
 // in the sidebar, and every future index.html you receive will automatically
