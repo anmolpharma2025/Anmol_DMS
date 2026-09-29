@@ -1071,10 +1071,7 @@ function parseAIJson(data, label) {
   if(data.error) {
     const m = data.error.message || JSON.stringify(data.error);
     console.error('AI API error:', data.error);
-    if(/credit balance|insufficient|quota|billing/i.test(m))
-      throw new Error('The AI service has run out of credit.\n\n' +
-        'Document scanning and face verification will not work until the Anthropic API account is topped up ' +
-        'at console.anthropic.com under Billing.\n\nYou can still enter this document manually.');
+    if(/credit balance|insufficient|quota|billing/i.test(m)) throw new Error('AI_CREDIT');
     throw new Error('The AI service returned an error:\n\n' + m);
   }
 
@@ -1275,6 +1272,168 @@ async function forceUpdate() {
   location.reload(true);
 }
 window.forceUpdate = forceUpdate;
+
+// Compares this device against the cloud, collection by collection.
+// Answers "is anything of mine missing from the cloud, or vice versa?"
+async function compareWithCloud() {
+  if(!db) { console.log('No cloud connection.'); return; }
+  console.log('=== DEVICE vs CLOUD ===');
+  console.log('collection            device   cloud   only here   only cloud');
+  let anyLocal = 0, anyCloud = 0;
+  for(const key of FB_COLLECTIONS) {
+    const local = (state[key]||[]).filter(r=>r&&r.id!=null);
+    let snap; try { snap = await db.collection(colPath(key)).get(); } catch(e) { continue; }
+    if(!local.length && !snap.docs.length) continue;
+    const norm = v => String(v).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
+    const lIds = new Set(local.map(r=>norm(r.id)));
+    const cIds = new Set(snap.docs.map(d=>d.id));
+    const onlyLocal = [...lIds].filter(i=>!cIds.has(i));
+    const onlyCloud = [...cIds].filter(i=>!lIds.has(i));
+    anyLocal += onlyLocal.length; anyCloud += onlyCloud.length;
+    const flag = onlyLocal.length || onlyCloud.length ? '  <--' : '';
+    console.log(`  ${key.padEnd(20)} ${String(local.length).padStart(5)} ${String(snap.docs.length).padStart(7)} ` +
+                `${String(onlyLocal.length).padStart(10)} ${String(onlyCloud.length).padStart(11)}${flag}`);
+    if(onlyLocal.length) console.log('       only on this device:', onlyLocal.slice(0,6).join(', ') + (onlyLocal.length>6?' …':''));
+    if(onlyCloud.length) console.log('       only in the cloud  :', onlyCloud.slice(0,6).join(', ') + (onlyCloud.length>6?' …':''));
+  }
+  console.log(`\nTotals — only on this device: ${anyLocal}, only in the cloud: ${anyCloud}`);
+  if(anyLocal) console.log('  Records here but not in the cloud: press Sync, or just make any change to push them up.');
+  if(anyCloud) console.log('  Records in the cloud but not here: press Sync to pull them down.');
+  if(!anyLocal && !anyCloud) console.log('  This device and the cloud match exactly.');
+  return { onlyLocal: anyLocal, onlyCloud: anyCloud };
+}
+window.compareWithCloud = compareWithCloud;
+
+// Explains a count difference against the management dashboard, which filters
+// out cancelled invoices and only counts the period it is showing.
+function invoiceCountBreakdown() {
+  const inv = state.invoices || [];
+  const cancelled = inv.filter(i => i.status === 'cancelled');
+  const noDate    = inv.filter(i => !i.date);
+  const byMonth   = {};
+  inv.forEach(i => { const m = String(i.date||'').slice(0,7) || '(no date)'; byMonth[m] = (byMonth[m]||0)+1; });
+  console.log('=== INVOICE COUNT ===');
+  console.log('  total in this system :', inv.length);
+  console.log('  cancelled            :', cancelled.length, '(the dashboard excludes these)');
+  console.log('  without a date       :', noDate.length, '(excluded from any period)');
+  console.log('  countable            :', inv.length - cancelled.length - noDate.length);
+  console.log('\n  by month:');
+  Object.keys(byMonth).sort().forEach(m => console.log(`    ${m}  ${byMonth[m]}`));
+  console.log('\n  The dashboard shows only its selected period, minus cancelled,');
+  console.log('  so a lower number there is normal.');
+  return { total: inv.length, cancelled: cancelled.length, noDate: noDate.length };
+}
+window.invoiceCountBreakdown = invoiceCountBreakdown;
+
+// ── INTEGRITY WATCH ───────────────────────────────────────────────────────────
+// Runs after every load and sync. If a record turns up in the wrong array it
+// says so straight away, names the array and logs a sample, so the cause can be
+// traced while the evidence is fresh instead of months later.
+function checkIntegrity(quiet) {
+  const findings = [];
+  Object.keys(state).forEach(key => {
+    if(!Array.isArray(state[key]) || !state[key].length) return;
+    const foreign = [];
+    state[key].forEach(r => {
+      if(!r || typeof r !== 'object' || r.id == null) return;
+      let s = _shapeOf(r);
+      if(s === 'contact') s = 'customers';
+      if(s && s !== key) foreign.push({ id: r.id, belongs: s });
+    });
+    if(foreign.length) findings.push({ key, count: foreign.length, sample: foreign.slice(0,5) });
+  });
+
+  if(!findings.length) {
+    if(!quiet) console.log('%cData integrity: OK — every record is in its proper array.', 'color:#0a0');
+    return 0;
+  }
+
+  const total = findings.reduce((s,f)=>s+f.count,0);
+  console.error('%c⚠ DATA INTEGRITY PROBLEM — ' + total + ' record(s) are in the wrong array',
+                'color:#c00;font-weight:bold;font-size:13px');
+  findings.forEach(f => {
+    console.error(`  ${f.key}: ${f.count} foreign record(s)`);
+    f.sample.forEach(x => console.error(`      ${x.id}  belongs in ${x.belongs}`));
+  });
+  console.error('  Run repairData() to inspect, then repairData(true) to fix.');
+  console.error('  Please tell your developer WHEN this appeared and what was done just before.');
+  if(typeof toast === 'function')
+    toast(`⚠ ${total} record(s) are in the wrong place. Run repairData() in the console.`, 'error', 12000);
+  // Leave a breadcrumb so the timing can be reconstructed later
+  try {
+    const log = JSON.parse(localStorage.getItem('anmolpharma_integrity_log') || '[]');
+    log.push({ at: new Date().toISOString(), total, arrays: findings.map(f=>f.key+':'+f.count) });
+    localStorage.setItem('anmolpharma_integrity_log', JSON.stringify(log.slice(-40)));
+  } catch(e) {}
+  return total;
+}
+window.checkIntegrity = checkIntegrity;
+
+// Shows when problems were first detected — the timeline points at the cause.
+function integrityHistory() {
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem('anmolpharma_integrity_log') || '[]'); } catch(e) {}
+  if(!log.length) { console.log('No integrity problems have been recorded on this device.'); return []; }
+  console.log('=== WHEN PROBLEMS WERE DETECTED ===');
+  log.forEach(e => console.log(`  ${e.at}   ${e.total} record(s)   ${e.arrays.join(', ')}`));
+  return log;
+}
+window.integrityHistory = integrityHistory;
+
+// One-off: lift "PO No: ..." out of old sales-order notes into the proper field.
+function migrateCustPO(apply) {
+  const sos = state.salesOrders || [];
+  const found = [];
+  sos.forEach(so => {
+    if(so.custPONo) return;                 // already has one
+    const po = extractCustPO(so.notes);
+    if(po) found.push({ so, po });
+  });
+  console.log(apply===true ? '=== MIGRATING ===' : '=== DRY RUN ===');
+  console.log(`  sales orders with a PO number still in notes: ${found.length}`);
+  found.slice(0,10).forEach(f => console.log(`    ${f.so.id}  ${f.so.customer||''}  ->  ${f.po}`));
+  if(found.length > 10) console.log(`    …and ${found.length-10} more`);
+  if(apply !== true) { console.log('\n  Run migrateCustPO(true) to apply.'); return found.length; }
+
+  found.forEach(f => {
+    f.so.custPONo = f.po;
+    // tidy the note so the number is not duplicated in two places
+    f.so.notes = String(f.so.notes||'')
+      .replace(/\b(?:PO|P\.O\.)\s*(?:No\.?|Number|#|Ref)?\s*[:#-]?\s*[A-Za-z0-9][A-Za-z0-9\/-]{2,}/i,'')
+      .replace(/^[\s|,-]+|[\s|,-]+$/g,'');
+  });
+  // carry it onto invoices already raised against those orders
+  let inv = 0;
+  (state.invoices||[]).forEach(i => {
+    if(i.custPONo || !i.soRef) return;
+    const so = sos.find(s => s.id === i.soRef);
+    if(so && so.custPONo) { i.custPONo = so.custPONo; inv++; }
+  });
+  save(); render();
+  console.log(`  ${found.length} sales order(s) and ${inv} invoice(s) updated.`);
+  toast(`✅ Recovered ${found.length} customer PO number(s).`);
+  return found.length;
+}
+window.migrateCustPO = migrateCustPO;
+
+// Everything raised against one customer PO — for "what have you billed us for PO X?"
+function findByCustPO(po) {
+  if(!po) { console.log('Usage: findByCustPO("PO-00-000020794")'); return; }
+  const q = String(po).toLowerCase();
+  const hit = v => String(v||'').toLowerCase().includes(q);
+  const sos = (state.salesOrders||[]).filter(s => hit(s.custPONo) || hit(extractCustPO(s.notes)));
+  const invs = (state.invoices||[]).filter(i => hit(custPOFor(i)));
+  console.log(`=== CUSTOMER PO: ${po} ===`);
+  console.log(`\nSales orders (${sos.length}):`);
+  sos.forEach(s => console.log(`  ${s.id}  ${s.date}  ${s.customer}  status: ${s.status}`));
+  console.log(`\nInvoices (${invs.length}):`);
+  let total = 0;
+  invs.forEach(i => { total += (+i.amount||0);
+    console.log(`  ${i.id}  ${i.date}  ${i.customer}  ${fmt(i.amount)}  ${getInvoiceStatus ? getInvoiceStatus(i) : i.status}`); });
+  if(invs.length) console.log(`\n  Total invoiced against this PO: ${fmt(total)}`);
+  return { salesOrders: sos.length, invoices: invs.length, total };
+}
+window.findByCustPO = findByCustPO;
 
 // ── DATA REPAIR ───────────────────────────────────────────────────────────────
 // Records have ended up in the wrong arrays (customers inside journal, and so on).
@@ -1609,6 +1768,7 @@ function applyRemoteState(remote) {
     }
   });
   state.page = currentPage;
+  setTimeout(() => { try { checkIntegrity(true); } catch(e) {} }, 800);
   return window._mergeUnsynced || 0;
 }
 
@@ -2629,6 +2789,7 @@ function showAppScreen() {
   });
   // Absolute fallback
   setTimeout(() => { _fbMetaLoadedOnce = true; }, 8000);
+  setTimeout(() => { try { checkIntegrity(true); } catch(e) {} }, 6000);
   // Hide nav items user can't access, show ones they can
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     const page = el.dataset.page;
@@ -6035,7 +6196,7 @@ function renderInvoices(c, ta) {
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th>DR / SO Ref</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th>Customer PO</th><th>DR / SO Ref</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${invFiltered.length===0?`<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
   ${invFiltered.map(inv => {
@@ -6059,6 +6220,7 @@ function renderInvoices(c, ta) {
         ${inv.due||'—'}${inv.due&&inv.due<today()&&getInvoiceStatus(inv)!=='paid'?' <span style="font-size:10px">⚠</span>':''}
       </td>
       <td>${inv.customer}</td>
+      <td class="mono" style="font-size:11px">${custPOFor(inv) || '<span style="color:var(--text-tertiary)">—</span>'}</td>
       <td style="font-size:12px">
         <div style="display:flex;align-items:center;gap:5px">
           <span style="color:var(--green);font-weight:500">${drDisplay}</span>
@@ -6112,6 +6274,7 @@ function editInvDR(invId) {
 <div style="background:var(--bg-primary);border-radius:var(--radius-md);padding:10px 14px;border:1px solid var(--border-light);margin-bottom:14px;font-size:12px;color:var(--text-secondary)">
   <strong>Invoice:</strong> ${invId} &nbsp;·&nbsp; <strong>Customer:</strong> ${inv.customer}
   ${inv.soRef?`&nbsp;·&nbsp; <strong>SO Ref:</strong> ${inv.soRef}`:''}
+  ${custPOFor(inv)?`&nbsp;·&nbsp; <strong>Customer PO:</strong> ${custPOFor(inv)}`:''}
   ${linkedSO?.drNo?`&nbsp;·&nbsp; <strong>SO DR#:</strong> ${linkedSO.drNo}`:''}
 </div>
 <div class="form-group">
@@ -6191,6 +6354,17 @@ function showEditInvoiceFull(id) {
 <div class="form-row">
   <div class="form-group"><label>Payment Terms</label><select id="inv-terms" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${termsOpts}</select></div>
   <div class="form-group"><label>Due Date</label><input type="date" id="inv-due" value="${inv.due||''}"></div>
+</div>
+<div class="form-row">
+  <div class="form-group">
+    <label>Customer PO No. <span style="font-size:11px;color:var(--text-tertiary)">(fills in from the linked SO)</span></label>
+    <input type="text" id="inv-custpo" value="${inv.custPONo||''}" placeholder="e.g. PO-00-000020794">
+  </div>
+  <div class="form-group"><label style="opacity:0">.</label>
+    <div style="padding:8px 10px;background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);font-size:11px;color:var(--accent);line-height:1.5">
+      <i class="ti ti-info-circle" style="margin-right:4px"></i>Printed on the invoice and DR, and searchable in the list.
+    </div>
+  </div>
 </div>
 <div class="form-group"><label>Link to SO (optional)</label><select id="inv-so" onchange="loadSOIntoInvoice()" style="width:100%;padding:8px 10px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-family:var(--font);font-size:13px">${soOpts}</select></div>
 <div id="so-load-banner" style="display:none;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:var(--radius-md);margin-bottom:8px;font-size:12px"></div>
@@ -6423,6 +6597,27 @@ function showAddInvoice() {
   }, 100);
 }
 
+// Pulls a customer PO number out of older free-text notes such as
+// "PO No: PO-00-000020794" or "Their PO# 12345", used for records created
+// before the dedicated field existed.
+// The customer's PO number for an invoice: its own field first, then the
+// linked sales order, then any legacy "PO No:" text in the SO notes.
+function custPOFor(inv) {
+  if(!inv) return '';
+  if(inv.custPONo) return inv.custPONo;
+  const so = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
+  if(!so) return '';
+  return so.custPONo || extractCustPO(so.notes) || '';
+}
+window.custPOFor = custPOFor;
+
+function extractCustPO(notes) {
+  if(!notes) return '';
+  const m = String(notes).match(/\b(?:PO|P\.O\.)\s*(?:No\.?|Number|#|Ref)?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9\/-]{2,})/i);
+  return m ? m[1].replace(/[.,;]+$/,'') : '';
+}
+window.extractCustPO = extractCustPO;
+
 function loadSOIntoInvoice() {
   const soId = document.getElementById('inv-so')?.value;
   if(!soId) {
@@ -6434,6 +6629,12 @@ function loadSOIntoInvoice() {
   }
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
+
+  // Carry the customer's PO number across from the sales order
+  const poEl = document.getElementById('inv-custpo');
+  if(poEl && !poEl.value.trim()) {
+    poEl.value = so.custPONo || extractCustPO(so.notes) || '';
+  }
 
   // Auto-fill customer from SO
   const custInp = document.getElementById('inv-cust-inp');
@@ -6678,7 +6879,8 @@ function saveInvoice() {
   const lines = invLines.map(l=>({ desc:l.desc||'Item', qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0, lineTotal:(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), itemId:l.itemId||'' }));
   const isHistorical = document.getElementById('inv-historical')?.checked || false;
   const soRef = window._invLinkedSO || '';
-  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef, ...(isHistorical?{source:'historical'}:{}) });
+  const custPONo = document.getElementById('inv-custpo')?.value.trim() || '';
+  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef, custPONo, ...(isHistorical?{source:'historical'}:{}) });
 
   // ── Deduct inventory — skip for historical entries ──
   if(!isHistorical) {
@@ -6964,7 +7166,7 @@ function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed 
   </div>
   <div class="meta-block" style="text-align:right">
     <h4>Invoice details</h4>
-    <p class="sub">${inv.soRef?`SO Ref: ${inv.soRef}<br>`:''}</p>
+    <p class="sub">${inv.soRef?`SO Ref: ${inv.soRef}<br>`:''}${custPOFor(inv)?`Your PO No.: <strong>${custPOFor(inv)}</strong><br>`:''}</p>
   </div>
 </div>
 <div class="dates">
@@ -7058,8 +7260,10 @@ tr:last-child td{border-bottom:2px solid #1a1a1a}
   <div>
     <div class="doc-title">DELIVERY RECEIPT</div>
     <div class="doc-meta">DR No.: <strong>${drNum}</strong></div>
+    ${(so.custPONo||extractCustPO(so.notes))?`<div class="doc-meta">Your PO No.: <strong>${so.custPONo||extractCustPO(so.notes)}</strong></div>`:''}
     <div class="doc-meta">Invoice Ref.: <strong>${inv.id}</strong></div>
     ${inv.soRef?`<div class="doc-meta">SO Ref.: <strong>${inv.soRef}</strong></div>`:''}
+    ${custPOFor(inv)?`<div class="doc-meta">Your PO No.: <strong>${custPOFor(inv)}</strong></div>`:''}
     <div class="doc-meta">Date: ${today()}</div>
   </div>
 </div>
@@ -12707,12 +12911,12 @@ function exportToExcel() {
   }
 
   addSheet('Invoices', state.invoices.map(i=>({
-    'Invoice ID':i.id,'Date':i.date,'Due Date':i.due,'Customer':i.customer,
+    'Invoice ID':i.id,'Date':i.date,'Due Date':i.due,'Customer':i.customer,'Customer PO No':custPOFor(i),
     'VAT Base':i.vatBase||i.amount,'Output VAT':i.vat||0,'Total Amount':i.amount,
     'Status':i.status,'Source':i.source||''
   })));
   addSheet('Sales Orders', (state.salesOrders||[]).map(s=>({
-    'SO ID':s.id,'Date':s.date,'Customer':s.customer,'Status':s.status,
+    'SO ID':s.id,'Date':s.date,'Customer':s.customer,'Customer PO No':s.custPONo||extractCustPO(s.notes)||'','Status':s.status,
     'Total Amount':s.total||0,'Notes':s.notes||''
   })));
   addSheet('Sales Returns', (state.salesReturns||[]).map(r=>({
@@ -12964,8 +13168,8 @@ function runImport() {
       else { arr.push(mapped); added++; }
     });
   };
-  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', source:r['Source']||'' }));
-  else if(sheetName==='Sales Orders') { if(!state.salesOrders) state.salesOrders=[]; merge(state.salesOrders, _importData, 'SO ID', r=>({ id:r['SO ID'], date:r['Date']||'', customer:r['Customer']||'', status:r['Status']||'pending', total:+r['Total Amount']||0, notes:r['Notes']||'' })); }
+  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', source:r['Source']||'' }));
+  else if(sheetName==='Sales Orders') { if(!state.salesOrders) state.salesOrders=[]; merge(state.salesOrders, _importData, 'SO ID', r=>({ id:r['SO ID'], date:r['Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', status:r['Status']||'pending', total:+r['Total Amount']||0, notes:r['Notes']||'' })); }
   else if(sheetName==='Sales Returns') { if(!state.salesReturns) state.salesReturns=[]; merge(state.salesReturns, _importData, 'Return ID', r=>({ id:r['Return ID'], date:r['Date']||'', customer:r['Customer']||'', invoiceRef:r['Invoice Ref']||'', amount:+r['Amount']||0, reason:r['Reason']||'' })); }
   else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, netCash:+r['Net Cash']||+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' })); }
   else if(sheetName==='Deposits') { if(!state.deposits) state.deposits=[]; merge(state.deposits, _importData, 'Deposit ID', r=>({ id:r['Deposit ID'], date:r['Date']||'', bankAccount:r['Bank Account']||'', amount:+r['Amount']||0, source:r['Source']||'', ref:r['Reference']||'', description:r['Description']||'', status:r['Status']||'pending' })); }
@@ -14161,6 +14365,7 @@ tr:last-child td{border-bottom:2px solid #1a1a1a}
   <div>
     <div class="doc-title">DELIVERY RECEIPT</div>
     <div class="doc-meta"><strong>DR No.: ${drNum}</strong></div>
+    ${(so.custPONo||extractCustPO(so.notes))?`<div class="doc-meta">Your PO No.: <strong>${so.custPONo||extractCustPO(so.notes)}</strong></div>`:''}
     <div class="doc-meta">SO Ref.: ${so.id}</div>
     <div class="doc-meta">Date: ${today()}</div>
   </div>
@@ -14446,6 +14651,10 @@ function showAddSO() {
 </div>
 <div class="form-row">
   <div class="form-group"><label>Order Date</label><input type="date" id="so-date" value="${today()}"></div>
+  <div class="form-group">
+    <label>Customer PO No. <span style="font-size:11px;color:var(--text-tertiary)">(their reference)</span></label>
+    <input type="text" id="so-custpo" placeholder="e.g. PO-00-000020794">
+  </div>
   <div class="form-group"><label>Requested Delivery</label><input type="date" id="so-del" value="${due.toISOString().split('T')[0]}"></div>
 </div>
 <div class="form-row">
@@ -14551,12 +14760,18 @@ If a field is not visible or unclear, use null or empty string. For lines, extra
       })
     });
 
+    const body = await res.text();
+    if(/credit balance|insufficient|billing|payment required/i.test(body) || res.status === 402)
+      throw new Error('AI_CREDIT');
     if(!res.ok) {
-      const body = await res.text();
       console.error('Worker HTTP', res.status, body);
-      throw new Error('The AI service is unavailable (HTTP ' + res.status + ').\n\n' + body.slice(0,200));
+      if(res.status === 429) throw new Error('The AI service is busy. Wait a moment and try again.');
+      if(res.status >= 500)  throw new Error('The AI service is temporarily down. Try again shortly.');
+      let m = body; try { m = (JSON.parse(body).error||{}).message || body; } catch(e) {}
+      throw new Error('AI service error (' + res.status + '): ' + String(m).slice(0,180));
     }
-    const data = await res.json();
+    let data; try { data = JSON.parse(body); }
+    catch(e) { throw new Error('The AI service returned something unreadable.'); }
     const extracted = parseAIJson(data, 'sales order');
 
     // Populate the form
@@ -14584,10 +14799,11 @@ If a field is not visible or unclear, use null or empty string. For lines, extra
     }
     if(extracted.notes) {
       const notesEl = document.getElementById('so-notes');
-      if(notesEl) notesEl.value = [extracted.notes, extracted.poNumber ? 'PO No: '+extracted.poNumber : ''].filter(Boolean).join(' | ');
-    } else if(extracted.poNumber) {
-      const notesEl = document.getElementById('so-notes');
-      if(notesEl) notesEl.value = 'PO No: ' + extracted.poNumber;
+      if(notesEl) notesEl.value = extracted.notes || '';
+    }
+    if(extracted.poNumber) {
+      const poEl = document.getElementById('so-custpo');
+      if(poEl) poEl.value = extracted.poNumber;      // its own field, not free text
     }
 
     // Populate line items
@@ -14625,7 +14841,7 @@ If a field is not visible or unclear, use null or empty string. For lines, extra
   } catch(err) {
     if(status) {
       status.innerHTML = `<i class="ti ti-alert-circle" style="color:var(--red);margin-right:6px"></i>
-        <strong>Scan failed:</strong> ${err.message}`;
+        <strong>Scan failed:</strong> ${aiErrorMessage(err).replace(/\n/g,'<br>')}`;
       status.style.background = 'rgba(239,68,68,0.08)';
       status.style.borderColor = 'var(--red)';
     }
@@ -14911,8 +15127,9 @@ function saveSO() {
   const sourceBranch = document.getElementById('so-source-branch')?.value || currentUser?.branchId || getMainBranchId();
   const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
+  const custPONo = document.getElementById('so-custpo')?.value.trim() || '';
   state.salesOrders.push({id, date, deliveryDate, customer, branch, sourceBranch,
-    sourceBranchName: branchNameOf(sourceBranch), lines, notes, preparedBy, status:'pending'});
+    sourceBranchName: branchNameOf(sourceBranch), custPONo, lines, notes, preparedBy, status:'pending'});
   auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${(lines||[]).length} item(s)`});
   save(); closeModal(); render();
 }
@@ -14940,6 +15157,7 @@ function printSO(id) { auditLog('PRINT','Sales Order',id,{description:`Printed S
   <div><div class="mk">Order Date</div><div class="mv">${so.date}</div></div>
   <div><div class="mk">Requested Delivery</div><div class="mv">${so.deliveryDate||'—'}</div></div>
   ${so.sourceBranchName?`<div><div class="mk">Fulfilled From</div><div class="mv">${so.sourceBranchName}</div></div>`:''}
+  ${(so.custPONo||extractCustPO(so.notes))?`<div><div class="mk">Your PO No.</div><div class="mv"><strong>${so.custPONo||extractCustPO(so.notes)}</strong></div></div>`:''}
 </div>
 ${so.notes?`<div class="notes-box"><strong>Notes:</strong> ${so.notes}</div>`:''}
 <table>
@@ -16021,10 +16239,7 @@ Rules:
     if(!response.ok) {
       const body = await response.text();
       console.error('Worker HTTP', response.status, body);
-      if(/credit balance|insufficient|quota|billing/i.test(body))
-        throw new Error('The AI service has run out of credit.\n\n' +
-          'Top up the Anthropic API account at console.anthropic.com under Billing.\n\n' +
-          'You can still create this purchase order manually.');
+      if(/credit balance|insufficient|quota|billing/i.test(body)) throw new Error('AI_CREDIT');
       throw new Error('The AI service is unavailable (HTTP ' + response.status + ').\n\n' + body.slice(0,200));
     }
     const data = await response.json();
@@ -19153,7 +19368,9 @@ async function captureFaceForVerification(empId) {
       if(btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-camera"></i> Try Again'; btn.style.opacity='1'; }
     }
   } catch(err) {
-    if(status) status.textContent = 'Verification error: ' + err.message;
+    if(status) status.textContent = err.message === 'AI_CREDIT'
+      ? 'Face check unavailable — AI credit has run out. Tell your administrator.'
+      : 'Verification error: ' + err.message;
     if(btn) { btn.disabled=false; btn.innerHTML='<i class="ti ti-camera"></i> Try Again'; btn.style.opacity='1'; }
   }
 }
@@ -21435,6 +21652,60 @@ function applyTemplate(tpl, vars) {
 
 // ── RESEND EMAIL VIA CLOUDFLARE WORKER ────────────────────────────────────────
 const WORKER_URL = 'https://lucky-wood-fa33.anmolpharma2025.workers.dev/';
+
+// ── ONE PLACE FOR ALL AI CALLS ────────────────────────────────────────────────
+// Every AI request goes through here so failures are reported the same way.
+// Previously each caller handled errors itself and some showed raw JSON.
+async function callAI(body, label) {
+  label = label || 'request';
+  let res;
+  try {
+    res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body)
+    });
+  } catch(e) {
+    throw new Error('Could not reach the AI service. Check your internet connection.');
+  }
+
+  const text = await res.text();
+  const looksLikeCredit = /credit balance|insufficient[_ ]?(credit|quota)|billing|payment required/i.test(text);
+
+  if(looksLikeCredit || res.status === 402) {
+    throw new Error('AI_CREDIT');
+  }
+  if(!res.ok) {
+    let msg = text;
+    try { const j = JSON.parse(text); msg = (j.error && j.error.message) || msg; } catch(e) {}
+    if(res.status === 429) throw new Error('The AI service is busy (too many requests). Wait a moment and try again.');
+    if(res.status >= 500)  throw new Error('The AI service is temporarily down. Try again shortly.');
+    throw new Error('AI service error (' + res.status + '): ' + String(msg).slice(0,180));
+  }
+
+  let data;
+  try { data = JSON.parse(text); }
+  catch(e) { throw new Error('The AI service returned something unreadable.'); }
+  if(data && data.error) {
+    const m = data.error.message || '';
+    if(/credit balance|insufficient|billing/i.test(m)) throw new Error('AI_CREDIT');
+    throw new Error('AI error: ' + m.slice(0,180));
+  }
+  return data;
+}
+
+// Turns an error into wording a user can act on.
+function aiErrorMessage(err) {
+  if(err && err.message === 'AI_CREDIT')
+    return 'The AI service has run out of credit.\n\n' +
+           'Scanning and face verification will not work until the Anthropic account is topped up ' +
+           'at console.anthropic.com under Plans & Billing.\n\n' +
+           'You can still enter this manually in the meantime.';
+  return (err && err.message) || 'Unknown error';
+}
+window.callAI = callAI;
+
+
 
 async function sendEmail({ to, subject, html, text }) {
   // Validate email address
