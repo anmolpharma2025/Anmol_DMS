@@ -1684,19 +1684,27 @@ async function erpRead(key) {
 }
 
 // Write/overwrite a single record in an ERP collection
+// Tells the main app something changed. Throttled: a burst of records should
+// produce ONE notification, otherwise every open ERP tab reloads repeatedly.
+let _notifyTimer = null;
+function notifyERP(who) {
+  if(_notifyTimer) clearTimeout(_notifyTimer);
+  _notifyTimer = setTimeout(() => {
+    _notifyTimer = null;
+    db.doc('companies/anmol_state_meta').set({
+      updatedAt: Date.now(), updatedBy: who || 'Companion app',
+      deviceId: 'mobile_' + (Math.random().toString(36).slice(2,8))
+    }, { merge: true }).catch(()=>{});
+  }, 3000);
+}
+
 async function erpWrite(key, record) {
   if(!record || record.id == null) return false;
   try {
     const docId = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
     await db.collection(erpCol(key)).doc(docId).set({ ...record, _t: Date.now() });
     // Nudge the ERP's listener so open sessions refresh
-    try {
-      await db.doc('companies/anmol_state_meta').set({
-        updatedAt: Date.now(),
-        updatedBy: (record.empName || 'Mobile') + ' (Mobile)',
-        deviceId: 'mobile_' + (record.empId || 'app')
-      }, { merge: true });
-    } catch(e) {}
+    notifyERP('Mobile app');
     return true;
   } catch(e) {
     console.warn(`erpWrite(${key}) failed:`, e.message);
@@ -1710,11 +1718,7 @@ async function erpUpdate(key, id, fields) {
   try {
     const docId = String(id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
     await db.collection(erpCol(key)).doc(docId).set({ ...fields, _t: Date.now() }, { merge: true });
-    try {
-      await db.doc('companies/anmol_state_meta').set({
-        updatedAt: Date.now(), updatedBy: 'Mobile', deviceId: 'mobile_update'
-      }, { merge: true });
-    } catch(e) {}
+    notifyERP('Mobile app');
     return true;
   } catch(e) {
     console.warn(`erpUpdate(${key}) failed:`, e.message);

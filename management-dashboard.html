@@ -569,6 +569,20 @@ function toast(msg,type='info',ms=3000){
 
 // ── SAVE BACK TO ERP ─────────────────────────────────────────────────────────
 // Writes ONE record to its own collection. Never rewrites the whole database.
+// Tells the main app something changed. Throttled: a burst of records should
+// produce ONE notification, otherwise every open ERP tab reloads repeatedly.
+let _notifyTimer = null;
+function notifyERP(who) {
+  if(_notifyTimer) clearTimeout(_notifyTimer);
+  _notifyTimer = setTimeout(() => {
+    _notifyTimer = null;
+    db.doc('companies/anmol_state_meta').set({
+      updatedAt: Date.now(), updatedBy: who || 'Companion app',
+      deviceId: 'dashboard_' + (Math.random().toString(36).slice(2,8))
+    }, { merge: true }).catch(()=>{});
+  }, 3000);
+}
+
 async function saveRecord(key, record){
   if(!record || record.id == null) throw new Error('Nothing to save.');
   const docId = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,100);
@@ -576,11 +590,7 @@ async function saveRecord(key, record){
   const clean = JSON.parse(JSON.stringify(record));
   await db.collection('anmol_data_' + key).doc(docId).set({ ...clean, _t: Date.now() });
   // Nudge the main app so open sessions pick the change up
-  try {
-    await db.doc('companies/anmol_state_meta').set({
-      updatedAt: Date.now(), updatedBy: 'Management Dashboard', deviceId: 'mgmt_dashboard'
-    }, { merge: true });
-  } catch(e) {}
+    notifyERP('Mobile app');
 }
 
 // ── HR MODAL ACTIONS ─────────────────────────────────────────────────────────

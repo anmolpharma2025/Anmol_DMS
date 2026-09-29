@@ -1829,24 +1829,60 @@ async function fbLoad() {
 }
 
 // _fbUnsubscribers declared above
+let _fbLastAppliedAt = 0, _fbPendingRemote = 0, _fbRemoteTimer = null, _fbLastToastAt = 0;
+
+// Pulls a remote change in. Only announces itself when something actually
+// changed, and not more than once every 30 seconds.
+async function applyRemoteChange() {
+  _fbRemoteTimer = null;
+  const want = _fbPendingRemote;
+  if(!want || want <= _fbLastAppliedAt) return;
+  const before = Object.keys(state).filter(k=>Array.isArray(state[k]))
+    .reduce((s,k)=>s+state[k].length,0);
+  fbSetStatus('loading');
+  const remote = await fbLoad();
+  if(!remote) { fbSetStatus('synced'); return; }
+  applyRemoteState(remote);
+  if(typeof recomputeBalances==='function') recomputeBalances();
+  lsScheduleWrite();
+  if(typeof render==='function') render();
+  _fbLastAppliedAt = want;
+  fbSetStatus('synced');
+  const after = Object.keys(state).filter(k=>Array.isArray(state[k]))
+    .reduce((s,k)=>s+state[k].length,0);
+  if(after !== before && Date.now() - _fbLastToastAt > 30000) {
+    _fbLastToastAt = Date.now();
+    showFbToast(`Updated — ${Math.abs(after-before)} record(s) ${after>before?'added':'removed'}`);
+  } else {
+    console.log('Synced from cloud (no visible change)');
+  }
+}
+
 function fbListen() {
   if(!db||_fbListening) return;
   _fbListening = true;
   _fbUnsubscribers.forEach(fn=>fn());
   _fbUnsubscribers = [];
-  const unsub = db.doc(FB_META).onSnapshot(async doc=>{    if(!doc.exists||!doc.data()) return;
+  const unsub = db.doc(FB_META).onSnapshot(doc=>{
+    if(!doc.exists||!doc.data()) return;
     const rid = doc.data().deviceId, rt = doc.data().updatedAt||0;
+
+    // Our own write coming back — just confirm the status
     if(rid===FB_DEVICE_ID) { _fbLastWriteTime=rt; fbSetStatus('synced'); return; }
-    if(_fbLastWriteTime&&rt<_fbLastWriteTime) return;
-    showFbToast('Syncing…');
-    const remote = await fbLoad();
-    if(remote) {
-      applyRemoteState(remote);
-      if(typeof recomputeBalances==='function') recomputeBalances();
-      lsScheduleWrite();
-      if(typeof render==='function') render();
-      fbSetStatus('synced'); showFbToast('Updated ✓');
-    }
+
+    // Ignore anything older than what we have already applied
+    if(rt <= _fbLastAppliedAt || (_fbLastWriteTime && rt < _fbLastWriteTime)) return;
+
+    // Ignore the echo of our own save for a few seconds. Another tab on this
+    // machine has a different device id, so without this two tabs bounce
+    // updates off each other and reload everything on every keystroke.
+    if(Date.now() - _fbLastWriteTime < 4000) return;
+
+    // Coalesce bursts: a device saving several records in a row produces
+    // several meta writes, which should cause ONE refresh, not several.
+    _fbPendingRemote = Math.max(_fbPendingRemote, rt);
+    if(_fbRemoteTimer) clearTimeout(_fbRemoteTimer);
+    _fbRemoteTimer = setTimeout(applyRemoteChange, 2500);
   }, err=>{
     _fbListening=false;
     console.error('Firebase listener error:', err);
