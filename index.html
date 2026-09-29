@@ -4010,33 +4010,45 @@ function overlayClick(e) { if (e.target === document.getElementById('modal')) cl
 // showModal is defined later with searchable-select support
 
 let _filterTimer = null;
+// Updates ONLY the table body of the current list. It reuses the same row
+// builder and the same search predicate as the full render, so the search can
+// never show different columns from the list — which is what used to happen
+// when this function kept its own copy of the markup.
 function filterTable() {
-  // Re-render the current page and put the cursor back where it was.
-  //
-  // This used to hold its own copy of every table's rows, which meant three
-  // copies of the same markup: one in the render function, one here, and one
-  // in the search path. They drifted apart — a column added to a list would
-  // vanish the moment you typed in the search box, and new fields were not
-  // searchable because only one copy knew about them. Re-rendering keeps a
-  // single source of truth.
   if(_filterTimer) clearTimeout(_filterTimer);
   _filterTimer = setTimeout(() => {
     _filterTimer = null;
-    const el = document.activeElement;
-    const id = el && el.id;
-    let start = null, end = null;
-    try { start = el.selectionStart; end = el.selectionEnd; } catch(e) {}
+    const page = state.page;
+    const tbody = document.querySelector('#content table tbody');
+    if(!tbody) return;
 
-    render();
+    if(page === 'invoices') {
+      const q = (window._invFilter||'').toLowerCase();
+      const rows = (state.invoices||[]).filter(i=>invMatches(i,q))
+        .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+      tbody.innerHTML = rows.length
+        ? rows.map(invRowHtml).join('')
+        : `<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${q?' for "'+q+'"':''}.</td></tr>`;
 
-    if(id) {
-      const back = document.getElementById(id);
-      if(back) {
-        back.focus();
-        if(start !== null) { try { back.setSelectionRange(start, end); } catch(e) {} }
-      }
+    } else if(page === 'salesorders') {
+      const q = (window._soFilter||'').toLowerCase();
+      const st2 = window._soStatusFilter || '';
+      const rows = (state.salesOrders||[])
+        .filter(so => (!st2 || so.status===st2) && soMatches(so,q))
+        .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+      tbody.innerHTML = rows.length
+        ? rows.map(soRowHtml).join('')
+        : `<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${q?' for "'+q+'"':''}.</td></tr>`;
+
+    } else {
+      // Other pages: plain text match over the rows already on screen
+      const box = document.querySelector('#content input[type="search"], #content input[placeholder*="Search" i]');
+      const q = (box ? box.value : '').toLowerCase();
+      tbody.querySelectorAll('tr').forEach(r => {
+        r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none';
+      });
     }
-  }, 180);   // wait for a pause in typing so long lists stay responsive
+  }, 120);
 }
 
 function renderPage(page) {
@@ -6114,43 +6126,25 @@ function createJournalFromInvoice(inv) {
   }
 }
 
-function renderInvoices(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddInvoice()"><i class="ti ti-plus"></i>New Invoice</button>`;
-  const totalGross = state.invoices.reduce((s, i) => s + (i.amount||0), 0);
-  const totalVAT   = state.invoices.reduce((s, i) => s + (i.vat||0), 0);
-  const totalBase  = state.invoices.reduce((s, i) => s + (i.vatBase||i.amount||0), 0);
-  const paid       = state.invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount||0), 0);
-  const outstanding= state.invoices.filter(i => i.status !== 'paid' && i.status !== 'draft').reduce((s, i) => s + (i.amount||0), 0);
+// Builds one invoice row. Used by the list AND by the search, so the two
+// can never drift apart again.
+// Shared search predicates — the list and the search box use the same ones.
+function invMatches(inv, q) {
+  if(!q) return true;
+  const custPO = (custPOFor(inv) || '').toLowerCase();
+  return inv.id.toLowerCase().includes(q) || (inv.customer||'').toLowerCase().includes(q) ||
+    custPO.includes(q) || (inv.soRef||'').toLowerCase().includes(q) ||
+    (inv.status||'').toLowerCase().includes(q) || (inv.due||'').includes(q) || (inv.date||'').includes(q);
+}
+function soMatches(so, q) {
+  if(!q) return true;
+  const custPO = (so.custPONo || extractCustPO(so.notes) || '').toLowerCase();
+  return so.id.toLowerCase().includes(q) || (so.customer||'').toLowerCase().includes(q) ||
+    custPO.includes(q) || (so.status||'').toLowerCase().includes(q) || (so.date||'').includes(q) ||
+    (so.lines||[]).some(l=>(l.desc||'').toLowerCase().includes(q));
+}
 
-  window._invFilter = window._invFilter || '';
-  const invFiltered = filterByCustomer(state.invoices, 'customer').filter(inv => {
-    const q = window._invFilter.toLowerCase();
-    if(!q) return true;
-    const custPO = (custPOFor(inv) || '').toLowerCase();
-    return inv.id.toLowerCase().includes(q) || (inv.customer||'').toLowerCase().includes(q) ||
-      custPO.includes(q) ||
-      (inv.soRef||'').toLowerCase().includes(q) ||
-      (inv.status||'').toLowerCase().includes(q) || (inv.due||'').includes(q) || (inv.date||'').includes(q);
-  }).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
-
-  c.innerHTML = `
-<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-  <div class="kpi"><div class="kpi-label">Total Invoiced (gross)</div><div class="kpi-value">${fmt(totalGross)}</div></div>
-  <div class="kpi"><div class="kpi-label">Output VAT (12%)</div><div class="kpi-value" style="color:var(--accent)">${fmt(totalVAT)}</div></div>
-  <div class="kpi"><div class="kpi-label">Collected</div><div class="kpi-value pos">${fmt(paid)}</div></div>
-  <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value neg">${fmt(outstanding)}</div></div>
-</div>
-<div style="margin-bottom:8px">
-  <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
-    value="${window._invFilter||''}"
-    oninput="window._invFilter=this.value;filterTable()"
-    style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
-</div>
-<table>
-  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th>Customer PO</th><th>DR / SO Ref</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
-  <tbody>
-  ${invFiltered.length===0?`<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
-  ${invFiltered.map(inv => {
+function invRowHtml(inv) {
     const base = inv.vatBase != null ? inv.vatBase : inv.amount;
     const vat  = inv.vat    != null ? inv.vat    : 0;
     const gross= inv.amount || 0;
@@ -6191,7 +6185,41 @@ function renderInvoices(c, ta) {
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
-  }).join('')}
+  }
+
+function renderInvoices(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddInvoice()"><i class="ti ti-plus"></i>New Invoice</button>`;
+  const totalGross = state.invoices.reduce((s, i) => s + (i.amount||0), 0);
+  const totalVAT   = state.invoices.reduce((s, i) => s + (i.vat||0), 0);
+  const totalBase  = state.invoices.reduce((s, i) => s + (i.vatBase||i.amount||0), 0);
+  const paid       = state.invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount||0), 0);
+  const outstanding= state.invoices.filter(i => i.status !== 'paid' && i.status !== 'draft').reduce((s, i) => s + (i.amount||0), 0);
+
+  window._invFilter = window._invFilter || '';
+  const invFiltered = filterByCustomer(state.invoices, 'customer').filter(inv => {
+    const q = window._invFilter.toLowerCase();
+    if(!q) return true;
+    return invMatches(inv, q);
+  }).sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label">Total Invoiced (gross)</div><div class="kpi-value">${fmt(totalGross)}</div></div>
+  <div class="kpi"><div class="kpi-label">Output VAT (12%)</div><div class="kpi-value" style="color:var(--accent)">${fmt(totalVAT)}</div></div>
+  <div class="kpi"><div class="kpi-label">Collected</div><div class="kpi-value pos">${fmt(paid)}</div></div>
+  <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value neg">${fmt(outstanding)}</div></div>
+</div>
+<div style="margin-bottom:8px">
+  <input type="text" placeholder="🔍  Search by invoice no., customer, status, due date…"
+    value="${window._invFilter||''}"
+    oninput="window._invFilter=this.value;filterTable()"
+    style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+</div>
+<table>
+  <thead><tr><th>Invoice</th><th>Date</th><th>Terms</th><th>Due</th><th>Customer</th><th>Customer PO</th><th>DR / SO Ref</th><th style="text-align:right">VAT Base</th><th style="text-align:right">VAT (12%)</th><th style="text-align:right">Total (Gross)</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${invFiltered.length===0?`<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text-tertiary)">No invoices found${window._invFilter?' for "'+window._invFilter+'"':''}.</td></tr>`:''}
+  ${invFiltered.map(invRowHtml).join('')}
   </tbody>
   <tfoot><tr style="background:var(--bg-secondary);font-weight:500">
     <td colspan="6" style="padding:8px 10px">Totals</td>
@@ -13875,45 +13903,8 @@ function getMyLocation() {
 // ── SALES ORDERS ──────────────────────────────────────────────────────────────
 const SO_STATUS_COLORS = { pending:'var(--amber)', approved:'var(--accent)', dispatched:'#a78bfa', delivered:'var(--green)', cancelled:'var(--red)' };
 
-function renderSalesOrders(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddSO()"><i class="ti ti-plus"></i>New Sales Order</button>`;
-  const sos = filterByCustomer(state.salesOrders||[], 'customer');
-  const total = sos.reduce((s,so)=>s+so.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
-  const byStatus = s => sos.filter(so=>so.status===s).length;
-  window._soFilter = window._soFilter || '';
-  const filtered = sos.filter(so => {
-    const q = window._soFilter.toLowerCase();
-    if(!q) return true;
-    const custPO = (so.custPONo || extractCustPO(so.notes) || '').toLowerCase();
-    return so.id.toLowerCase().includes(q) || so.customer.toLowerCase().includes(q) ||
-      custPO.includes(q) ||
-      so.status.toLowerCase().includes(q) || (so.date||'').includes(q) ||
-      so.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
-  });
-  const filterStatus = window._soStatusFilter || '';
-  const displayed = (filterStatus ? filtered.filter(so=>so.status===filterStatus) : filtered)
-    .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
-
-  c.innerHTML = `
-<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
-  <div class="kpi" onclick="window._soStatusFilter='';window._soFilter='';render()" style="cursor:pointer" title="Show all"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='pending'?'':'pending';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='approved'?'':'approved';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
-  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='delivered'?'':'delivered';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='delivered'?'2px solid var(--green)':'none'}" title="Filter delivered"><div class="kpi-label">Delivered</div><div class="kpi-value" style="color:var(--green)">${byStatus('delivered')}</div></div>
-  <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value pos">${fmt(total)}</div></div>
-</div>
-${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> orders only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._soStatusFilter='';render()">Clear</button></div>`:''}
-<div style="margin-bottom:8px">
-  <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
-    value="${window._soFilter||''}"
-    oninput="window._soFilter=this.value;filterTable()"
-    style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
-</div>
-<table>
-  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Customer PO</th><th>Items</th><th>DR No.</th><th>Invoice</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
-  <tbody>
-  ${displayed.length===0?`<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
-  ${displayed.map(so=>{
+// Builds one sales-order row — shared by the list and the search.
+function soRowHtml(so) {
     const soTotal=so.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     const approvedCount=so.lines.filter(l=>l.approved).length;
     // Find linked invoice
@@ -13946,7 +13937,43 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteSO('${so.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
-  }).join('')}
+  }
+
+function renderSalesOrders(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddSO()"><i class="ti ti-plus"></i>New Sales Order</button>`;
+  const sos = filterByCustomer(state.salesOrders||[], 'customer');
+  const total = sos.reduce((s,so)=>s+so.lines.reduce((a,l)=>a+(l.lineTotal||0),0),0);
+  const byStatus = s => sos.filter(so=>so.status===s).length;
+  window._soFilter = window._soFilter || '';
+  const filtered = sos.filter(so => {
+    const q = window._soFilter.toLowerCase();
+    if(!q) return true;
+    return soMatches(so, q);
+  });
+  const filterStatus = window._soStatusFilter || '';
+  const displayed = (filterStatus ? filtered.filter(so=>so.status===filterStatus) : filtered)
+    .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px">
+  <div class="kpi" onclick="window._soStatusFilter='';window._soFilter='';render()" style="cursor:pointer" title="Show all"><div class="kpi-label">Total Orders</div><div class="kpi-value">${sos.length}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='pending'?'':'pending';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='pending'?'2px solid var(--amber)':'none'}" title="Filter pending"><div class="kpi-label">Pending</div><div class="kpi-value" style="color:var(--amber)">${byStatus('pending')}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='approved'?'':'approved';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='approved'?'2px solid var(--accent)':'none'}" title="Filter approved"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--accent)">${byStatus('approved')}</div></div>
+  <div class="kpi" onclick="window._soStatusFilter=window._soStatusFilter==='delivered'?'':'delivered';render()" style="cursor:pointer;outline:${(window._soStatusFilter||'')==='delivered'?'2px solid var(--green)':'none'}" title="Filter delivered"><div class="kpi-label">Delivered</div><div class="kpi-value" style="color:var(--green)">${byStatus('delivered')}</div></div>
+  <div class="kpi"><div class="kpi-label">Order Value</div><div class="kpi-value pos">${fmt(total)}</div></div>
+</div>
+${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> orders only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._soStatusFilter='';render()">Clear</button></div>`:''}
+<div style="margin-bottom:8px">
+  <input type="text" placeholder="🔍  Search by SO no., customer, item, status…"
+    value="${window._soFilter||''}"
+    oninput="window._soFilter=this.value;filterTable()"
+    style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+</div>
+<table>
+  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Customer PO</th><th>Items</th><th>DR No.</th><th>Invoice</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${displayed.length===0?`<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
+  ${displayed.map(soRowHtml).join('')}
   </tbody>
 </table>`;
 }
