@@ -13969,7 +13969,9 @@ function renderSalesOrders(c, ta) {
   const filtered = sos.filter(so => {
     const q = window._soFilter.toLowerCase();
     if(!q) return true;
+    const custPO = (so.custPONo || extractCustPO(so.notes) || '').toLowerCase();
     return so.id.toLowerCase().includes(q) || so.customer.toLowerCase().includes(q) ||
+      custPO.includes(q) ||
       so.status.toLowerCase().includes(q) || (so.date||'').includes(q) ||
       so.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
   });
@@ -13993,7 +13995,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Items</th><th>DR No.</th><th>Invoice</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>SO No.</th><th>Date</th><th>Delivery Date</th><th>Customer</th><th>Customer PO</th><th>Items</th><th>DR No.</th><th>Invoice</th><th style="text-align:right">Total Value</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>
   ${displayed.length===0?`<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${window._soFilter?' for "'+window._soFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
   ${displayed.map(so=>{
@@ -14007,6 +14009,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
     return `<tr>
       <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
       <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
+      <td class="mono" style="font-size:11px">${(so.custPONo || extractCustPO(so.notes)) || '<span style="color:var(--text-tertiary)">—</span>'}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${(()=>{
   const issuedMap={};
   (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{const k=it.itemId||it.desc;issuedMap[k]=(issuedMap[k]||0)+(it.qty||0);}));
