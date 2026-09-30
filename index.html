@@ -6609,6 +6609,12 @@ function loadSOIntoInvoice() {
   const so = (state.salesOrders||[]).find(s=>s.id===soId);
   if(!so) return;
 
+  // Carry the VAT treatment across so the invoice totals match the order
+  if(so.vatType) {
+    const vt = document.getElementById('inv-vat-type');
+    if(vt) { vt.value = so.vatType; window._invVatType = so.vatType; }
+  }
+
   // Carry the customer's PO number across from the sales order
   const poEl = document.getElementById('inv-custpo');
   if(poEl && !poEl.value.trim()) {
@@ -14654,11 +14660,24 @@ function showAddSO() {
   </div>
   ${orderLineTableHtml('so')}
 </div>
+<div class="form-group"><label>VAT Treatment</label>
+  <select id="so-vat-type" onchange="window._soVatType=this.value; calcSOTotals()">
+    <option value="inclusive">VAT-inclusive — selling price already includes 12% VAT</option>
+    <option value="exclusive">VAT-exclusive — add 12% on top of line totals</option>
+    <option value="exempt">VAT-exempt / zero-rated</option>
+  </select>
+</div>
+<div style="background:var(--bg-secondary);border-radius:var(--radius-md);padding:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;margin-bottom:14px">
+  <div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:3px">VAT Base</div><div id="so-vat-base" style="font-weight:500">&#8369;0.00</div></div>
+  <div><div style="font-size:11px;color:var(--accent);margin-bottom:3px">Output VAT (12%)</div><div id="so-vat-amt" style="font-weight:500;color:var(--accent)">&#8369;0.00</div></div>
+  <div><div style="font-size:11px;color:var(--text-secondary);margin-bottom:3px">Total Amount Due</div><div id="so-vat-gross" style="font-weight:500;font-size:15px">&#8369;0.00</div></div>
+</div>
 <div class="form-group"><label>Notes</label><input type="text" id="so-notes" placeholder="Special instructions or notes"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveSO()">Create Sales Order</button>
 </div>`);
+  window._soVatType = 'inclusive';
   renderOrderLines('so');
   setTimeout(()=>{
     makeSearchDrop('so-cust-inp','so-cust-dd','so-cust',
@@ -15062,6 +15081,24 @@ function updateOrderLine(prefix, i, field, val) {
   if(tb){ const rows=tb.querySelectorAll('tr'); if(rows[i]){ const cells=rows[i].querySelectorAll('td'); if(cells[3]) cells[3].textContent=fmt(qty*price); } }
 }
 
+// VAT summary for the sales order. Deliberately the same calculation the
+// invoice uses, so the figures agree when the order is invoiced.
+function calcSOTotals() {
+  const lines = window._soLines || [];
+  const vatable = lines.filter(l=>!l.vatExempt);
+  const exempt  = lines.filter(l=>l.vatExempt);
+  const sum = arr => arr.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0), 0);
+  const vatableTotal = sum(vatable), exemptTotal = sum(exempt);
+  const type = window._soVatType || document.getElementById('so-vat-type')?.value || 'inclusive';
+  let base=0, vat=0, gross=0;
+  if(type==='exclusive')      { const r=computeVAT(vatableTotal);  base=r.vatBase+exemptTotal; vat=r.vat; gross=r.amount+exemptTotal; }
+  else if(type==='inclusive') { const r=vatFromGross(vatableTotal); base=r.vatBase+exemptTotal; vat=r.vat; gross=vatableTotal+exemptTotal; }
+  else                        { base=vatableTotal+exemptTotal; vat=0; gross=base; }
+  const b=document.getElementById('so-vat-base'), a=document.getElementById('so-vat-amt'), g=document.getElementById('so-vat-gross');
+  if(b) b.textContent=fmt(base); if(a) a.textContent=fmt(vat); if(g) g.textContent=fmt(gross);
+  return { vatBase:base, vat, total:gross, vatType:type };
+}
+
 function renderSOTotals() {
   const soLines = window._soLines||[];
   const tb = document.getElementById('so-lines-body');
@@ -15071,6 +15108,7 @@ function renderSOTotals() {
     const cells = row.querySelectorAll('td');
     if(cells[3]) cells[3].textContent = fmt((parseFloat(l.qty)||0)*(parseFloat(l.unitPrice)||0));
   });
+  calcSOTotals();
 }
 
 function updatePOTotals() {
@@ -15109,8 +15147,10 @@ function saveSO() {
   const id = nextRefNum('SO', state.salesOrders||[]);
   if(!state.salesOrders) state.salesOrders=[];
   const custPONo = document.getElementById('so-custpo')?.value.trim() || '';
+  const t = calcSOTotals();     // same maths the invoice will use
   state.salesOrders.push({id, date, deliveryDate, customer, branch, sourceBranch,
-    sourceBranchName: branchNameOf(sourceBranch), custPONo, lines, notes, preparedBy, status:'pending'});
+    sourceBranchName: branchNameOf(sourceBranch), custPONo, lines, notes, preparedBy,
+    vatType: t.vatType, vatBase: t.vatBase, vat: t.vat, total: t.total, status:'pending'});
   auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${(lines||[]).length} item(s)`});
   save(); closeModal(); render();
 }
