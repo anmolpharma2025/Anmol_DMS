@@ -4000,13 +4000,33 @@ document.querySelectorAll('.nav-item').forEach(el => {
   });
 });
 
+// Cancel / Escape on a part-filled sales order keeps a draft too
+function closeSOModal() {
+  const d = (typeof captureSODraft === 'function') ? captureSODraft() : null;
+  if(d) {
+    saveSODraft();
+    if(!confirm('Discard this sales order?\n\nOK     = keep it as a draft and close\nCancel = go back to the form')) return;
+  }
+  closeModal();
+}
+window.closeSOModal = closeSOModal;
+
 function closeModal() {
   document.getElementById('modal').style.display = 'none';
   // Clear any pending journal edit state so closing without saving doesn't lose data
   window._editingJournalGroupId = null;
   window._jeEditGroupId = null;
 }
-function overlayClick(e) { if (e.target === document.getElementById('modal')) closeModal(); }
+function overlayClick(e) {
+  if (e.target !== document.getElementById('modal')) return;
+  // A stray click outside the box should not throw away a part-filled order
+  const d = (typeof captureSODraft === 'function') ? captureSODraft() : null;
+  if (d) {
+    saveSODraft();
+    if (!confirm('Close this sales order?\n\nYour entries are saved as a draft and will be offered back next time you open the form.')) return;
+  }
+  closeModal();
+}
 // showModal is defined later with searchable-select support
 
 let _filterTimer = null;
@@ -14604,6 +14624,80 @@ function saveEditSO(id) {
   save(); closeModal(); render();
 }
 
+// ── SALES ORDER DRAFT ─────────────────────────────────────────────────────────
+// Keeps an unsaved sales order safe. A stray click outside the modal, an
+// accidental Escape, or a closed tab should not lose a half-entered order.
+const SO_DRAFT_KEY = 'anmolpharma_so_draft';
+let _soDraftTimer = null;
+
+function soModalOpen() {
+  return !!document.getElementById('so-cust-inp') || !!document.getElementById('so-custpo');
+}
+
+function captureSODraft() {
+  if(!soModalOpen()) return null;
+  const val = id => (document.getElementById(id)||{}).value || '';
+  const d = {
+    savedAt: new Date().toISOString(),
+    customer: val('so-cust'), customerText: val('so-cust-inp'),
+    branch: val('so-branch-sel'), date: val('so-date'), deliveryDate: val('so-del'),
+    custPONo: val('so-custpo'), sourceBranch: val('so-source-branch'),
+    vatType: val('so-vat-type'), notes: val('so-notes'),
+    lines: (window._soLines||[]).filter(l => l && (l.desc || l.itemId || (+l.qty>1) || (+l.unitPrice>0)))
+  };
+  const hasContent = d.customer || d.customerText || d.custPONo || d.notes || d.lines.length;
+  return hasContent ? d : null;
+}
+
+function saveSODraft() {
+  const d = captureSODraft();
+  try {
+    if(d) localStorage.setItem(SO_DRAFT_KEY, JSON.stringify(d));
+    else  localStorage.removeItem(SO_DRAFT_KEY);
+  } catch(e) {}
+}
+
+// Called on every keystroke in the modal — debounced so it costs nothing
+function scheduleSODraft() {
+  if(_soDraftTimer) clearTimeout(_soDraftTimer);
+  _soDraftTimer = setTimeout(saveSODraft, 700);
+}
+// Catch every edit inside the modal without wiring each field individually
+document.addEventListener('input',  e => { if(soModalOpen()) scheduleSODraft(); }, true);
+document.addEventListener('change', e => { if(soModalOpen()) scheduleSODraft(); }, true);
+// And never lose it if the tab is closed or hidden mid-entry
+window.addEventListener('pagehide', () => { if(soModalOpen()) saveSODraft(); });
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden' && soModalOpen()) saveSODraft();
+});
+
+function clearSODraft() {
+  if(_soDraftTimer) { clearTimeout(_soDraftTimer); _soDraftTimer = null; }
+  try { localStorage.removeItem(SO_DRAFT_KEY); } catch(e) {}
+}
+
+function getSODraft() {
+  try { return JSON.parse(localStorage.getItem(SO_DRAFT_KEY) || 'null'); } catch(e) { return null; }
+}
+
+// Puts a saved draft back into the open form
+function restoreSODraft(d) {
+  const set = (id,v) => { const el=document.getElementById(id); if(el && v) el.value = v; };
+  set('so-cust', d.customer); set('so-cust-inp', d.customerText);
+  set('so-branch-sel', d.branch); set('so-date', d.date); set('so-del', d.deliveryDate);
+  set('so-custpo', d.custPONo); set('so-source-branch', d.sourceBranch);
+  set('so-vat-type', d.vatType); set('so-notes', d.notes);
+  if(d.vatType) window._soVatType = d.vatType;
+  if(d.lines && d.lines.length) {
+    window._soLines = d.lines;
+    renderOrderLines('so');
+  }
+  if(typeof calcSOTotals === 'function') calcSOTotals();
+  if(d.customer && typeof showSOCustBranch === 'function') {
+    try { showSOCustBranch(document.getElementById('so-cust')); } catch(e) {}
+  }
+}
+
 function showAddSO() {
   const custOpts = '<option value="">— Select customer —</option>' +
     state.customers.map(c=>`<option value="${c.name}">${c.name}${(c.branches&&c.branches.length>1)?' ('+c.branches.length+' branches)':c.branch?' — '+c.branch:''}</option>`).join('') +
@@ -14674,11 +14768,30 @@ function showAddSO() {
 </div>
 <div class="form-group"><label>Notes</label><input type="text" id="so-notes" placeholder="Special instructions or notes"></div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
-  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn" onclick="closeSOModal()">Cancel</button>
   <button class="btn primary" onclick="saveSO()">Create Sales Order</button>
 </div>`);
   window._soVatType = 'inclusive';
   renderOrderLines('so');
+
+  // Offer back anything left unsaved last time
+  setTimeout(() => {
+    const d = getSODraft();
+    if(!d) return;
+    const when = new Date(d.savedAt);
+    const mins = Math.round((Date.now() - when.getTime())/60000);
+    const ago  = mins < 1 ? 'just now' : mins < 60 ? mins + ' minute(s) ago'
+               : mins < 1440 ? Math.round(mins/60) + ' hour(s) ago' : when.toLocaleString('en-PH');
+    const what = [d.customer||d.customerText, d.custPONo ? 'PO ' + d.custPONo : '',
+                  d.lines && d.lines.length ? d.lines.length + ' line(s)' : ''].filter(Boolean).join(' · ');
+    if(confirm('An unfinished sales order was found from ' + ago + '.\n\n' + (what||'(no details)') +
+               '\n\nRestore it?\n\nOK = restore     Cancel = discard and start fresh')) {
+      restoreSODraft(d);
+    } else {
+      clearSODraft();
+    }
+  }, 260);
+
   setTimeout(()=>{
     makeSearchDrop('so-cust-inp','so-cust-dd','so-cust',
       state.customers.map(c=>c.name),
@@ -15152,6 +15265,7 @@ function saveSO() {
     sourceBranchName: branchNameOf(sourceBranch), custPONo, lines, notes, preparedBy,
     vatType: t.vatType, vatBase: t.vatBase, vat: t.vat, total: t.total, status:'pending'});
   auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${(lines||[]).length} item(s)`});
+  clearSODraft();     // saved for real — the draft is no longer needed
   save(); closeModal(); render();
 }
 
