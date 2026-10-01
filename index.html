@@ -13941,7 +13941,7 @@ function soRowHtml(so) {
     return `<tr>
       <td class="mono">${so.id}</td><td>${so.date}</td><td>${so.deliveryDate||'—'}</td>
       <td style="font-weight:500">${so.customer}${so.branch?`<div style="font-size:11px;color:var(--accent);margin-top:1px"><i class="ti ti-building-store" style="font-size:10px"></i> ${so.branch}</div>`:''}</td>
-      <td class="mono" style="font-size:11px">${(so.custPONo || extractCustPO(so.notes)) || '<span style="color:var(--text-tertiary)">—</span>'}</td>
+      <td class="mono" style="font-size:11px">${(so.custPONo || extractCustPO(so.notes)) || '<span style="color:var(--text-tertiary)">—</span>'}${(so.poAttachments&&so.poAttachments.length)?`<button class="btn" style="padding:0 5px;font-size:10px;margin-left:5px" onclick="event.stopPropagation();viewSOAttachments('${so.id}')" title="${so.poAttachments.length} attached page(s)"><i class="ti ti-paperclip"></i>${so.poAttachments.length}</button>`:''}</td>
       <td style="font-size:12px;color:var(--text-secondary)">${(()=>{
   const issuedMap={};
   (so.drIssued||[]).forEach(dr=>dr.items.forEach(it=>{const k=it.itemId||it.desc;issuedMap[k]=(issuedMap[k]||0)+(it.qty||0);}));
@@ -14698,7 +14698,85 @@ function restoreSODraft(d) {
   }
 }
 
+// ── CUSTOMER PO PAGES ON A SALES ORDER ────────────────────────────────────────
+// Pages scanned (or simply attached) are uploaded to Cloud Storage when the
+// order is saved. Firestore keeps only the links, so the records stay small.
+function renderSOAttachList() {
+  const box = document.getElementById('so-attach-list');
+  if(!box) return;
+  const pages = window._soPOPages || [];
+  if(!pages.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div style="font-size:11px;color:var(--text-secondary);margin:6px 0 4px">
+      <i class="ti ti-paperclip" style="font-size:11px"></i> ${pages.length} PO page(s) will be attached
+    </div>` +
+    pages.map((f,i)=>`
+      <div style="display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 8px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:3px">
+        <i class="ti ti-${f.type==='application/pdf'?'file-type-pdf':'photo'}" style="color:var(--accent)"></i>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.name)}</span>
+        <span style="color:var(--text-tertiary)">${(f.size/1024).toFixed(0)} KB</span>
+        <button class="btn danger" style="padding:1px 6px;font-size:10px" onclick="removeSOAttach(${i})"><i class="ti ti-x"></i></button>
+      </div>`).join('');
+}
+function removeSOAttach(i) {
+  (window._soPOPages||[]).splice(i,1);
+  renderSOAttachList();
+}
+function addSOAttachFiles(input) {
+  const files = Array.from(input.files||[]).filter(f=>{
+    if(f.size > 10*1024*1024) { alert(`"${f.name}" is over 10MB and was skipped.`); return false; }
+    return true;
+  });
+  window._soPOPages = (window._soPOPages||[]).concat(files);
+  input.value = '';
+  renderSOAttachList();
+}
+
+// Uploads the pages and returns [{name,url}] for storing on the order
+async function uploadSOAttachments(soId) {
+  const pages = window._soPOPages || [];
+  if(!pages.length) return [];
+  if(!window.fbStorage) { console.warn('Cloud Storage unavailable — pages not attached.'); return []; }
+  const out = [];
+  for(let i=0; i<pages.length; i++) {
+    const f = pages[i];
+    try {
+      const small = await compressImageFile(f);
+      const safe  = f.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+      const url   = await uploadToStorage(small, `sales-orders/${soId}/p${i+1}_${Date.now()}_${safe}`);
+      out.push({ name:f.name, url, page:i+1 });
+    } catch(e) {
+      console.error('Could not attach "'+f.name+'":', e.message);
+      toast(`Could not attach "${f.name}" — the order was still saved.`, 'warning', 6000);
+    }
+  }
+  return out;
+}
+
+// Opens the attached pages of an order
+function viewSOAttachments(soId) {
+  const so = (state.salesOrders||[]).find(s=>s.id===soId);
+  const atts = (so && so.poAttachments) || [];
+  if(!atts.length) { alert('No customer PO pages are attached to this order.'); return; }
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-paperclip" style="margin-right:6px;color:var(--accent)"></i>Customer PO — ${esc(so.id)}</h3>
+  <button class="close-btn" onclick="closeModal()">&times;</button>
+</div>
+${so.custPONo?`<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">PO No.: <strong>${esc(so.custPONo)}</strong></div>`:''}
+<div style="max-height:70vh;overflow-y:auto">
+  ${atts.map(a=>`
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">Page ${a.page||''} — ${esc(a.name||'')}</div>
+      ${/\.pdf$/i.test(a.name||'')
+        ? `<a class="btn" href="${a.url}" target="_blank"><i class="ti ti-file-type-pdf"></i>Open PDF</a>`
+        : `<img src="${a.url}" style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-light)">`}
+    </div>`).join('')}
+</div>`);
+}
+window.viewSOAttachments = viewSOAttachments;
+
 function showAddSO() {
+  window._soPOPages = [];   // start with no attached pages
   const custOpts = '<option value="">— Select customer —</option>' +
     state.customers.map(c=>`<option value="${c.name}">${c.name}${(c.branches&&c.branches.length>1)?' ('+c.branches.length+' branches)':c.branch?' — '+c.branch:''}</option>`).join('') +
     '<option value="__add_new__">➕ Customer not in list — Add new customer…</option>';
@@ -14710,7 +14788,7 @@ function showAddSO() {
   <div style="display:flex;gap:8px;align-items:center">
     <label id="scan-po-btn" title="Upload a PO photo/scan to auto-fill this form" style="cursor:pointer;display:flex;align-items:center;gap:5px;padding:5px 10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border-radius:var(--radius-md);font-size:12px;font-weight:500">
       <i class="ti ti-scan" style="font-size:14px"></i> Scan PO
-      <input type="file" id="po-scan-input" accept="image/*" style="display:none" onchange="scanPOImage(this)">
+      <input type="file" id="po-scan-input" accept="image/*,.pdf" multiple style="display:none" onchange="scanPOImage(this)">
     </label>
     <button class="close-btn" onclick="closeModal()">×</button>
   </div>
@@ -14735,6 +14813,13 @@ function showAddSO() {
   <div class="form-group">
     <label>Customer PO No. <span style="font-size:11px;color:var(--text-tertiary)">(their reference)</span></label>
     <input type="text" id="so-custpo" placeholder="e.g. PO-00-000020794">
+    <div style="margin-top:5px">
+      <button class="btn" style="padding:3px 9px;font-size:11px" onclick="document.getElementById('so-attach-input').click()">
+        <i class="ti ti-paperclip"></i>Attach PO pages
+      </button>
+      <input type="file" id="so-attach-input" accept="image/*,.pdf" multiple style="display:none" onchange="addSOAttachFiles(this)">
+    </div>
+    <div id="so-attach-list"></div>
   </div>
   <div class="form-group"><label>Requested Delivery</label><input type="date" id="so-del" value="${due.toISOString().split('T')[0]}"></div>
 </div>
@@ -14772,7 +14857,9 @@ function showAddSO() {
   <button class="btn primary" onclick="saveSO()">Create Sales Order</button>
 </div>`);
   window._soVatType = 'inclusive';
+  window._soPOPages = window._soPOPages || [];
   renderOrderLines('so');
+  setTimeout(renderSOAttachList, 50);
 
   // Offer back anything left unsaved last time
   setTimeout(() => {
@@ -14807,23 +14894,43 @@ function showAddSO() {
 }
 
 async function scanPOImage(input) {
-  const file = input.files[0];
-  if(!file) return;
-  if(file.size > 5 * 1024 * 1024) { alert('Image too large. Please use an image under 5MB.'); return; }
+  // A customer PO often runs to several pages. Every page selected is read in
+  // one request so items continuing onto later pages are not missed, and all
+  // of them are kept to attach to the sales order.
+  const files = Array.from(input.files || []);
+  if(!files.length) return;
+  const tooBig = files.filter(f => f.size > 5*1024*1024).map(f => f.name);
+  if(tooBig.length) { alert('These pages are over 5MB and were skipped:\n' + tooBig.join('\n')); }
+  const pages = files.filter(f => f.size <= 5*1024*1024).slice(0, 8);
+  if(!pages.length) return;
+  input.value = '';
 
-  // Show loading status
+  // Remember them so saveSO() can attach them to the order
+  window._soPOPages = (window._soPOPages || []).concat(pages);
+  renderSOAttachList();
+
   const status = document.getElementById('po-scan-status');
   const scanBtn = document.getElementById('scan-po-btn');
-  if(status) { status.style.display = ''; }
+  if(status) {
+    status.style.display = '';
+    const label = status.querySelector('span,div') || status;
+    label.textContent = `Reading ${pages.length} page${pages.length>1?'s':''}…`;
+  }
   if(scanBtn) scanBtn.style.opacity = '0.5';
 
-  // Convert to base64
-  const base64 = await new Promise((resolve, reject) => {
+  // Read every page, preserving order
+  const asB64 = f => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = e => resolve(e.target.result.split(',')[1]);
     reader.onerror = reject;
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(f);
   });
+  const imageParts = [];
+  for(let i=0; i<pages.length; i++) {
+    const b64 = await asB64(pages[i]);
+    if(pages.length > 1) imageParts.push({ type:'text', text:`--- Page ${i+1} of ${pages.length} ---` });
+    imageParts.push({ type:'image', source:{ type:'base64', media_type: pages[i].type || 'image/jpeg', data: b64 } });
+  }
 
   // Get current inventory and customer names for context
   const itemNames = (state.inventory||[]).map(i=>i.name).join(', ');
@@ -14835,17 +14942,19 @@ async function scanPOImage(input) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
+        max_tokens: 8000,
         messages: [{
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: file.type, data: base64 }
-            },
+            ...imageParts,
             {
               type: 'text',
-              text: `You are reading a Purchase Order document image. Extract all information and return ONLY a JSON object with no markdown, no explanation, just raw JSON.
+              text: `The image(s) above are ALL PAGES OF ONE customer Purchase Order, in order.
+Treat them as a single document: an item table may continue from one page to the next, and
+headers or totals may repeat. Combine every line item from every page into ONE list, in the
+order they appear, and never repeat an item that spans a page break.
+
+Extract all information and return ONLY a JSON object with no markdown, no explanation, just raw JSON.
 
 Known customers in the system: ${custNames}
 Known inventory items: ${itemNames}
@@ -15267,6 +15376,19 @@ function saveSO() {
   auditLog('CREATE','Sales Order',id,{description:`Created SO for ${customer} — ${(lines||[]).length} item(s)`});
   clearSODraft();     // saved for real — the draft is no longer needed
   save(); closeModal(); render();
+
+  // Upload any customer PO pages in the background, then attach them
+  if((window._soPOPages||[]).length) {
+    const soId = id, n = window._soPOPages.length;
+    toast(`Uploading ${n} PO page(s)…`);
+    uploadSOAttachments(soId).then(atts => {
+      window._soPOPages = [];
+      if(!atts.length) return;
+      const rec = (state.salesOrders||[]).find(s=>s.id===soId);
+      if(rec) { rec.poAttachments = atts; save(); render(); }
+      toast(`✅ ${atts.length} PO page(s) attached to ${soId}.`);
+    });
+  }
 }
 
 function printSO(id) { auditLog('PRINT','Sales Order',id,{description:`Printed SO ${id}`});
@@ -16236,6 +16358,7 @@ function toast(msg,type='info',ms=3000){
 
 // ── SCAN CUSTOMER PO ─────────────────────────────────────────────────────────
 function showScanPO() {
+  window._scanPages = [];
   showModal(`
 <div class="modal-head">
   <h3><i class="ti ti-scan" style="margin-right:6px;color:var(--accent)"></i>Scan Customer Purchase Order</h3>
@@ -16243,7 +16366,7 @@ function showScanPO() {
 </div>
 <div style="background:var(--accent-bg);border:1px solid var(--accent);border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--accent)">
   <i class="ti ti-info-circle" style="margin-right:4px"></i>
-  Upload a photo or PDF of your customer's PO. Claude AI will extract all items, quantities, prices, and supplier info automatically.
+  Upload every page of your customer's PO. All pages are read together, so items continuing onto later pages are picked up — and each page is attached to the sales order for your records.
 </div>
 
 <div id="scan-drop-zone" onclick="document.getElementById('scan-file-input').click()"
@@ -16252,14 +16375,14 @@ function showScanPO() {
   ondragleave="this.style.borderColor='var(--border-mid)'"
   ondrop="event.preventDefault();this.style.borderColor='var(--border-mid)';handleScanDrop(event)">
   <i class="ti ti-upload" style="font-size:36px;color:var(--text-tertiary);display:block;margin-bottom:10px"></i>
-  <div style="font-size:14px;font-weight:600;margin-bottom:4px">Drop file here or click to upload</div>
-  <div style="font-size:12px;color:var(--text-secondary)">Supports: JPG, PNG, PDF • Max 10MB</div>
-  <input type="file" id="scan-file-input" accept="image/*,.pdf" style="display:none" onchange="handleScanFile(this)">
+  <div style="font-size:14px;font-weight:600;margin-bottom:4px">Drop pages here or click to upload</div>
+  <div style="font-size:12px;color:var(--text-secondary)">JPG, PNG or PDF &bull; several pages at once &bull; max 10MB each</div>
+  <input type="file" id="scan-file-input" accept="image/*,.pdf" multiple style="display:none" onchange="handleScanFile(this)">
 </div>
 
 <div id="scan-preview" style="display:none;margin-top:12px">
-  <img id="scan-img-preview" style="max-width:100%;max-height:200px;border-radius:var(--radius-sm);border:1px solid var(--border-light)">
-  <div id="scan-pdf-preview" style="padding:12px;background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:13px;color:var(--text-secondary)"></div>
+  <div style="font-size:12px;font-weight:600;margin-bottom:6px">Pages to scan</div>
+  <div id="scan-page-list" style="max-height:260px;overflow-y:auto"></div>
 </div>
 
 <div id="scan-status" style="display:none;margin-top:12px;padding:10px 14px;border-radius:var(--radius-md);font-size:13px"></div>
@@ -16272,38 +16395,91 @@ function showScanPO() {
 </div>`);
 }
 
+// A customer PO often runs to several pages. All selected pages are scanned
+// together in one request so line items continuing onto page 2 are not missed,
+// and all of them are attached to the sales order afterwards.
+const SCAN_MAX_PAGES = 8;
+
 function handleScanDrop(e) {
-  const file = e.dataTransfer.files[0];
-  if(file) processScanFile(file);
+  addScanFiles(e.dataTransfer.files);
 }
 function handleScanFile(input) {
-  const file = input.files[0];
-  if(file) processScanFile(file);
+  addScanFiles(input.files);
+  input.value = '';        // allow picking the same file again after removing it
 }
 
-function processScanFile(file) {
-  if(file.size > 10*1024*1024) { alert('File too large. Please use a file under 10MB.'); return; }
-  window._scanFile = file;
-  const preview = document.getElementById('scan-preview');
-  const imgPrev = document.getElementById('scan-img-preview');
-  const pdfPrev = document.getElementById('scan-pdf-preview');
-  preview.style.display='block';
-  if(file.type.startsWith('image/')) {
-    const url=URL.createObjectURL(file);
-    imgPrev.src=url; imgPrev.style.display='block';
-    pdfPrev.style.display='none';
-  } else {
-    imgPrev.style.display='none';
-    pdfPrev.style.display='block';
-    pdfPrev.innerHTML=`<i class="ti ti-file-type-pdf" style="font-size:20px;color:var(--red);margin-right:8px;vertical-align:-3px"></i><strong>${file.name}</strong> (${(file.size/1024).toFixed(0)} KB)`;
+function addScanFiles(fileList) {
+  if(!window._scanPages) window._scanPages = [];
+  const incoming = Array.from(fileList || []);
+  for(const f of incoming) {
+    if(f.size > 10*1024*1024) { alert(`"${f.name}" is larger than 10MB and was skipped.`); continue; }
+    if(window._scanPages.length >= SCAN_MAX_PAGES) {
+      alert(`Only ${SCAN_MAX_PAGES} pages can be scanned at once. The rest were skipped.`);
+      break;
+    }
+    if(window._scanPages.some(p => p.file.name===f.name && p.file.size===f.size)) continue;  // no duplicates
+    window._scanPages.push({ file:f, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : '' });
   }
-  document.getElementById('scan-btn').disabled=false;
-  document.getElementById('scan-drop-zone').style.borderColor='var(--green)';
+  renderScanPages();
+}
+
+function removeScanPage(i) {
+  const p = (window._scanPages||[])[i];
+  if(p && p.url) URL.revokeObjectURL(p.url);
+  window._scanPages.splice(i,1);
+  renderScanPages();
+}
+
+function moveScanPage(i, dir) {
+  const a = window._scanPages || [];
+  const j = i + dir;
+  if(j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]];
+  renderScanPages();
+}
+
+function renderScanPages() {
+  const pages = window._scanPages || [];
+  const wrap = document.getElementById('scan-preview');
+  const list = document.getElementById('scan-page-list');
+  const btn  = document.getElementById('scan-btn');
+  const zone = document.getElementById('scan-drop-zone');
+  if(!wrap || !list) return;
+
+  if(!pages.length) {
+    wrap.style.display='none';
+    if(btn) btn.disabled = true;
+    if(zone) zone.style.borderColor='var(--border-mid)';
+    return;
+  }
+  wrap.style.display='block';
+  if(btn) { btn.disabled=false; btn.innerHTML = `<i class="ti ti-scan"></i>Scan ${pages.length} page${pages.length>1?'s':''} with AI`; }
+  if(zone) zone.style.borderColor='var(--green)';
+
+  const kb = n => (n/1024).toFixed(0)+' KB';
+  list.innerHTML = pages.map((p,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border-light);border-radius:var(--radius-md);margin-bottom:6px;background:var(--bg-primary)">
+      <div style="width:46px;height:56px;flex-shrink:0;border-radius:4px;overflow:hidden;background:var(--bg-secondary);display:flex;align-items:center;justify-content:center">
+        ${p.url ? `<img src="${p.url}" style="width:100%;height:100%;object-fit:cover">`
+                : `<i class="ti ti-file-type-pdf" style="font-size:22px;color:var(--red)"></i>`}
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">Page ${i+1}</div>
+        <div style="font-size:11px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.file.name)} · ${kb(p.file.size)}</div>
+      </div>
+      <button class="btn" style="padding:2px 7px;font-size:11px" onclick="moveScanPage(${i},-1)" ${i===0?'disabled':''} title="Move up"><i class="ti ti-arrow-up"></i></button>
+      <button class="btn" style="padding:2px 7px;font-size:11px" onclick="moveScanPage(${i},1)" ${i===pages.length-1?'disabled':''} title="Move down"><i class="ti ti-arrow-down"></i></button>
+      <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="removeScanPage(${i})" title="Remove"><i class="ti ti-x"></i></button>
+    </div>`).join('') +
+    `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+      <i class="ti ti-info-circle" style="font-size:11px"></i>
+      Pages are read in this order and all of them are attached to the sales order.
+    </div>`;
 }
 
 async function runScanPO() {
-  const file = window._scanFile;
-  if(!file) { alert('Please select a file first.'); return; }
+  const pages = window._scanPages || [];
+  if(!pages.length) { alert('Please add at least one page first.'); return; }
 
   const statusEl=document.getElementById('scan-status');
   const btn=document.getElementById('scan-btn');
@@ -16311,35 +16487,44 @@ async function runScanPO() {
   statusEl.style.display='block';
   statusEl.style.background='var(--accent-bg)';
   statusEl.style.color='var(--accent)';
-  statusEl.innerHTML='<i class="ti ti-brain" style="margin-right:6px"></i>Claude AI is reading your PO…';
+  statusEl.innerHTML=`<i class="ti ti-brain" style="margin-right:6px"></i>Reading ${pages.length} page${pages.length>1?'s':''}…`;
 
   try {
-    // Read file as base64
-    const base64 = await new Promise((res,rej)=>{
+    // Read every page, keeping the order shown on screen
+    const asBase64 = f => new Promise((res,rej)=>{
       const reader=new FileReader();
       reader.onload=e=>res(e.target.result.split(',')[1]);
-      reader.onerror=()=>rej(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
+      reader.onerror=()=>rej(new Error('Could not read "'+f.name+'"'));
+      reader.readAsDataURL(f);
     });
-
-    const isPDF = file.type==='application/pdf';
-    const mediaType = isPDF?'application/pdf':file.type;
+    const parts = [];
+    for(let i=0; i<pages.length; i++) {
+      const f = pages[i].file;
+      const b64 = await asBase64(f);
+      const isPDF = f.type==='application/pdf';
+      if(pages.length > 1) parts.push({ type:'text', text:`--- Page ${i+1} of ${pages.length} ---` });
+      parts.push({ type: isPDF?'document':'image',
+                   source:{ type:'base64', media_type: isPDF?'application/pdf':f.type, data:b64 } });
+    }
 
     const response = await fetch(WORKER_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
-        max_tokens:4000,
+        max_tokens:8000,
         messages:[{
           role:'user',
           content:[
-            { type: isPDF?'document':'image',
-              source:{ type:'base64', media_type:mediaType, data:base64 }
-            },
+            ...parts,
             { type:'text', text:`You are a data extraction assistant for a pharmaceutical distribution ERP system.
 
-Extract ALL information from this Purchase Order document and return ONLY valid JSON (no markdown, no explanation):
+The images above are ALL PAGES OF ONE Purchase Order, in order. Treat them as a single
+document: a table of items may continue from one page onto the next, and headers or totals
+may repeat. Combine every line item from every page into ONE list, in the order they appear,
+and do not repeat an item that spans a page break.
+
+Extract ALL information and return ONLY valid JSON (no markdown, no explanation):
 
 {
   "supplier": "company or person name who issued this PO",
