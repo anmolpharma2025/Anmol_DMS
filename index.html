@@ -13143,6 +13143,42 @@ function showImportExcel() {
 
 let _importData = null;
 
+// The columns each sheet type must have. Checked against the FILE's headers,
+// not the mapped result — a mapper always produces the target shape, so
+// validating its output can never catch the wrong sheet.
+const IMPORT_REQUIRED = {
+  'Invoices':          ['Invoice ID','Customer'],
+  'Sales Orders':      ['SO ID','Customer'],
+  'Journal':           ['Entry ID'],
+  'Customers':         ['Customer ID','Name'],
+  'Suppliers':         ['Supplier ID','Name'],
+  'Inventory':         ['Item ID','Name'],
+  'Purchase Orders':   ['PO ID','Supplier'],
+  'Purchase Requests': ['PR ID'],
+  'Supplier Invoices': ['SI ID','Supplier'],
+  'Employees':         ['Employee ID','Name'],
+  'Attendance':        ['Record ID'],
+  'Collections':       ['Collection ID'],
+};
+
+// Returns an error string when the file's headers do not match the chosen type
+function importHeaderProblem(sheetName, rows) {
+  const need = IMPORT_REQUIRED[sheetName];
+  if(!need || !rows || !rows.length) return '';
+  const have = new Set(Object.keys(rows[0]));
+  const missing = need.filter(col => !have.has(col));
+  if(!missing.length) return '';
+  // Does it look like a different type instead?
+  let looksLike = '';
+  for(const [type, req] of Object.entries(IMPORT_REQUIRED)) {
+    if(req.every(col => have.has(col))) { looksLike = type; break; }
+  }
+  return `This sheet is missing the column(s): ${missing.join(', ')}.` +
+         (looksLike ? ` It looks like ${looksLike} data instead.` : '') +
+         ` Columns found: ${[...have].slice(0,8).join(', ')}`;
+}
+
+let _importSheet = null;
 function previewImport(event) {
   const file = event.target.files[0];
   if(!file) return;
@@ -13151,9 +13187,28 @@ function previewImport(event) {
   reader.onload = e => {
     const wb = XLSX.read(e.target.result, {type:'binary'});
     const sheetName = document.getElementById('import-sheet').value;
-    const ws = wb.Sheets[sheetName] || wb.Sheets[wb.SheetNames[0]];
-    if(!ws) { document.getElementById('import-preview').textContent = 'Sheet not found in file.'; return; }
-    _importData = XLSX.utils.sheet_to_json(ws);
+    // Never fall back to another sheet. Reading sheet 1 when the chosen sheet is
+    // missing silently imported, say, Suppliers into Invoices.
+    const ws = wb.Sheets[sheetName];
+    if(!ws) {
+      _importData = null;
+      document.getElementById('import-preview').innerHTML =
+        `<span style="color:var(--red)">✗ This file has no sheet named "${sheetName}".</span>` +
+        `<div style="font-size:11px;margin-top:4px;color:var(--text-secondary)">Sheets in this file: ${wb.SheetNames.map(n=>'<code>'+n+'</code>').join(', ')}</div>` +
+        `<div style="font-size:11px;margin-top:3px;color:var(--text-secondary)">Pick the matching type above, or export a fresh template.</div>`;
+      return;
+    }
+    const rows = XLSX.utils.sheet_to_json(ws);
+    const problem = importHeaderProblem(sheetName, rows);
+    if(problem) {
+      _importData = null; _importSheet = null;
+      document.getElementById('import-preview').innerHTML =
+        `<span style="color:var(--red)">✗ This sheet does not match "${sheetName}".</span>` +
+        `<div style="font-size:11px;margin-top:4px;color:var(--text-secondary)">${problem}</div>`;
+      return;
+    }
+    _importData = rows;
+    _importSheet = sheetName;
     document.getElementById('import-preview').innerHTML = `<span style="color:var(--green)">✓ Found ${_importData.length} rows in "${sheetName}".</span> Ready to import.`;
   };
   reader.readAsBinaryString(file);
@@ -13164,33 +13219,46 @@ function runImport() {
   if(!_importData || _importData.length === 0) { alert('No data to import. Please select a file first.'); return; }
   const sheetName = document.getElementById('import-sheet').value;
   let added=0, updated=0;
-  const merge = (arr, rows, idField, mapper) => {
+  // Guard: the chosen sheet must match the data. Importing the wrong sheet is
+  // how foreign records ended up in the invoice and journal lists.
+  if(_importSheet && _importSheet !== sheetName) {
+    alert(`The file was read from the "${_importSheet}" sheet but "${sheetName}" is selected.\n\nRe-select the file after choosing the right type.`);
+    return;
+  }
+  const skipped = [];
+  const merge = (arr, rows, idField, mapper, targetKey) => {
     rows.forEach(row => {
       const id = row[idField]; if(!id) return;
-      const idx = arr.findIndex(x=>x.id===id);
       const mapped = mapper(row);
+      // Does the resulting record actually belong in this array?
+      if(targetKey && typeof _shapeOf === 'function') {
+        let s = _shapeOf(mapped);
+        if(s === 'contact') s = 'customers';
+        if(s && s !== targetKey) { skipped.push(`${id} looks like ${s}`); return; }
+      }
+      const idx = arr.findIndex(x=>x.id===id);
       if(idx>=0) { arr[idx]={...arr[idx],...mapped}; updated++; }
       else { arr.push(mapped); added++; }
     });
   };
-  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', source:r['Source']||'' }));
-  else if(sheetName==='Sales Orders') { if(!state.salesOrders) state.salesOrders=[]; merge(state.salesOrders, _importData, 'SO ID', r=>({ id:r['SO ID'], date:r['Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', status:r['Status']||'pending', total:+r['Total Amount']||0, notes:r['Notes']||'' })); }
+  if(sheetName==='Invoices') merge(state.invoices, _importData, 'Invoice ID', r=>({ id:r['Invoice ID'], date:r['Date']||'', due:r['Due Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', vatBase:+r['VAT Base']||0, vat:+r['Output VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', source:r['Source']||'' }), 'invoices');
+  else if(sheetName==='Sales Orders') { if(!state.salesOrders) state.salesOrders=[]; merge(state.salesOrders, _importData, 'SO ID', r=>({ id:r['SO ID'], date:r['Date']||'', customer:r['Customer']||'', custPONo:r['Customer PO No']||'', status:r['Status']||'pending', total:+r['Total Amount']||0, notes:r['Notes']||'' }), 'salesOrders'); }
   else if(sheetName==='Sales Returns') { if(!state.salesReturns) state.salesReturns=[]; merge(state.salesReturns, _importData, 'Return ID', r=>({ id:r['Return ID'], date:r['Date']||'', customer:r['Customer']||'', invoiceRef:r['Invoice Ref']||'', amount:+r['Amount']||0, reason:r['Reason']||'' })); }
-  else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, netCash:+r['Net Cash']||+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' })); }
+  else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, netCash:+r['Net Cash']||+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' }), 'collections'); }
   else if(sheetName==='Deposits') { if(!state.deposits) state.deposits=[]; merge(state.deposits, _importData, 'Deposit ID', r=>({ id:r['Deposit ID'], date:r['Date']||'', bankAccount:r['Bank Account']||'', amount:+r['Amount']||0, source:r['Source']||'', ref:r['Reference']||'', description:r['Description']||'', status:r['Status']||'pending' })); }
-  else if(sheetName==='Supplier Invoices') { if(!state.supplierInvoices) state.supplierInvoices=[]; merge(state.supplierInvoices, _importData, 'SI ID', r=>({ id:r['SI ID'], date:r['Date']||'', dueDate:r['Due Date']||'', supplier:r['Supplier']||'', supplierInvNo:r['Supplier Inv No']||'', poRef:r['PO Ref']||'', subtotal:+r['Net Amount']||0, vat:+r['VAT']||0, total:+r['Total']||0, payments:[], status:r['Status']||'unpaid' })); }
-  else if(sheetName==='Purchase Orders') { if(!state.purchaseOrders) state.purchaseOrders=[]; merge(state.purchaseOrders, _importData, 'PO ID', r=>({ id:r['PO ID'], date:r['Date']||'', supplier:r['Supplier']||'', status:r['Status']||'pending', lines:[], notes:r['Notes']||'' })); }
-  else if(sheetName==='Purchase Requests') { if(!state.purchaseRequests) state.purchaseRequests=[]; merge(state.purchaseRequests, _importData, 'PR ID', r=>({ id:r['PR ID'], date:r['Date']||'', requestedBy:r['Requested By']||'', department:r['Department']||'', description:r['Description']||'', estimatedCost:+r['Estimated Cost']||0, status:r['Status']||'pending' })); }
+  else if(sheetName==='Supplier Invoices') { if(!state.supplierInvoices) state.supplierInvoices=[]; merge(state.supplierInvoices, _importData, 'SI ID', r=>({ id:r['SI ID'], date:r['Date']||'', dueDate:r['Due Date']||'', supplier:r['Supplier']||'', supplierInvNo:r['Supplier Inv No']||'', poRef:r['PO Ref']||'', subtotal:+r['Net Amount']||0, vat:+r['VAT']||0, total:+r['Total']||0, payments:[], status:r['Status']||'unpaid' }), 'supplierInvoices'); }
+  else if(sheetName==='Purchase Orders') { if(!state.purchaseOrders) state.purchaseOrders=[]; merge(state.purchaseOrders, _importData, 'PO ID', r=>({ id:r['PO ID'], date:r['Date']||'', supplier:r['Supplier']||'', status:r['Status']||'pending', lines:[], notes:r['Notes']||'' }), 'purchaseOrders'); }
+  else if(sheetName==='Purchase Requests') { if(!state.purchaseRequests) state.purchaseRequests=[]; merge(state.purchaseRequests, _importData, 'PR ID', r=>({ id:r['PR ID'], date:r['Date']||'', requestedBy:r['Requested By']||'', department:r['Department']||'', description:r['Description']||'', estimatedCost:+r['Estimated Cost']||0, status:r['Status']||'pending' }), 'purchaseRequests'); }
   else if(sheetName==='Purchases') { if(!state.purchases) state.purchases=[]; merge(state.purchases, _importData, 'Purchase ID', r=>({ id:r['Purchase ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', notes:r['Notes']||'' })); }
   else if(sheetName==='Expenses') { if(!state.expenses) state.expenses=[]; merge(state.expenses, _importData, 'Expense ID', r=>({ id:r['Expense ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', expType:r['Type']||'admin', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, vatType:r['VAT Type']||'', status:r['Status']||'pending' })); }
-  else if(sheetName==='Journal') { if(!state.journal) state.journal=[]; merge(state.journal, _importData, 'Entry ID', r=>({ id:r['Entry ID'], group:r['Group ID']||r['Entry ID'], date:r['Date']||'', ref:r['Reference']||'', type:r['Type']||'general', desc:r['Description']||'', debit:r['Debit Account']||null, credit:r['Credit Account']||null, amount:+r['Amount']||0, payee:r['Payee']||'', preparedBy:r['Prepared By']||'', approvedBy:r['Approved By']||'' })); }
+  else if(sheetName==='Journal') { if(!state.journal) state.journal=[]; merge(state.journal, _importData, 'Entry ID', r=>({ id:r['Entry ID'], group:r['Group ID']||r['Entry ID'], date:r['Date']||'', ref:r['Reference']||'', type:r['Type']||'general', desc:r['Description']||'', debit:r['Debit Account']||null, credit:r['Credit Account']||null, amount:+r['Amount']||0, payee:r['Payee']||'', preparedBy:r['Prepared By']||'', approvedBy:r['Approved By']||'' }), 'journal'); }
   else if(sheetName==='Chart of Accounts') { if(!state.accounts) state.accounts=[]; merge(state.accounts, _importData, 'Account Code', r=>({ id:r['Account Code']||'', name:r['Account Name']||'', type:r['Type']||'Asset', balance:+r['Balance']||0 })); }
-  else if(sheetName==='Customers') { merge(state.customers, _importData, 'Customer ID', r=>({ id:r['Customer ID'], name:r['Name']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', tin:r['TIN']||'', creditLimit:+r['Credit Limit']||0, balance:+r['Balance']||0, status:r['Status']||'active' })); }
-  else if(sheetName==='Suppliers') { if(!state.suppliers) state.suppliers=[]; merge(state.suppliers, _importData, 'Supplier ID', r=>({ id:r['Supplier ID'], name:r['Name']||'', tin:r['TIN']||'', contactPerson:r['Contact Person']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', category:r['Category']||'', terms:r['Payment Terms']||'', status:r['Status']||'active', notes:r['Notes']||'' })); }
-  else if(sheetName==='Inventory') { if(!state.inventory) state.inventory=[]; merge(state.inventory, _importData, 'Item ID', r=>({ id:r['Item ID'], name:r['Name']||'', category:r['Category']||'', unit:r['Unit']||'pc', costPrice:+r['Cost Price']||0, salePrice:+r['Sale Price']||0, qty:+r['Qty on Hand']||0, reorderLevel:+r['Reorder Level']||0, description:r['Description']||'', status:r['Status']||'active', lots:[] })); }
+  else if(sheetName==='Customers') { merge(state.customers, _importData, 'Customer ID', r=>({ id:r['Customer ID'], name:r['Name']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', tin:r['TIN']||'', creditLimit:+r['Credit Limit']||0, balance:+r['Balance']||0, status:r['Status']||'active' }), 'customers'); }
+  else if(sheetName==='Suppliers') { if(!state.suppliers) state.suppliers=[]; merge(state.suppliers, _importData, 'Supplier ID', r=>({ id:r['Supplier ID'], name:r['Name']||'', tin:r['TIN']||'', contactPerson:r['Contact Person']||'', email:r['Email']||'', phone:r['Phone']||'', address:r['Address']||'', category:r['Category']||'', terms:r['Payment Terms']||'', status:r['Status']||'active', notes:r['Notes']||'' }), 'suppliers'); }
+  else if(sheetName==='Inventory') { if(!state.inventory) state.inventory=[]; merge(state.inventory, _importData, 'Item ID', r=>({ id:r['Item ID'], name:r['Name']||'', category:r['Category']||'', unit:r['Unit']||'pc', costPrice:+r['Cost Price']||0, salePrice:+r['Sale Price']||0, qty:+r['Qty on Hand']||0, reorderLevel:+r['Reorder Level']||0, description:r['Description']||'', status:r['Status']||'active', lots:[] }), 'inventory'); }
   else if(sheetName==='Inventory Movements') { if(!state.inventoryMovements) state.inventoryMovements=[]; merge(state.inventoryMovements, _importData, 'Movement ID', r=>({ id:r['Movement ID'], date:r['Date']||'', itemId:r['Item ID']||'', itemName:r['Item Name']||'', type:r['Type']||'in', qty:+r['Qty']||0, ref:r['Reference']||'', notes:r['Notes']||'', branchId:r['Branch']||'', recordedBy:r['Recorded By']||'' })); }
-  else if(sheetName==='Employees') { if(!state.employees) state.employees=[]; merge(state.employees, _importData, 'Employee ID', r=>({ id:r['Employee ID'], name:r['Name']||'', position:r['Position']||'', department:r['Department']||'', basicSalary:+r['Basic Salary']||0, allowance:+r['Allowance']||0, sssNo:r['SSS No']||'', philhealthNo:r['PhilHealth No']||'', pagibigNo:r['Pag-IBIG No']||'', tinNo:r['TIN']||'', startDate:r['Date Hired']||'', status:r['Status']||'active', email:r['Email']||'', phone:r['Phone']||'' })); }
-  else if(sheetName==='Attendance') { if(!state.attendance) state.attendance=[]; merge(state.attendance, _importData, 'Record ID', r=>({ id:r['Record ID'], date:r['Date']||'', empId:r['Employee ID']||'', empName:r['Employee Name']||'', status:r['Status']||'present', timeIn:r['Time In']||'', timeOut:r['Time Out']||'', hoursWorked:+r['Hours Worked']||0, overtimeHours:+r['OT Hours']||0, lateMins:+r['Late (mins)']||0, notes:r['Notes']||'' })); }
+  else if(sheetName==='Employees') { if(!state.employees) state.employees=[]; merge(state.employees, _importData, 'Employee ID', r=>({ id:r['Employee ID'], name:r['Name']||'', position:r['Position']||'', department:r['Department']||'', basicSalary:+r['Basic Salary']||0, allowance:+r['Allowance']||0, sssNo:r['SSS No']||'', philhealthNo:r['PhilHealth No']||'', pagibigNo:r['Pag-IBIG No']||'', tinNo:r['TIN']||'', startDate:r['Date Hired']||'', status:r['Status']||'active', email:r['Email']||'', phone:r['Phone']||'' }), 'employees'); }
+  else if(sheetName==='Attendance') { if(!state.attendance) state.attendance=[]; merge(state.attendance, _importData, 'Record ID', r=>({ id:r['Record ID'], date:r['Date']||'', empId:r['Employee ID']||'', empName:r['Employee Name']||'', status:r['Status']||'present', timeIn:r['Time In']||'', timeOut:r['Time Out']||'', hoursWorked:+r['Hours Worked']||0, overtimeHours:+r['OT Hours']||0, lateMins:+r['Late (mins)']||0, notes:r['Notes']||'' }), 'attendance'); }
   else if(sheetName==='Payroll') { if(!state.payrolls) state.payrolls=[]; merge(state.payrolls, _importData, 'Payroll ID', r=>({ id:r['Payroll ID'], period:r['Period']||'', payType:r['Pay Type']||'', payDate:r['Pay Date']||'', empId:r['Employee ID']||'', empName:r['Employee Name']||'', scheduledDays:+r['Scheduled Days']||0, daysWorked:+r['Days Worked']||0, totalOTHours:+r['OT Hours']||0, totalLateMins:+r['Late (mins)']||0, semiMonthlyBasic:+r['½-Mo Basic']||0, basicPay:+r['½-Mo Basic']||0, absentDeduction:+r['Absent Deduction']||0, lateDeduction:+r['Late Deduction']||0, overtime:+r['OT Pay']||0, allowance:+r['Allowance']||0, grossPay:+r['Gross Pay']||0, sss:+r['SSS']||0, philhealth:+r['PhilHealth']||0, pagibig:+r['Pag-IBIG']||0, withholdingTax:+r['W/Tax']||0, totalDeductions:+r['Total Deductions']||0, netPay:+r['Net Pay']||0, status:r['Status']||'pending' })); }
   else if(sheetName==='Leave Management') { if(!state.leaves) state.leaves=[]; merge(state.leaves, _importData, 'Leave ID', r=>({ id:r['Leave ID'], empId:r['Employee ID']||'', empName:r['Employee Name']||'', leaveTypeLabel:r['Leave Type']||'', type:r['Leave Type']||'', startDate:r['Date From']||'', from:r['Date From']||'', endDate:r['Date To']||'', to:r['Date To']||'', days:+r['Days']||0, reason:r['Reason']||'', withPay:r['With Pay']==='No'?false:true, status:r['Status']||'pending', filedOn:r['Filed On']||'' })); }
   else if(sheetName==='Performance') { if(!state.performances) state.performances=[]; merge(state.performances, _importData, 'Record ID', r=>({ id:r['Record ID'], empId:r['Employee ID']||'', empName:r['Employee Name']||'', period:r['Period']||'', rating:r['Rating']||'', score:r['Score']||'', notes:r['Notes']||'', reviewedBy:r['Reviewed By']||'' })); }
@@ -13200,7 +13268,14 @@ function runImport() {
   save();
   _importData = null;
   closeModal();
-  alert(`Import complete!\n✓ ${added} records added\n✓ ${updated} records updated`);
+  let msg = `Import complete!\n✓ ${added} records added\n✓ ${updated} records updated`;
+  if(skipped.length) {
+    msg += `\n\n⚠ ${skipped.length} row(s) were SKIPPED because they do not look like ${sheetName}:\n` +
+           skipped.slice(0,8).join('\n') + (skipped.length>8 ? `\n…and ${skipped.length-8} more` : '') +
+           `\n\nThis usually means the wrong sheet was selected.`;
+    console.warn('Import skipped rows:', skipped);
+  }
+  alert(msg);
   render();
 }
 
