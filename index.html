@@ -1458,7 +1458,20 @@ function _shapeOf(r) {
   if(k.has('customer') && any('due','vatBase'))    return 'invoices';
   if(any('orNo','receiptNo') || (k.has('customer') && any('mode','invoice') && !k.has('lines'))) return 'collections';
   if(k.has('empId') && any('timeIn','timeOut'))    return 'attendance';
+
+  // Purchase requests: a request has requestedBy/dateNeeded and no supplier
+  if(any('requestedBy','dateNeeded') && !k.has('supplier') && !k.has('customer')) return 'purchaseRequests';
+
+  // Suppliers vs customers. Suppliers carry trade fields and no balance;
+  // customers always have a balance. Missing this is why supplier records
+  // sitting in the invoice list were never detected.
+  if(k.has('name') && any('tin','contactPerson','terms','category') && !k.has('balance')
+     && !k.has('costPrice') && !k.has('amount')) return 'suppliers';
   if(k.has('balance') && k.has('name') && !k.has('type')) return 'contact';
+
+  // Employees
+  if(k.has('name') && any('position','department','monthlySalary','dateHired') && !k.has('balance')) return 'employees';
+
   return null;   // unknown — never moved
 }
 
