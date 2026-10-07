@@ -6213,7 +6213,8 @@ function invRowHtml(inv) {
       <td><div class="action-btns">
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="viewInvoice('${inv.id}')"><i class="ti ti-eye"></i></button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditInvoiceFull('${inv.id}')"><i class="ti ti-edit"></i></button>
-        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoice('${inv.id}')"><i class="ti ti-printer"></i></button>
+        <button class="btn" style="padding:3px 9px;font-size:11px" onclick="printInvoiceForm('${inv.id}')" title="Print onto the pre-printed invoice form"><i class="ti ti-printer"></i></button>
+        <button class="btn" style="padding:3px 7px;font-size:11px" onclick="printInvoice('${inv.id}')" title="Print the whole invoice on blank paper"><i class="ti ti-file-text"></i></button>
         ${getInvoiceStatus(inv)!=='paid'?`<button class="btn" style="padding:3px 8px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="cancelInvoice('${inv.id}')" title="Cancel Invoice"><i class="ti ti-ban"></i></button>`:''}
         <button class="btn danger" style="padding:3px 8px;font-size:11px" onclick="deleteInvoice('${inv.id}')" title="Delete"><i class="ti ti-trash"></i></button>
       </div></td>
@@ -6221,7 +6222,8 @@ function invRowHtml(inv) {
   }
 
 function renderInvoices(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddInvoice()"><i class="ti ti-plus"></i>New Invoice</button>`;
+  ta.innerHTML = `<button class="btn primary" onclick="showAddInvoice()"><i class="ti ti-plus"></i>New Invoice</button>
+    <button class="btn" onclick="invoiceFormCalibration()" title="Adjust where data prints on the pre-printed form"><i class="ti ti-adjustments"></i>Form Alignment</button>`;
   const totalGross = state.invoices.reduce((s, i) => s + (i.amount||0), 0);
   const totalVAT   = state.invoices.reduce((s, i) => s + (i.vat||0), 0);
   const totalBase  = state.invoices.reduce((s, i) => s + (i.vatBase||i.amount||0), 0);
@@ -7068,7 +7070,8 @@ ${(state.collections||[]).filter(r=>r.invoice===inv.id).length>0?`
 <div style="display:flex;gap:8px;justify-content:flex-end">
   <button class="btn" onclick="closeModal()">Close</button>
   <button class="btn" onclick="showEditInvoiceNumber('${inv.id}')"><i class="ti ti-edit"></i>Edit #</button>
-  <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-printer"></i>Print Invoice</button>
+  <button class="btn primary" onclick="closeModal();printInvoiceForm('${inv.id}')"><i class="ti ti-printer"></i>Print on SI Form</button>
+  <button class="btn" onclick="closeModal();printInvoice('${inv.id}')"><i class="ti ti-file-text"></i>Print on Blank Paper</button>
 </div>`);
 }
 
@@ -7115,6 +7118,188 @@ function saveInvoiceNumber(oldId) {
   stampUpdate(inv);
   save(); closeModal(); render();
 }
+
+// ── PRINTING ONTO THE PRE-PRINTED SALES INVOICE PAD ──────────────────────────
+// The pad already carries the company header, table rules, terms and BIR
+// details. We must print ONLY the variable data, positioned to land inside the
+// boxes. Coordinates are percentages of the page, measured from a scan of the
+// actual form; the calibration offsets below let each printer be nudged.
+
+const SI_FORM = {
+  date:     { x:80.0, y:15.6 },
+  customer: { x:18.0, y:18.6 },
+  tin:      { x:18.0, y:20.6 },
+  address:  { x:18.0, y:22.6, w:62 },
+  items:    { startY:26.8, rowH:2.17, rows:18,
+              descX:6.0, qtyC:65.6, priceR:79.2, amtR:94.2 },
+  vatBlock: { valueR:62.8, rows:{ vatable:66.0, vat:68.2, zero:70.5, exempt:72.7 } },
+  totals:   { valueR:94.2, rows:{ gross:66.0, lessVat:68.2, net:70.4,
+                                  discount:72.6, addVat:74.8, wtax:77.0, due:79.2 } }
+};
+
+const SI_CAL_KEY = 'anmolpharma_si_calibration';
+function getSICal() {
+  try { const d = JSON.parse(localStorage.getItem(SI_CAL_KEY)); if(d) return d; } catch(e) {}
+  return { paper:'A4', offsetX:0, offsetY:0, font:10.5, guides:false };
+}
+function saveSICal(cal) { try { localStorage.setItem(SI_CAL_KEY, JSON.stringify(cal)); } catch(e) {} }
+
+// Prints only the data, for feeding a pre-printed pad through the printer
+function printInvoiceForm(id, opts) {
+  opts = opts || {};
+  const inv = state.invoices.find(i=>i.id===id);
+  if(!inv) return;
+  auditLog('PRINT','Invoice',id,{description:`Printed invoice ${id} onto pre-printed form`});
+  const cust = state.customers.find(c=>c.name===inv.customer) || {};
+  const lines = inv.lines || [];
+  const cal = Object.assign(getSICal(), opts.cal||{});
+
+  const gross  = +inv.amount  || 0;
+  const vat    = +inv.vat     || 0;
+  const netVat = +inv.vatBase || (gross - vat);
+  const isExempt = inv.vatType === 'exempt';
+  const disc = +inv.discount || 0, wtax = +inv.withholdingTax || 0;
+  const n2 = v => (+v) ? (+v).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
+
+  const F = SI_FORM;
+  const put = (x,y,txt,align,width) => {
+    if(txt===''||txt==null) return '';
+    const a = align||'left';
+    const style = a==='right'
+      ? `right:${100-x}%;text-align:right`
+      : a==='center' ? `left:${x}%;transform:translateX(-50%);text-align:center`
+      : `left:${x}%;text-align:left${width?`;width:${width}%`:''}`;
+    return `<div class="f" style="top:${y}%;${style}">${esc(String(txt))}</div>`;
+  };
+
+  let out = '';
+  out += put(F.date.x,     F.date.y,     inv.date||'');
+  out += put(F.customer.x, F.customer.y, inv.customer||'');
+  out += put(F.tin.x,      F.tin.y,      cust.tin||'');
+  out += put(F.address.x,  F.address.y,  cust.address||'', 'left', F.address.w);
+
+  const I = F.items;
+  lines.slice(0, I.rows).forEach((l,i)=>{
+    const y = I.startY + i*I.rowH;
+    out += put(I.descX,  y, l.desc||'');
+    out += put(I.qtyC,   y, l.qty||'', 'center');
+    out += put(I.priceR, y, n2(l.unitPrice), 'right');
+    out += put(I.amtR,   y, n2((+l.qty||0)*(+l.unitPrice||0)), 'right');
+  });
+  if(lines.length > I.rows)
+    out += put(I.descX, I.startY + I.rows*I.rowH, `…and ${lines.length-I.rows} more item(s) — see attached list`);
+
+  const V = F.vatBlock;
+  out += put(V.valueR, V.rows.vatable, isExempt?'':n2(netVat), 'right');
+  out += put(V.valueR, V.rows.vat,     n2(vat),                'right');
+  out += put(V.valueR, V.rows.exempt,  isExempt?n2(netVat):'', 'right');
+
+  const T = F.totals;
+  out += put(T.valueR, T.rows.gross,    n2(gross),  'right');
+  out += put(T.valueR, T.rows.lessVat,  n2(vat),    'right');
+  out += put(T.valueR, T.rows.net,      n2(netVat), 'right');
+  out += put(T.valueR, T.rows.discount, n2(disc),   'right');
+  out += put(T.valueR, T.rows.addVat,   n2(vat),    'right');
+  out += put(T.valueR, T.rows.wtax,     n2(wtax),   'right');
+  out += put(T.valueR, T.rows.due,      n2(gross-disc-wtax), 'right');
+
+  const guides = cal.guides ? `
+    <div class="guide" style="top:${F.items.startY}%;height:${F.items.rows*F.items.rowH}%"></div>
+    ${Array.from({length:F.items.rows}).map((_,i)=>
+      `<div class="gline" style="top:${F.items.startY+i*F.items.rowH}%"></div>`).join('')}
+    <div class="gv" style="left:${F.items.qtyC}%"></div>
+    <div class="gv" style="left:${F.items.priceR}%"></div>
+    <div class="gv" style="left:${F.items.amtR}%"></div>` : '';
+
+  const sizes = { A4:'210mm 297mm', Folio:'215.9mm 330.2mm', Letter:'215.9mm 279.4mm', Legal:'215.9mm 355.6mm' };
+  const win = window.open('','_blank','width=900,height=1000');
+  if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SI ${inv.id}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%}
+  body{font-family:Arial,Helvetica,sans-serif;background:#fff}
+  .page{position:relative;width:100%;height:100%;
+        transform:translate(${cal.offsetX}mm, ${cal.offsetY}mm)}
+  .f{position:absolute;font-size:${cal.font}px;line-height:1.1;white-space:nowrap;color:#000}
+  .f[style*="width"]{white-space:normal}
+  .guide{position:absolute;left:5.2%;right:5.1%;border:1px dashed #09c;opacity:.5}
+  .gline{position:absolute;left:5.2%;right:5.1%;border-top:1px dotted #0c9;opacity:.5}
+  .gv{position:absolute;top:26%;height:40%;border-left:1px dotted #c09;opacity:.5}
+  @page{ size:${sizes[cal.paper]||sizes.A4}; margin:0 }
+  @media print{ .noprint{display:none} }
+  .noprint{position:fixed;top:8px;right:8px;z-index:9}
+  .noprint button{padding:7px 14px;font:600 12px Arial;background:#1a3a8f;color:#fff;border:0;border-radius:4px;cursor:pointer;margin-left:4px}
+</style></head><body>
+<div class="noprint">
+  <button onclick="window.print()">Print</button>
+  <button onclick="window.close()" style="background:#666">Close</button>
+</div>
+<div class="page">${guides}${out}</div>
+<script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
+</body></html>`);
+  win.document.close();
+}
+
+// Adjust the alignment for your printer
+function invoiceFormCalibration() {
+  const cal = getSICal();
+  const inv = (state.invoices||[]).slice(-1)[0];
+  showModal(`
+<div class="modal-head">
+  <h3><i class="ti ti-adjustments" style="margin-right:6px;color:var(--accent)"></i>Pre-printed Invoice Alignment</h3>
+  <button class="close-btn" onclick="closeModal()">&times;</button>
+</div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">
+  Print a test onto a blank sheet, hold it against a real invoice form up to the light,
+  then nudge until the figures sit inside the boxes.
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Paper size</label>
+    <select id="cal-paper">
+      ${['A4','Folio','Letter','Legal'].map(x=>`<option value="${x}" ${cal.paper===x?'selected':''}>${x}</option>`).join('')}
+    </select>
+  </div>
+  <div class="form-group"><label>Font size (px)</label>
+    <input type="number" id="cal-font" step="0.5" value="${cal.font}">
+  </div>
+</div>
+<div class="form-row">
+  <div class="form-group"><label>Shift right / left (mm)</label>
+    <input type="number" id="cal-x" step="0.5" value="${cal.offsetX}">
+  </div>
+  <div class="form-group"><label>Shift down / up (mm)</label>
+    <input type="number" id="cal-y" step="0.5" value="${cal.offsetY}">
+  </div>
+</div>
+<label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:12px">
+  <input type="checkbox" id="cal-guides" ${cal.guides?'checked':''}> Show alignment guides on the test print
+</label>
+<div style="display:flex;gap:8px;justify-content:flex-end">
+  <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn" onclick="saveSICalFromForm(true)"><i class="ti ti-printer"></i>Save &amp; test print</button>
+  <button class="btn primary" onclick="saveSICalFromForm(false)">Save</button>
+</div>`);
+  window._calSampleId = inv ? inv.id : null;
+}
+function saveSICalFromForm(doTest) {
+  const cal = {
+    paper:  document.getElementById('cal-paper').value,
+    offsetX:parseFloat(document.getElementById('cal-x').value)||0,
+    offsetY:parseFloat(document.getElementById('cal-y').value)||0,
+    font:   parseFloat(document.getElementById('cal-font').value)||10.5,
+    guides: document.getElementById('cal-guides').checked
+  };
+  saveSICal(cal);
+  closeModal();
+  toast('Alignment saved.');
+  if(doTest) {
+    if(window._calSampleId) printInvoiceForm(window._calSampleId);
+    else alert('Create an invoice first, then use Save & test print.');
+  }
+}
+window.printInvoiceForm = printInvoiceForm;
+window.invoiceFormCalibration = invoiceFormCalibration;
 
 function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed invoice ${id}`});
   const inv = state.invoices.find(i=>i.id===id);
