@@ -846,9 +846,11 @@ async function _fbDoSave(stateData) {
         .filter(id => !liveIds.has(id));
       if(!gone.length) continue;
       // Guard against a bug wiping a collection: large removals must be explicit
-      if(gone.length > 200) {
-        console.warn(`${key}: ${gone.length} records are missing locally — too many to remove automatically. ` +
-                     `Run cleanCloudExtras(false) if that is intended.`);
+      if(gone.length > 200 && !window._allowBulkCloudDelete) {
+        console.warn(`${key}: ${gone.length} records are missing locally — too many to remove automatically.`);
+        console.warn(`  Run cleanCloudExtras(false) to clear them, or they will come back on the next sync.`);
+        if(typeof toast === 'function')
+          toast(`⚠ ${gone.length} old ${key} record(s) are still in the cloud. Run cleanCloudExtras(false).`, 'warning', 9000);
         continue;
       }
       try {
@@ -1554,8 +1556,16 @@ function repairData(apply) {
   recomputeBalances();
   fbResetHashes();
   save(); render();
-  console.log('\nDone. Now run cleanCloudExtras() to clear the old copies from the cloud.');
-  toast(`✅ Repaired — ${(before-after).toLocaleString()} misplaced record(s) removed. Run cleanCloudExtras() next.`, 'success', 10000);
+  console.log('\nLocal data is clean. The cloud still holds the old copies — clearing them now.');
+  toast(`✅ Repaired ${(before-after).toLocaleString()} record(s). Clearing the cloud copies…`, 'success', 8000);
+  // Without this the cloud copies come straight back on the next sync
+  setTimeout(() => {
+    if(typeof cleanCloudExtras === 'function') {
+      cleanCloudExtras().then(n => {
+        if(n > 0) console.log(`\n${n} stale cloud record(s) found. Run cleanCloudExtras(false) to delete them.`);
+      });
+    }
+  }, 1200);
   return before-after;
 }
 window.repairData = repairData;
@@ -1722,8 +1732,20 @@ function mergeRemoteArray(key, remoteArr, localArr) {
   (localArr||[]).forEach(r => { if(r && r.id != null) localById[String(r.id)] = r; });
 
   const seen = new Set();
-  let restoredFields = 0;
-  const out = remoteArr.map(r => {
+  let restoredFields = 0, rejected = 0;
+
+  // Reject records the cloud sends that clearly belong in a different array.
+  // Guarding only the local side was not enough: a stray record left in a cloud
+  // collection came straight back on the next sync, so cleaning never held.
+  const belongsHere = r => {
+    if(!r || typeof r !== 'object' || typeof _shapeOf !== 'function') return true;
+    let s = _shapeOf(r);
+    if(s === 'contact') s = 'customers';
+    if(s && s !== key) { rejected++; return false; }
+    return true;
+  };
+
+  const out = remoteArr.filter(belongsHere).map(r => {
     if(!r || r.id == null) return r;
     const id = String(r.id);
     seen.add(id);
@@ -1755,7 +1777,11 @@ function mergeRemoteArray(key, remoteArr, localArr) {
     }
     out.push(r); kept++;
   });
-  if(blocked) console.warn(`merge ${key}: ignored ${blocked} record(s) that belong in another array`);
+  if(blocked)  console.warn(`merge ${key}: ignored ${blocked} local record(s) that belong in another array`);
+  if(rejected) {
+    console.warn(`merge ${key}: rejected ${rejected} record(s) the cloud sent that belong elsewhere — run cleanCloudExtras(false) to remove them`);
+    window._mergeRejected = (window._mergeRejected||0) + rejected;
+  }
   if(kept) console.log(`merge ${key}: kept ${kept} local-only record(s) not yet in the cloud`);
   window._mergeUnsynced = (window._mergeUnsynced||0) + kept + restoredFields;
   return out;
