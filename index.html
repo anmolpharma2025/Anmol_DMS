@@ -2327,6 +2327,38 @@ const ACTION_MAP = {
   'delete purchase orders':      'delete_po',
   'initiate inventory transfers':'transfer_inventory',
   'confirm transfer receipt':    'transfer_inventory',
+  // --- added so these permissions are honoured instead of being admin-only ---
+  'approve journal entries':           'approve_journal',
+  'cancel journal entries':            'cancel_journal',
+  'edit journal entries':              'edit_journal',
+  'approve purchase requests':         'approve_pr',
+  'delete purchase requests':          'delete_pr',
+  'cancel invoices':                   'edit_invoice',
+  'edit invoices':                     'edit_invoice',
+  'delete supplier invoices':          'delete_si',
+  'delete suppliers':                  'delete_supplier',
+  'delete accounts':                   'delete_account',
+  'clear audit logs':                  'clear_audit_log',
+  'import data':                       'import_data',
+  'disable 2FA':                       'manage_2fa',
+  'clear stock movements':             'delete_item',
+  'mark consignment as sold':          'adjust_stock',
+  'delete inventory items':            'delete_item',
+  'delete attendance records':         'delete_attendance',
+  'edit employee records':             'edit_employee',
+  'delete employees':                  'delete_employee',
+  'generate payroll':                  'create_payroll',
+  'edit payroll':                      'create_payroll',
+  'delete payroll records':            'delete_payroll',
+  'delete collection records':         'delete_collection',
+  'delete deposit transactions':       'delete_collection',
+  'delete disbursement vouchers':      'delete_voucher',
+  'delete expenses':                   'delete_expense',
+  'delete purchases':                  'delete_purchase',
+  'edit purchase orders':              'edit_po',
+  'mark purchase orders received':     'receive_po',
+  'edit user accounts':                'edit_user',
+  'delete user accounts':              'delete_user',
 };
 
 function requireAdmin(action) {
@@ -2354,6 +2386,32 @@ function requireAdmin(action) {
   <button class="btn" onclick="closeModal()">Close</button>
 </div>`);
   return false;
+}
+
+// Keeps the signed-in session in step with the stored account. Role, branch and
+// customer assignments are cached on currentUser at login; without this, a
+// permission or role change only took effect after signing out and back in.
+function refreshCurrentUser() {
+  if(!currentUser) return;
+  const u = getUsers().find(x => x.id === currentUser.id);
+  if(!u) return;                                   // account removed — leave the session alone
+  if(u.active === false) {                         // deactivated while signed in
+    alert('Your account has been deactivated. You will be signed out.');
+    logout();
+    return;
+  }
+  const changed = u.role !== currentUser.role
+    || u.branchId !== currentUser.branchId
+    || JSON.stringify(u.assignedCustomers||null) !== JSON.stringify(currentUser.assignedCustomers||null);
+  if(changed) {
+    console.log('Account updated — applying new role/branch without re-login.');
+    currentUser.role = u.role;
+    currentUser.branchId = u.branchId;
+    currentUser.assignedCustomers = u.assignedCustomers || null;
+    currentUser.name = u.name;
+    setSession(currentUser);
+    if(!canAccess(state.page)) state.page = 'dashboard';
+  }
 }
 
 function canAccess(page) {
@@ -3069,10 +3127,15 @@ const ALL_ACTIONS = {
   'Employees':       ['create_employee','edit_employee','delete_employee','view_employee'],
   'Payroll':         ['create_payroll','release_payroll','delete_payroll','view_payroll'],
   'Attendance':      ['create_attendance','edit_attendance','delete_attendance','view_attendance'],
-  'Journal':         ['create_journal','delete_journal','view_journal'],
+  'Journal':         ['create_journal','edit_journal','approve_journal','cancel_journal','delete_journal','view_journal'],
+  'Customers':       ['create_customer','edit_customer','delete_customers','view_customer'],
+  'Suppliers':       ['create_supplier','edit_supplier','delete_supplier','view_supplier'],
+  'Supplier Invoices':['create_si','edit_si','delete_si','view_si'],
+  'Purchase Requests':['create_pr','approve_pr','delete_pr','view_pr'],
+  'Chart of Accounts':['create_account','edit_account','delete_account','view_account'],
   'Reports':         ['view_reports'],
-  'Users':           ['create_user','edit_user','delete_user','manage_roles','view_users'],
-  'Company':         ['edit_company','view_company'],
+  'Users':           ['create_user','edit_user','delete_user','manage_roles','manage_2fa','view_users'],
+  'Company':         ['edit_company','view_company','import_data','clear_audit_log'],
 };
 
 // Default actions per role (empty = all actions allowed)
@@ -4102,6 +4165,8 @@ function renderCurrentPage() {
 }
 
 function render() {
+  // Pick up any role/branch change made by an admin while this user is signed in
+  try { refreshCurrentUser(); } catch(e) {}
   // Always re-apply nav visibility on every render so permission changes take effect immediately
   if(currentUser) {
     document.querySelectorAll('.nav-item[data-page]').forEach(el => {
