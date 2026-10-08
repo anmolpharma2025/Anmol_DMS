@@ -1338,8 +1338,10 @@ function checkIntegrity(quiet) {
     const foreign = [];
     state[key].forEach(r => {
       if(!r || typeof r !== 'object' || r.id == null) return;
-      let s = _shapeOf(r);
-      if(s === 'contact') s = 'customers';
+      // Uses the same combined verdict as the repair and the merge guard. While
+      // this used field shape alone it reported "OK" on a tab that was visibly
+      // contaminated, because records such as {id,name,status} match no rule.
+      const s = _wrongArray(key, r);
       if(s && s !== key) foreign.push({ id: r.id, belongs: s });
     });
     if(foreign.length) findings.push({ key, count: foreign.length, sample: foreign.slice(0,5) });
@@ -1443,6 +1445,71 @@ window.findByCustPO = findByCustPO;
 // record with the same id already exists there. Fields present only on the stray
 // copy are merged into the proper one first, so no information is discarded.
 
+// Second, independent signal: the id prefix.
+// Field-shape detection alone kept missing records — a supplier saved with only
+// a name is {id,name,status}, which matches no shape rule, so it sat in the
+// invoice list for ever: invisible to the repair AND to the merge guard. That is
+// exactly why the same small handful came back after every clean-up. An id
+// prefix does not depend on which fields happen to be filled in.
+// Only arrays that own their prefix outright are listed here. journal,
+// inventory, employees, accounts, purchaseRequests and payrolls are deliberately
+// absent: they legitimately carry other arrays' prefixes (the journal entry for
+// INV-0007 is itself called INV-0007, and PR- means both a purchase request and
+// a payroll), so a prefix proves nothing there.
+// Each entry is the exact id format one array uses, checked against the whole
+// database: every pattern matches all of its own array's ids and none belonging
+// to any other array. Whole-id patterns matter — reading just the leading
+// letters is not safe here, because a customer is C001 while an inventory item
+// is C01-CH, and both begin with C.
+const ID_PATTERN_HOME = [
+  [/^INV-/i,      'invoices'          ],
+  [/^SO\d+$/i,    'salesOrders'       ],
+  [/^PO\d+$/i,    'purchaseOrders'    ],
+  [/^SUP-\d+$/i,  'suppliers'         ],
+  [/^C\d{3,}$/i,  'customers'         ],
+  [/^SI-\d+$/i,   'supplierInvoices'  ],
+  [/^OR-\d+$/i,   'collections'       ],
+  [/^PUR-\d+$/i,  'purchases'         ],
+  [/^MOV-\d+$/i,  'inventoryMovements'],
+  [/^TX-\d+$/i,   'inventoryTransfers'],
+  [/^ATT-\d+$/i,  'attendance'        ],
+  [/^LV-\d+$/i,   'leaves'            ]
+];
+// The only arrays whose contents may be judged by id. inventory, employees,
+// accounts, purchaseRequests and payrolls own no pattern and are never judged
+// this way; an id matching no pattern is simply "unknown" and falls through to
+// the field-shape check, so records such as the odd auto-generated attendance
+// id are left alone.
+const STRICT_PREFIX_ARRAYS = new Set(ID_PATTERN_HOME.map(p => p[1]));
+
+// Which array the id itself says this record belongs to, or null if unknown.
+function _prefixHome(r) {
+  if(!r || r.id == null) return null;
+  const id = String(r.id);
+  for(const [re, home] of ID_PATTERN_HOME) if(re.test(id)) return home;
+  return null;
+}
+
+// The single verdict used everywhere: where does this record really belong?
+// Returns the correct array name, or null for "it belongs here, or we cannot tell".
+// Prefix evidence is checked first, but only for arrays that own their prefix;
+// otherwise it falls back to the field shape.
+function _wrongArray(key, r) {
+  if(!r || typeof r !== 'object' || r.id == null) return null;
+  const home = _prefixHome(r);
+  if(home && home !== key && STRICT_PREFIX_ARRAYS.has(key)) return home;
+  // The journal holds its own JV- and DV- entries, which never appear in the map
+  // above, so a prefix owned by another array means this is a copy of that other
+  // record. Real journal entries always carry debit, credit or group, so
+  // requiring all three to be absent keeps genuine entries untouched.
+  if(key === 'journal' && home && home !== 'journal'
+     && r.debit === undefined && r.credit === undefined && r.group === undefined) return home;
+  let s = (typeof _shapeOf === 'function') ? _shapeOf(r) : null;
+  if(s === 'contact') s = (home === 'suppliers') ? 'suppliers' : 'customers';
+  if(s && s !== key) return s;
+  return null;
+}
+
 function _shapeOf(r) {
   if(!r || typeof r !== 'object') return null;
   const k = new Set(Object.keys(r));
@@ -1474,13 +1541,22 @@ function _shapeOf(r) {
   // Employees
   if(k.has('name') && any('position','department','monthlySalary','dateHired') && !k.has('balance')) return 'employees';
 
+  // Purchases (cost of sales). These carry a vendor rather than a supplier, and
+  // no lines. Only purchases-shaped records use 'vendor', so this is safe — and
+  // the journal rule above already claims anything with debit/credit/group.
+  if(k.has('vendor') && any('amount','vatBase')) return 'purchases';
+
   return null;   // unknown — never moved
 }
 
 function repairData(apply) {
+  // Every array a stray may be sent home to. 'purchases', 'inventoryTransfers',
+  // 'leaves' and 'payrolls' were missing, so records belonging to them had
+  // nowhere to go and were left sitting in the wrong tab.
   const HOME = ['journal','invoices','salesOrders','purchaseOrders','supplierInvoices',
-                'purchaseRequests','inventory','inventoryMovements','customers','suppliers',
-                'employees','attendance','collections','accounts'];
+                'purchaseRequests','purchases','inventory','inventoryMovements',
+                'inventoryTransfers','customers','suppliers',
+                'employees','attendance','payrolls','leaves','collections','accounts'];
   const index = {};
   HOME.forEach(k => { index[k] = {}; (state[k]||[]).forEach(r => { if(r && r.id != null) index[k][String(r.id)] = r; }); });
 
@@ -1492,7 +1568,8 @@ function repairData(apply) {
     const keep = [];
     state[key].forEach(r => {
       if(!r || typeof r !== 'object' || r.id == null) { keep.push(r); return; }
-      let s = _shapeOf(r);
+      // Combined verdict: id prefix first, field shape second.
+      let s = _wrongArray(key, r);
       if(s === 'contact') s = index.suppliers[String(r.id)] && !index.customers[String(r.id)] ? 'suppliers' : 'customers';
       let target = (s && s !== key && index[s] && index[s][String(r.id)]) ? s : null;
       // Also catch records that cannot render here and live elsewhere under the same id
@@ -1558,12 +1635,15 @@ function repairData(apply) {
   save(); render();
   console.log('\nLocal data is clean. The cloud still holds the old copies — clearing them now.');
   toast(`✅ Repaired ${(before-after).toLocaleString()} record(s). Clearing the cloud copies…`, 'success', 8000);
-  // Without this the cloud copies come straight back on the next sync
+  // Without this the cloud copies come straight back on the next sync.
+  // purgeStrays only removes documents that are provably in the wrong
+  // collection AND already exist in the right one, so it needs no confirmation.
   setTimeout(() => {
-    if(typeof cleanCloudExtras === 'function') {
-      cleanCloudExtras().then(n => {
-        if(n > 0) console.log(`\n${n} stale cloud record(s) found. Run cleanCloudExtras(false) to delete them.`);
-      });
+    if(typeof purgeStrays === 'function') {
+      purgeStrays(true).then(n => {
+        console.log(n ? `\nRemoved ${n} stray record(s) from the cloud — they will not come back.`
+                      : '\nNo stray records left in the cloud.');
+      }).catch(e => console.warn('Cloud clean-up skipped:', e.message));
     }
   }, 1200);
   return before-after;
@@ -1720,6 +1800,112 @@ async function cleanCloudExtras(dryRun) {
   return done;
 }
 window.cleanCloudExtras = cleanCloudExtras;
+
+// ── TARGETED STRAY PURGE ──────────────────────────────────────────────────────
+// This is what finally stops the contamination coming back.
+// Filtering strays out when reading keeps the screen clean, but the documents
+// themselves stay in the wrong cloud collection for ever — so any device on an
+// older build pulls them in again and re-uploads them, and the same handful
+// reappears after every clean-up.
+//
+// Unlike cleanCloudExtras, this does NOT compare counts and does NOT delete
+// anything merely because it is missing from this device. A document is removed
+// only when BOTH are true:
+//   1. its id prefix or field shape proves it belongs in a different array, and
+//   2. a record with that same id already exists in the array it belongs to.
+// So every document it deletes is a duplicate whose original is kept. Nothing
+// that exists in only one place is ever touched.
+// The automatic run clears up to this many documents by itself. The recurring
+// handful is always far below it. A bigger backlog — the first clean-up of a
+// database that has been contaminated for months — is reported instead, so a
+// backup is taken before thousands of documents are touched.
+const AUTO_PURGE_CAP = 300;
+
+async function purgeStrays(apply, auto) {
+  if(!db) { console.log('No cloud connection.'); return 0; }
+  const DRY = apply !== true;
+  console.log(DRY ? '=== STRAY SCAN — nothing will be deleted ===' : '=== REMOVING STRAY CLOUD RECORDS ===');
+
+  // Read every collection once, so "does the original exist?" can be answered
+  // from the cloud rather than trusting this device's copy.
+  const snaps = {}, cloudIds = {};
+  await Promise.all(FB_COLLECTIONS.map(key =>
+    db.collection(colPath(key)).get()
+      .then(s => { snaps[key] = s.docs; cloudIds[key] = new Set(s.docs.map(d => d.id)); })
+      .catch(() => { snaps[key] = null; cloudIds[key] = new Set(); })
+  ));
+
+  const plan = []; const tally = {}; let unverified = 0;
+  for(const key of FB_COLLECTIONS) {
+    if(!snaps[key]) continue;                       // read failed — never guess
+    for(const doc of snaps[key]) {
+      let rec; try { const {_t, ...r} = doc.data(); rec = r; } catch(e) { continue; }
+      if(rec.id == null) rec.id = doc.id;
+      const home = _wrongArray(key, rec);
+      if(!home || home === key) continue;
+      // The original must already exist where this record belongs — either in
+      // that cloud collection or in that array on this device. Without an
+      // original there is nothing to fall back on, so the stray is left alone.
+      const inHomeCloud  = !!(cloudIds[home] && cloudIds[home].has(doc.id));
+      const inHomeLocal  = (state[home]||[]).some(r => r && String(r.id) === String(rec.id));
+      if(!inHomeCloud && !inHomeLocal) { unverified++; continue; }
+      plan.push({key, ref: doc.ref, id: doc.id, home});
+      const lbl = `${key} → ${home}`;
+      tally[lbl] = (tally[lbl]||0) + 1;
+    }
+  }
+
+  if(!plan.length) {
+    console.log('No stray records in the cloud. Nothing to remove.' +
+      (unverified ? `  (${unverified} misplaced record(s) left alone — no copy exists in the right array.)` : ''));
+    if(typeof toast==='function' && !DRY && !auto) toast('Cloud is clean — no stray records.', 'ok');
+    return 0;
+  }
+  Object.entries(tally).sort((a,b)=>b[1]-a[1]).forEach(([k,v]) => console.log(`  ${String(v).padStart(5)}  ${k}`));
+  if(unverified) console.log(`  ${unverified} misplaced record(s) SKIPPED — no copy in the right array, so they are kept.`);
+  if(DRY) {
+    console.log(`\n${plan.length} duplicate(s) sitting in the wrong collection. Run purgeStrays(true) to delete them.`);
+    return plan.length;
+  }
+  if(auto && plan.length > AUTO_PURGE_CAP) {
+    console.warn(`\n${plan.length} stray record(s) is more than the automatic clean-up will remove on its own.`);
+    console.warn('Run  purgeStrays(true)  once to clear the backlog. A backup downloads first.');
+    if(typeof toast==='function')
+      toast(`${plan.length} old duplicate records found in the cloud. Run purgeStrays(true) in the console once to clear them.`, 'warn', 12000);
+    return 0;
+  }
+  // A manual run can be large, so keep a copy of everything before deleting.
+  if(!auto && typeof downloadBackup === 'function') downloadBackup();
+
+  let done = 0;
+  for(let i=0;i<plan.length;i+=400) {
+    const batch = db.batch();
+    plan.slice(i,i+400).forEach(p => batch.delete(p.ref));
+    try { await batch.commit(); done += Math.min(400, plan.length-i); }
+    catch(e) { console.error('stray delete failed:', e.message); }
+  }
+  fbResetHashes();
+  console.log(`Removed ${done} stray record(s) from the cloud. They will not come back.`);
+  if(typeof toast==='function') toast(`✅ Removed ${done} stray record(s) from the cloud.`, 'ok', 6000);
+  return done;
+}
+window.purgeStrays = purgeStrays;
+
+// Runs the purge by itself, once per session, when a sync actually turns up
+// strays. Typing console commands is what kept failing — by the time anyone
+// noticed the tab was dirty again, the cloud copies had already spread.
+let _autoPurgeDone = false, _autoPurgeTimer = null;
+function scheduleStrayPurge() {
+  if(_autoPurgeDone || _autoPurgeTimer || !db) return;
+  _autoPurgeTimer = setTimeout(async () => {
+    _autoPurgeTimer = null; _autoPurgeDone = true;
+    try {
+      const n = await purgeStrays(true, true);
+      if(n) console.log(`Automatic clean-up removed ${n} stray cloud record(s).`);
+    } catch(e) { console.warn('Automatic stray clean-up skipped:', e.message); }
+  }, 6000);
+}
+window.scheduleStrayPurge = scheduleStrayPurge;
 window.restoreBackup = restoreBackup;
 
 // ── SAFE REMOTE MERGE ─────────────────────────────────────────────────────────
@@ -1737,11 +1923,11 @@ function mergeRemoteArray(key, remoteArr, localArr) {
   // Reject records the cloud sends that clearly belong in a different array.
   // Guarding only the local side was not enough: a stray record left in a cloud
   // collection came straight back on the next sync, so cleaning never held.
+  // Judged on both signals — field shape AND id prefix. Shape alone let bare
+  // records such as {id,name,status} through, which is why a few always returned.
   const belongsHere = r => {
-    if(!r || typeof r !== 'object' || typeof _shapeOf !== 'function') return true;
-    let s = _shapeOf(r);
-    if(s === 'contact') s = 'customers';
-    if(s && s !== key) { rejected++; return false; }
+    if(!r || typeof r !== 'object' || typeof _wrongArray !== 'function') return true;
+    if(_wrongArray(key, r)) { rejected++; return false; }
     return true;
   };
 
@@ -1770,11 +1956,7 @@ function mergeRemoteArray(key, remoteArr, localArr) {
   let kept = 0, blocked = 0;
   (localArr||[]).forEach(r => {
     if(!r || r.id == null || seen.has(String(r.id))) return;
-    if(typeof _shapeOf === 'function') {
-      let s = _shapeOf(r);
-      if(s === 'contact') s = 'customers';
-      if(s && s !== key) { blocked++; return; }   // belongs elsewhere — do not spread it
-    }
+    if(typeof _wrongArray === 'function' && _wrongArray(key, r)) { blocked++; return; }
     out.push(r); kept++;
   });
   if(blocked)  console.warn(`merge ${key}: ignored ${blocked} local record(s) that belong in another array`);
@@ -1790,6 +1972,7 @@ function mergeRemoteArray(key, remoteArr, localArr) {
 // Applies a remote snapshot onto state, preserving journal approvals and local media
 function applyRemoteState(remote) {
   window._mergeUnsynced = 0;
+  const rejectedBefore = window._mergeRejected || 0;
   if(!remote) return 0;
   const currentPage = state.page;
   const la = {}, lc = {};
@@ -1799,7 +1982,16 @@ function applyRemoteState(remote) {
   });
   Object.keys(remote).forEach(key => {
     if(key === 'journal') {
-      state.journal = (remote.journal||[]).map(l => ({...l, ...(la[l.id]||{}), ...(lc[l.id]||{})}));
+      // The journal takes the cloud copy wholesale so approvals are never lost,
+      // but it still must not accept copies of other records: that path had no
+      // guard at all, so strays flowed straight back in on every sync.
+      const jr = (remote.journal||[]).filter(l => !(typeof _wrongArray==='function' && _wrongArray('journal', l)));
+      const jDropped = (remote.journal||[]).length - jr.length;
+      if(jDropped) {
+        console.warn(`merge journal: rejected ${jDropped} record(s) the cloud sent that belong in another array`);
+        window._mergeRejected = (window._mergeRejected||0) + jDropped;
+      }
+      state.journal = jr.map(l => ({...l, ...(la[l.id]||{}), ...(lc[l.id]||{})}));
     } else if(Array.isArray(remote[key])) {
       state[key] = mergeRemoteArray(key, remote[key], state[key]);
     } else {
@@ -1808,6 +2000,12 @@ function applyRemoteState(remote) {
   });
   state.page = currentPage;
   setTimeout(() => { try { checkIntegrity(true); } catch(e) {} }, 800);
+  // The cloud just sent records that belong in other arrays. Filtering them out
+  // here only hides them; the documents stay put and come back next time. Clear
+  // them at the source, once, without the user having to run anything.
+  if((window._mergeRejected || 0) > rejectedBefore && typeof scheduleStrayPurge === 'function') {
+    scheduleStrayPurge();
+  }
   return window._mergeUnsynced || 0;
 }
 
@@ -13646,9 +13844,8 @@ function runImport() {
       const id = row[idField]; if(!id) return;
       const mapped = mapper(row);
       // Does the resulting record actually belong in this array?
-      if(targetKey && typeof _shapeOf === 'function') {
-        let s = _shapeOf(mapped);
-        if(s === 'contact') s = 'customers';
+      if(targetKey && typeof _wrongArray === 'function') {
+        const s = _wrongArray(targetKey, mapped);
         if(s && s !== targetKey) { skipped.push(`${id} looks like ${s}`); return; }
       }
       const idx = arr.findIndex(x=>x.id===id);
@@ -18331,8 +18528,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.1.0';
-const APP_BUILD   = '20260926-0811';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.2.0';
+const APP_BUILD   = '20261008-1930';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button

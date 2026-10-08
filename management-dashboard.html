@@ -486,12 +486,50 @@ function inPd(date){
 }
 
 // ── LOAD DATA ────────────────────────────────────────────────────────────────
+// Same id formats the main system uses. Each pattern matches every id in its own
+// array and none belonging to any other, so an id matching a different array's
+// pattern is a stray copy. Arrays with no pattern (inventory, employees,
+// accounts, purchase requests, payrolls, journal) are never judged this way.
+const DASH_ID_HOME = [
+  [/^INV-/i,     'invoices'          ], [/^SO\d+$/i,  'salesOrders'       ],
+  [/^PO\d+$/i,   'purchaseOrders'    ], [/^SUP-\d+$/i,'suppliers'         ],
+  [/^C\d{3,}$/i, 'customers'         ], [/^SI-\d+$/i, 'supplierInvoices'  ],
+  [/^OR-\d+$/i,  'collections'       ], [/^PUR-\d+$/i,'purchases'         ],
+  [/^MOV-\d+$/i, 'inventoryMovements'], [/^TX-\d+$/i, 'inventoryTransfers'],
+  [/^ATT-\d+$/i, 'attendance'        ], [/^LV-\d+$/i, 'leaves'            ]
+];
+const DASH_STRICT = new Set(DASH_ID_HOME.map(p => p[1]));
+function _dashWrongArray(key, r){
+  if(!r || typeof r !== 'object' || r.id == null) return null;
+  const id = String(r.id);
+  for(const [re, home] of DASH_ID_HOME){
+    if(!re.test(id)) continue;
+    if(home === key) return null;
+    // Only judge arrays that own their id format; the journal keeps its own
+    // JV-/DV- entries, so a foreign id there is a copy unless it is a real
+    // entry (real ones always carry debit, credit or group).
+    if(DASH_STRICT.has(key)) return home;
+    if(key === 'journal' && r.debit === undefined && r.credit === undefined
+       && r.group === undefined) return home;
+    return null;
+  }
+  // Purchase requests share the PR- prefix with payrolls, so they have no id
+  // pattern. They are identified by their fields instead, which is enough to
+  // keep copies of them out of the invoice figures.
+  if(key !== 'purchaseRequests' && (r.requestedBy !== undefined || r.dateNeeded !== undefined)
+     && r.supplier === undefined && r.customer === undefined) return 'purchaseRequests';
+  return null;
+}
+
 async function loadData(){
   document.getElementById('dash').innerHTML = '<div class="loading"><div class="spin"></div><span>Loading…</span></div>';
   try {
     // Read the ERP's per-record collections — the same storage the main app uses.
     // The old single "companies/anmol" document is NOT used: writing the whole
     // database back from here is what kept putting records into wrong arrays.
+    // Records that belong in another array are skipped on the way in, using the
+    // same id formats as the main system, so the figures here match it exactly
+    // instead of counting copies of customers and suppliers as invoices.
     const KEYS = ['journal','invoices','salesOrders','salesReturns','collections','deposits',
       'supplierInvoices','purchaseOrders','purchaseRequests','purchases','expenses',
       'customers','suppliers','inventory','inventoryMovements','inventoryTransfers',
@@ -502,7 +540,7 @@ async function loadData(){
         .then(s => ({k, docs: s.docs.map(d => { const {_t, ...r} = d.data(); return r; })}))
         .catch(() => ({k, docs: []}))));
     S = {};
-    results.forEach(({k, docs}) => { S[k] = docs; });
+    results.forEach(({k, docs}) => { S[k] = docs.filter(r => !_dashWrongArray(k, r)); });
     try {
       const meta = await db.doc('companies/anmol_state_meta').get();
       if(meta.exists) ['settings','branches'].forEach(k => { if(meta.data()[k]) S[k] = meta.data()[k]; });
