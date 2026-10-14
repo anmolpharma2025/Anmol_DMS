@@ -449,8 +449,13 @@ const COLORS = ['#4f8ef7','#00d68f','#ffa502','#a78bfa','#ff6b81'];
 
 function invStatus(inv,cols){
   if(inv.status==='cancelled') return 'cancelled';
-  const paid=(cols||[]).filter(c=>(c.invoices||[]).includes(inv.id)||c.invoice===inv.id).reduce((s,c)=>s+(c.netCash||c.amount||0),0);
-  if(paid>=(inv.amount||0)&&(inv.amount||0)>0) return 'paid';
+  const mine=(cols||[]).filter(c=>(c.invoices||[]).includes(inv.id)||c.invoice===inv.id);
+  const paid=mine.reduce((s,c)=>s+(c.netCash||c.amount||0),0);
+  // Tax the customer withheld is remitted to the BIR, not paid to us, so it is
+  // never going to turn up as cash. Counting it as outstanding left every
+  // invoice with withholding stuck as unpaid and overdue.
+  const withheld=Math.max(mine.reduce((s,c)=>s+(+c.cwtAmount||0),0), +inv.withholdingTax||0);
+  if(paid>=(inv.amount||0)-withheld-0.01&&(inv.amount||0)>0) return 'paid';
   if(inv.due&&inv.due<today()) return 'overdue';
   return 'pending';
 }
