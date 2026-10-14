@@ -7437,9 +7437,25 @@ const SI_FORM = {
                                   discount:72.6, addVat:74.8, wtax:77.0, due:79.2 } }
 };
 
+// Physical paper dimensions in millimetres. The page box is given these exact
+// sizes rather than width/height:100%, which is what made alignment drift on
+// impact printers: 100% resolves to the PRINTABLE area, and a dot matrix
+// printer's mechanical dead zone is much larger than a laser printer's, so
+// every percentage position was squeezed into a smaller box. The error grew
+// further down the sheet — the date would land correctly while the totals crept
+// upward. With a real mm page box the positions no longer depend on what the
+// driver reports as printable.
+const SI_PAPER_MM = {
+  A4:     [210,   297  ],
+  Folio:  [215.9, 330.2],
+  Letter: [215.9, 279.4],
+  Legal:  [215.9, 355.6]
+};
+
 const SI_CAL_KEY = 'anmolpharma_si_calibration';
 function getSICal() {
-  const DEFAULTS = { paper:'A4', offsetX:0, offsetY:1.5, font:10.5, guides:false, v:2 };
+  const DEFAULTS = { paper:'A4', offsetX:0, offsetY:1.5, font:10.5, guides:false,
+                     scaleX:100, scaleY:100, mono:false, bold:false, v:2 };
   try {
     const d = JSON.parse(localStorage.getItem(SI_CAL_KEY));
     if(d) {
@@ -7470,14 +7486,17 @@ function printInvoiceForm(id, opts) {
   const n2 = v => (+v) ? (+v).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '';
 
   const F = SI_FORM;
-  const put = (x,y,txt,align,width) => {
+  // cls is applied as a class, never as an inline width: the rule below that
+  // turns on wrapping keys off the substring "width" in the style attribute, so
+  // an inline max-width would silently make a line wrap and break the row pitch.
+  const put = (x,y,txt,align,width,cls) => {
     if(txt===''||txt==null) return '';
     const a = align||'left';
     const style = a==='right'
       ? `right:${100-x}%;text-align:right`
       : a==='center' ? `left:${x}%;transform:translateX(-50%);text-align:center`
       : `left:${x}%;text-align:left${width?`;width:${width}%`:''}`;
-    return `<div class="f" style="top:${y}%;${style}">${esc(String(txt))}</div>`;
+    return `<div class="f${cls?' '+cls:''}" style="top:${y}%;${style}">${esc(String(txt))}</div>`;
   };
 
   let out = '';
@@ -7489,7 +7508,7 @@ function printInvoiceForm(id, opts) {
   const I = F.items;
   lines.slice(0, I.rows).forEach((l,i)=>{
     const y = I.startY + i*I.rowH;
-    out += put(I.descX,  y, l.desc||'');
+    out += put(I.descX,  y, l.desc||'', 'left', null, 'desc');
     out += put(I.qtyC,   y, l.qty||'', 'center');
     out += put(I.priceR, y, n2(l.unitPrice), 'right');
     out += put(I.amtR,   y, n2((+l.qty||0)*(+l.unitPrice||0)), 'right');
@@ -7519,23 +7538,38 @@ function printInvoiceForm(id, opts) {
     <div class="gv" style="left:${F.items.priceR}%"></div>
     <div class="gv" style="left:${F.items.amtR}%"></div>` : '';
 
-  const sizes = { A4:'210mm 297mm', Folio:'215.9mm 330.2mm', Letter:'215.9mm 279.4mm', Legal:'215.9mm 355.6mm' };
+  const [PW, PH] = SI_PAPER_MM[cal.paper] || SI_PAPER_MM.A4;
+  // Impact printers put down solid black dots. Anti-aliased grey edges on a
+  // small sans-serif turn into missing dots and a blurry character, so a
+  // monospace face and optional bold give a far cleaner strike. Both are
+  // switches, so nothing changes for anyone already printing on a laser.
+  const fam  = cal.mono ? `'Courier New',Courier,monospace` : `Arial,Helvetica,sans-serif`;
+  const wght = cal.bold ? 700 : 400;
   const win = window.open('','_blank','width=900,height=1000');
   if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SI ${inv.id}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  html,body{width:100%;height:100%}
-  body{font-family:Arial,Helvetica,sans-serif;background:#fff}
-  .page{position:relative;width:100%;height:100%;
-        transform:translate(${cal.offsetX}mm, ${cal.offsetY}mm)}
-  .f{position:absolute;font-size:${cal.font}px;line-height:1.1;white-space:nowrap;color:#000}
+  html,body{margin:0;background:#fff}
+  body{font-family:${fam}}
+  /* The page box is the PHYSICAL sheet, in millimetres — never a percentage of
+     whatever the driver says it can print. Scale corrects a printer that feeds
+     slightly long or short; it pivots at the top-left corner so the offsets
+     below stay meaningful. */
+  .page{position:relative;width:${PW}mm;height:${PH}mm;overflow:hidden;
+        transform-origin:0 0;
+        transform:translate(${cal.offsetX}mm, ${cal.offsetY}mm) scale(${(+cal.scaleX||100)/100}, ${(+cal.scaleY||100)/100})}
+  .f{position:absolute;font-size:${cal.font}px;font-weight:${wght};line-height:1.1;
+     white-space:nowrap;color:#000;-webkit-font-smoothing:none;font-smooth:never}
   .f[style*="width"]{white-space:normal}
+  /* Keep a long description out of the quantity column. Monospace is wider, so
+     this matters more on a dot matrix than it did on a laser. */
+  .desc{max-width:${(SI_FORM.items.qtyC - SI_FORM.items.descX - 4).toFixed(1)}%;overflow:hidden;text-overflow:ellipsis}
   .guide{position:absolute;left:5.2%;right:5.1%;border:1px dashed #09c;opacity:.5}
   .gline{position:absolute;left:5.2%;right:5.1%;border-top:1px dotted #0c9;opacity:.5}
   .gv{position:absolute;top:26%;height:40%;border-left:1px dotted #c09;opacity:.5}
-  @page{ size:${sizes[cal.paper]||sizes.A4}; margin:0 }
-  @media print{ .noprint{display:none} }
+  @page{ size:${PW}mm ${PH}mm; margin:0 }
+  @media print{ .noprint{display:none} html,body{width:${PW}mm;height:${PH}mm} }
   .noprint{position:fixed;top:8px;right:8px;z-index:9}
   .noprint button{padding:7px 14px;font:600 12px Arial;background:#1a3a8f;color:#fff;border:0;border-radius:4px;cursor:pointer;margin-left:4px}
 </style></head><body>
@@ -7549,6 +7583,99 @@ function printInvoiceForm(id, opts) {
   win.document.close();
 }
 
+// Prints a millimetre grid with a marker at every field position, using the
+// calibration currently saved. Hold it against a real invoice form and the
+// error can be read off in millimetres instead of guessed at: if the CUSTOMER
+// marker sits 4mm above the form's customer line, put 4 into "shift down".
+// On a dot matrix this is the only practical way to find the numbers, because
+// where the sheet starts depends on how the paper was parked in the feeder.
+function printSIRuler() {
+  const cal = getSICal();
+  const [PW, PH] = SI_PAPER_MM[cal.paper] || SI_PAPER_MM.A4;
+  const F = SI_FORM;
+
+  // Grid layer — true paper millimetres, deliberately NOT shifted or scaled.
+  let grid = '';
+  for(let x = 0; x <= PW; x += 10) {
+    grid += `<div class="v${x%50===0?' maj':''}" style="left:${x}mm"></div>`;
+    grid += `<div class="lx" style="left:${x}mm">${x}</div>`;
+  }
+  for(let y = 0; y <= PH; y += 10) {
+    grid += `<div class="h${y%50===0?' maj':''}" style="top:${y}mm"></div>`;
+    grid += `<div class="ly" style="top:${y}mm">${y}</div>`;
+  }
+
+  // Marker layer — carries exactly the same transform as a real invoice print.
+  // The tick sits exactly on the anchor point — the corner the real field is
+  // positioned from. For a right-aligned figure that corner is its RIGHT edge,
+  // so the tick goes on the right and the label hangs off to the left;
+  // otherwise the tick would be a label-width away from the point being measured.
+  const mark = (xPct, yPct, label, align) => {
+    const x = xPct/100*PW, y = yPct/100*PH;
+    const r = align === 'right';
+    const side = r ? `right:${(PW-x).toFixed(2)}mm` : `left:${x.toFixed(2)}mm`;
+    return `<div class="mk${r?' r':''}" style="top:${y.toFixed(2)}mm;${side}">`
+         + `<span class="cr"></span><span class="tg">${esc(label)}</span></div>`;
+  };
+  let marks = '';
+  marks += mark(F.date.x,     F.date.y,     'DATE');
+  marks += mark(F.customer.x, F.customer.y, 'CUSTOMER');
+  marks += mark(F.tin.x,      F.tin.y,      'TIN');
+  marks += mark(F.address.x,  F.address.y,  'ADDRESS');
+  const I = F.items;
+  marks += mark(I.descX,  I.startY,                  'item row 1');
+  marks += mark(I.descX,  I.startY+(I.rows-1)*I.rowH,`item row ${I.rows}`);
+  marks += mark(I.qtyC,   I.startY,                  'QTY');
+  marks += mark(I.priceR, I.startY, 'PRICE',  'right');
+  marks += mark(I.amtR,   I.startY, 'AMOUNT', 'right');
+  marks += mark(F.vatBlock.valueR, F.vatBlock.rows.vatable, 'VAT base', 'right');
+  marks += mark(F.totals.valueR,   F.totals.rows.gross,     'gross',    'right');
+  marks += mark(F.totals.valueR,   F.totals.rows.due,       'AMOUNT DUE','right');
+
+  const win = window.open('','_blank','width=900,height=1000');
+  if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Alignment ruler</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif}
+  .sheet{position:relative;width:${PW}mm;height:${PH}mm;overflow:hidden}
+  .v,.h{position:absolute;background:#bbb}
+  .v{top:0;height:100%;width:.2mm} .h{left:0;width:100%;height:.2mm}
+  .v.maj,.h.maj{background:#333}
+  .lx,.ly{position:absolute;font-size:6pt;color:#333}
+  .lx{top:.4mm;transform:translateX(.3mm)} .ly{left:.4mm;transform:translateY(.3mm)}
+  .layer{position:absolute;inset:0;transform-origin:0 0;
+         transform:translate(${cal.offsetX}mm, ${cal.offsetY}mm) scale(${(+cal.scaleX||100)/100}, ${(+cal.scaleY||100)/100})}
+  .mk{position:absolute;height:0;white-space:nowrap;font-size:7pt;color:#000;font-weight:700}
+  .cr{position:absolute;top:0;left:0;width:4mm;height:.4mm;background:#000}
+  .tg{position:absolute;top:-2.4mm;left:4.6mm}
+  .mk.r .cr{left:auto;right:0}
+  .mk.r .tg{left:auto;right:4.6mm}
+  .hdr{position:absolute;top:3mm;left:16mm;font-size:8pt;color:#000;max-width:178mm;
+       line-height:1.5;background:#fff;padding:2mm 3mm;border:.3mm solid #333}
+  @page{ size:${PW}mm ${PH}mm; margin:0 }
+  @media print{ .noprint{display:none} html,body{width:${PW}mm;height:${PH}mm} }
+  .noprint{position:fixed;top:8px;right:8px;z-index:9}
+  .noprint button{padding:7px 14px;font:600 12px Arial;background:#1a3a8f;color:#fff;border:0;border-radius:4px;cursor:pointer;margin-left:4px}
+</style></head><body>
+<div class="noprint">
+  <button onclick="window.print()">Print</button>
+  <button onclick="window.close()" style="background:#666">Close</button>
+</div>
+<div class="sheet">${grid}
+  <div class="hdr"><b>Alignment ruler — ${cal.paper}</b><br>
+    Grid is 10mm, heavy lines every 50mm, measured from the top-left corner of the sheet.<br>
+    Markers show where each field will print at the current setting
+    (shift ${cal.offsetX}mm across, ${cal.offsetY}mm down, scale ${cal.scaleX}% &times; ${cal.scaleY}%).<br>
+    Lay this over a real form: if a marker sits 4mm above its box, add 4 to &ldquo;shift down&rdquo;.</div>
+  <div class="layer">${marks}</div>
+</div>
+<script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
+</body></html>`);
+  win.document.close();
+}
+window.printSIRuler = printSIRuler;
+
 // Adjust the alignment for your printer
 function invoiceFormCalibration() {
   const cal = getSICal();
@@ -7558,9 +7685,22 @@ function invoiceFormCalibration() {
   <h3><i class="ti ti-adjustments" style="margin-right:6px;color:var(--accent)"></i>Pre-printed Invoice Alignment</h3>
   <button class="close-btn" onclick="closeModal()">&times;</button>
 </div>
-<div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;line-height:1.5">
-  Print a test onto a blank sheet, hold it against a real invoice form up to the light,
-  then nudge until the figures sit inside the boxes.
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.55">
+  Print the <b>ruler</b>, lay it over a real invoice form, and read the gap in millimetres.
+  Put that number into the shift boxes — no guessing needed.
+</div>
+<div style="font-size:12px;background:var(--bg-secondary);border-left:3px solid var(--accent);
+            padding:9px 11px;border-radius:4px;margin-bottom:12px;line-height:1.6">
+  <b>In the printer dialog, every time:</b><br>
+  Scale <b>100%</b> &nbsp;·&nbsp; Margins <b>None</b> &nbsp;·&nbsp; <b>Uncheck</b> &ldquo;Fit to page&rdquo;
+  and &ldquo;Headers and footers&rdquo;.<br>
+  Any one of those left on will shrink the sheet and nothing will line up, however the
+  figures below are set.
+</div>
+<div style="margin-bottom:12px">
+  <button class="btn" style="font-size:12px" onclick="applyDotMatrixPreset()">
+    <i class="ti ti-printer"></i>Set up for dot matrix (Epson LQ&#8209;310)
+  </button>
 </div>
 <div class="form-row">
   <div class="form-group"><label>Paper size</label>
@@ -7580,27 +7720,67 @@ function invoiceFormCalibration() {
     <input type="number" id="cal-y" step="0.5" value="${cal.offsetY}">
   </div>
 </div>
+<div class="form-row">
+  <div class="form-group"><label>Width scale (%)</label>
+    <input type="number" id="cal-sx" step="0.5" value="${cal.scaleX}">
+  </div>
+  <div class="form-group"><label>Height scale (%)</label>
+    <input type="number" id="cal-sy" step="0.5" value="${cal.scaleY}">
+  </div>
+</div>
+<div style="font-size:11px;color:var(--text-secondary);margin:-4px 0 12px;line-height:1.5">
+  Leave both at 100 unless the spacing drifts further out the lower down the page it goes.
+  If the last line is 3mm high over 290mm, set height scale to 101.
+</div>
+<label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:7px">
+  <input type="checkbox" id="cal-mono" ${cal.mono?'checked':''}> Monospace font — strikes more cleanly on a dot matrix
+</label>
+<label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:7px">
+  <input type="checkbox" id="cal-bold" ${cal.bold?'checked':''}> Bold — darker print through a worn ribbon or carbon copies
+</label>
 <label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-bottom:12px">
   <input type="checkbox" id="cal-guides" ${cal.guides?'checked':''}> Show alignment guides on the test print
 </label>
-<div style="display:flex;gap:8px;justify-content:flex-end">
+<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
   <button class="btn" onclick="closeModal()">Cancel</button>
+  <button class="btn" onclick="saveSICalFromForm(false,true)"><i class="ti ti-ruler"></i>Save &amp; print ruler</button>
   <button class="btn" onclick="saveSICalFromForm(true)"><i class="ti ti-printer"></i>Save &amp; test print</button>
   <button class="btn primary" onclick="saveSICalFromForm(false)">Save</button>
 </div>`);
   window._calSampleId = inv ? inv.id : null;
 }
-function saveSICalFromForm(doTest) {
+// Starting point for an Epson LQ-310 or any other impact printer. These are a
+// sensible place to begin, not a measurement of your machine: where a sheet
+// starts on a dot matrix depends on how it was parked in the feeder, so the
+// ruler still has to be printed once to find the real shift.
+function applyDotMatrixPreset() {
+  const set = (id,v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  const chk = (id,v) => { const el = document.getElementById(id); if(el) el.checked = v; };
+  set('cal-paper','A4'); set('cal-font',11); set('cal-sx',100); set('cal-sy',100);
+  set('cal-x',0); set('cal-y',0);
+  chk('cal-mono',true); chk('cal-bold',true); chk('cal-guides',false);
+  toast('Dot matrix settings filled in — now print the ruler to find the shift.', 'ok', 6000);
+}
+window.applyDotMatrixPreset = applyDotMatrixPreset;
+
+function saveSICalFromForm(doTest, doRuler) {
+  const num = (id,d) => { const v = parseFloat((document.getElementById(id)||{}).value); return isNaN(v)?d:v; };
   const cal = {
     paper:  document.getElementById('cal-paper').value,
-    offsetX:parseFloat(document.getElementById('cal-x').value)||0,
-    offsetY:parseFloat(document.getElementById('cal-y').value)||0,
-    font:   parseFloat(document.getElementById('cal-font').value)||10.5,
-    guides: document.getElementById('cal-guides').checked
+    offsetX:num('cal-x',0),
+    offsetY:num('cal-y',0),
+    font:   num('cal-font',10.5) || 10.5,
+    scaleX: num('cal-sx',100) || 100,
+    scaleY: num('cal-sy',100) || 100,
+    mono:   !!(document.getElementById('cal-mono')||{}).checked,
+    bold:   !!(document.getElementById('cal-bold')||{}).checked,
+    guides: document.getElementById('cal-guides').checked,
+    v: 2
   };
   saveSICal(cal);
   closeModal();
   toast('Alignment saved.');
+  if(doRuler) { printSIRuler(); return; }
   if(doTest) {
     if(window._calSampleId) printInvoiceForm(window._calSampleId);
     else alert('Create an invoice first, then use Save & test print.');
@@ -18528,8 +18708,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.2.0';
-const APP_BUILD   = '20261008-1930';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.2.1';
+const APP_BUILD   = '20261014-2230';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
