@@ -6942,6 +6942,32 @@ function custPOFor(inv) {
 }
 window.custPOFor = custPOFor;
 
+// The customer's clinic / branch for this invoice. It is chosen on the sales
+// order ("Branch / Clinic"), not on the invoice, so it is resolved through the
+// linked SO. When there is no SO it falls back to the customer's own branch,
+// but ONLY when they have a single one — guessing between several branches on
+// a printed invoice would put the wrong clinic on a BIR document.
+function custBranchFor(inv) {
+  if(!inv) return '';
+  if(inv.custBranch) return inv.custBranch;
+  const so = inv.soRef ? (state.salesOrders||[]).find(s=>s.id===inv.soRef) : null;
+  if(so && so.branch) return so.branch;
+  const c = (state.customers||[]).find(x=>x.name===inv.customer);
+  if(!c) return '';
+  if(c.branches && c.branches.length > 1) return '';
+  return c.branch || (c.branches && c.branches[0] && c.branches[0].name) || '';
+}
+window.custBranchFor = custBranchFor;
+
+// "PO-00-000020794 — MAKATI CLINIC", or just whichever half exists.
+function poBranchLine(inv) {
+  const po = custPOFor(inv) || '';
+  const br = custBranchFor(inv) || '';
+  if(!po && !br) return '';
+  return 'P.O. No. ' + (po || '—') + (br ? '  —  ' + br : '');
+}
+window.poBranchLine = poBranchLine;
+
 function extractCustPO(notes) {
   if(!notes) return '';
   const m = String(notes).match(/\b(?:PO|P\.O\.)\s*(?:No\.?|Number|#|Ref)?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9\/-]{2,})/i);
@@ -7561,12 +7587,21 @@ window.fmtDateMDY = fmtDateMDY;
 
 const SI_FORM = {
   // y values are the measured label baselines on the printed pad
+  // Sales order number — one row pitch above the date, so it sits clear above
+  // the date box's top border rather than inside it.
+  soNo:     { x:80.0, y:12.90 },
   date:     { x:80.0, y:15.10 },
   customer: { x:18.0, y:18.15 },
   tin:      { x:18.0, y:20.18 },
   address:  { x:18.0, y:22.20, w:62 },
   items:    { startY:26.8, rowH:2.17, rows:18,
               descX:6.0, qtyC:65.6, priceR:79.2, amtR:94.2 },
+  // Customer PO and clinic/branch, sitting just inside the bottom border of the
+  // item box. The box runs from 26.8 to 26.8 + 18 x 2.17 = 65.86, which is
+  // where the VAT block begins, so 64.20 is the last clear line inside it.
+  // When this line prints, the item list gives up its final row (see below) so
+  // the two can never land on top of each other.
+  poBranch: { x:6.0, y:64.20 },
   vatBlock: { valueR:62.8, rows:{ vatable:66.0, vat:68.2, zero:70.5, exempt:72.7 } },
   totals:   { valueR:94.2, rows:{ gross:66.0, lessVat:68.2, net:70.4,
                                   discount:72.6, addVat:74.8, wtax:77.0, due:79.2 } }
@@ -7640,16 +7675,31 @@ function printInvoiceForm(id, opts) {
   out += put(F.tin.x,      F.tin.y,      cust.tin||'');
   out += put(F.address.x,  F.address.y,  cust.address||'', 'left', F.address.w);
 
+  // Sales order number, above the date box
+  out += put(F.soNo.x, F.soNo.y, inv.soRef ? 'S.O. No. ' + inv.soRef : '');
+
   const I = F.items;
-  lines.slice(0, I.rows).forEach((l,i)=>{
+  // The customer PO / clinic line occupies the last line inside the item box,
+  // so when it prints the item list may only use the rows above it.
+  const poLine = poBranchLine(inv);
+  const slots  = I.rows - (poLine ? 1 : 0);   // rows left for content
+  // When the list is too long the "…and N more" note needs a row of its own,
+  // otherwise it lands on top of the PO line at the foot of the box.
+  const overflow = lines.length > slots;
+  const shown    = overflow ? slots - 1 : Math.min(lines.length, slots);
+  lines.slice(0, shown).forEach((l,i)=>{
     const y = I.startY + i*I.rowH;
     out += put(I.descX,  y, l.desc||'', 'left', null, 'desc');
     out += put(I.qtyC,   y, l.qty||'', 'center');
     out += put(I.priceR, y, n2(l.unitPrice), 'right');
     out += put(I.amtR,   y, n2((+l.qty||0)*(+l.unitPrice||0)), 'right');
   });
-  if(lines.length > I.rows)
-    out += put(I.descX, I.startY + I.rows*I.rowH, `…and ${lines.length-I.rows} more item(s) — see attached list`);
+  if(overflow)
+    out += put(I.descX, I.startY + shown*I.rowH,
+               `…and ${lines.length-shown} more item(s) — see attached list`, 'left', null, 'poline');
+
+  // Customer PO number and clinic / branch, just above the item box border
+  out += put(F.poBranch.x, F.poBranch.y, poLine, 'left', null, 'poline');
 
   const V = F.vatBlock;
   out += put(V.valueR, V.rows.vatable, isExempt?'':n2(netVat), 'right');
@@ -7700,6 +7750,9 @@ function printInvoiceForm(id, opts) {
   /* Keep a long description out of the quantity column. Monospace is wider, so
      this matters more on a dot matrix than it did on a laser. */
   .desc{max-width:${(SI_FORM.items.qtyC - SI_FORM.items.descX - 4).toFixed(1)}%;overflow:hidden;text-overflow:ellipsis}
+  /* The PO / clinic line runs along the bottom of the box, so it may use the
+     full width up to the amount column rather than stopping at the qty column. */
+  .poline{max-width:${(SI_FORM.items.amtR - SI_FORM.items.descX).toFixed(1)}%;overflow:hidden;text-overflow:ellipsis}
   .guide{position:absolute;left:5.2%;right:5.1%;border:1px dashed #09c;opacity:.5}
   .gline{position:absolute;left:5.2%;right:5.1%;border-top:1px dotted #0c9;opacity:.5}
   .gv{position:absolute;top:26%;height:40%;border-left:1px dotted #c09;opacity:.5}
@@ -7745,21 +7798,28 @@ function printSIRuler() {
   // positioned from. For a right-aligned figure that corner is its RIGHT edge,
   // so the tick goes on the right and the label hangs off to the left;
   // otherwise the tick would be a label-width away from the point being measured.
-  const mark = (xPct, yPct, label, align) => {
+  // tagMm slides the LABEL further along the tick without moving the tick, so
+  // two fields only a millimetre or two apart stay readable on the sheet.
+  const mark = (xPct, yPct, label, align, tagMm) => {
     const x = xPct/100*PW, y = yPct/100*PH;
     const r = align === 'right';
     const side = r ? `right:${(PW-x).toFixed(2)}mm` : `left:${x.toFixed(2)}mm`;
+    const tag  = tagMm ? ` style="${r?'right':'left'}:${(4.6+tagMm).toFixed(1)}mm"` : '';
     return `<div class="mk${r?' r':''}" style="top:${y.toFixed(2)}mm;${side}">`
-         + `<span class="cr"></span><span class="tg">${esc(label)}</span></div>`;
+         + `<span class="cr"></span><span class="tg"${tag}>${esc(label)}</span></div>`;
   };
   let marks = '';
+  marks += mark(F.soNo.x,     F.soNo.y,     'S.O. No.');
   marks += mark(F.date.x,     F.date.y,     'DATE');
   marks += mark(F.customer.x, F.customer.y, 'CUSTOMER');
   marks += mark(F.tin.x,      F.tin.y,      'TIN');
   marks += mark(F.address.x,  F.address.y,  'ADDRESS');
   const I = F.items;
   marks += mark(I.descX,  I.startY,                  'item row 1');
-  marks += mark(I.descX,  I.startY+(I.rows-1)*I.rowH,`item row ${I.rows}`);
+  marks += mark(I.descX,  I.startY+(I.rows-2)*I.rowH,`item row ${I.rows-1} — last one when the P.O. line prints`);
+  marks += mark(I.descX,  I.startY+(I.rows-1)*I.rowH,`item row ${I.rows} — only without a P.O. line`);
+  // Sits barely a millimetre below row 18, so its label is pushed clear.
+  marks += mark(F.poBranch.x, F.poBranch.y, 'P.O. No. / Clinic', 'left', 86);
   marks += mark(I.qtyC,   I.startY,                  'QTY');
   marks += mark(I.priceR, I.startY, 'PRICE',  'right');
   marks += mark(I.amtR,   I.startY, 'AMOUNT', 'right');
@@ -8047,6 +8107,7 @@ function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed 
     </td>
     <td style="width:26px">&nbsp;</td>
     <td style="width:200px;padding-left:18px">
+      ${inv.soRef?`<div style="font-size:10px;margin-bottom:2px">S.O. No.: <b>${esc(inv.soRef)}</b></div>`:''}
       <table class="datebox" style="width:100%"><tr><td style="width:40px">Date:</td><td>${fmtDateMDY(inv.date)}</td></tr></table>
     </td>
   </tr></table>
@@ -8073,6 +8134,7 @@ function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed 
         <td class="c-prc">${l?n2(l.unitPrice):''}</td>
         <td class="c-amt">${l?n2((+l.qty||0)*(+l.unitPrice||0)):''}</td>
       </tr>`;}).join('')}
+    ${poBranchLine(inv)?`<tr><td class="c-desc" colspan="4" style="font-size:10px">${esc(poBranchLine(inv))}</td></tr>`:''}
   </table>
 
   <table class="foot"><tr>
@@ -18859,8 +18921,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.3.0';
-const APP_BUILD   = '20261014-2250';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.3.1';
+const APP_BUILD   = '20261015-2210';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
