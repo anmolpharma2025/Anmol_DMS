@@ -6732,10 +6732,21 @@ function saveEditInvoiceFull() {
   // Validate the withholding BEFORE anything is written to the record: bailing
   // out further down would leave the invoice half-updated and unsaved.
   const _editWtax = parseFloat((parseFloat((document.getElementById('inv-cwt-amt')||{}).value)||0).toFixed(2));
-  const _editGross = invLines.filter(l=>l.desc||l.itemId)
+  const _editLines = invLines.filter(l=>l.desc||l.itemId);
+  const _editGross = _editLines
     .reduce((s,l)=>s+(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0),0);
   if(_editWtax > _editGross) {
     alert('The withholding tax is larger than the invoice total. Please check the amount.'); return;
+  }
+  // An existing invoice already has its journal entry and its stock movements
+  // against this number, so it cannot be split here without unpicking those.
+  const _editMax = invMaxLines();
+  if(_editLines.length > _editMax) {
+    alert(`This invoice would have ${_editLines.length} item lines, but only ${_editMax} fit on one printed form.\n\n` +
+          `An invoice that is already saved cannot be split automatically — its journal entry and stock ` +
+          `movements are recorded against this number.\n\n` +
+          `Remove ${_editLines.length - _editMax} line(s) and put them on a new invoice instead.`);
+    return;
   }
   inv.customer  = customer;
   inv.date      = document.getElementById('inv-date').value||inv.date;
@@ -7324,6 +7335,30 @@ function calcInvLines() {
 
 function calcInvVAT() { calcInvLines(); }
 
+// ── INVOICE LINE CAP ─────────────────────────────────────────────────────────
+// A prenumbered BIR pad cannot carry a continuation page, so an invoice may
+// never hold more lines than one printed form shows. The cap is read from the
+// form layout itself, so the two can never disagree: widen the item box and the
+// cap follows.
+function invMaxLines() {
+  return (typeof SI_FORM !== 'undefined' && SI_FORM.items && SI_FORM.items.rows) || 25;
+}
+
+// "INV-0042" -> "INV-0043", keeping the prefix and the zero padding. Any number
+// already used is skipped, so a split can never land on an existing invoice.
+function nextInvNumAfter(id) {
+  const m = String(id||'').match(/^(.*?)(\d+)(\D*)$/);
+  if(!m) return nextInvNum();
+  const head = m[1], digits = m[2], tail = m[3];
+  let n = parseInt(digits, 10);
+  for(let guard=0; guard<10000; guard++) {
+    n++;
+    const cand = head + String(n).padStart(digits.length, '0') + tail;
+    if(!(state.invoices||[]).find(i => i.id === cand)) return cand;
+  }
+  return nextInvNum();
+}
+
 function saveInvoice() {
   const customer = document.getElementById('inv-cust')?.value || document.getElementById('inv-cust-inp')?.value || '';
   const date     = document.getElementById('inv-date').value;
@@ -7349,35 +7384,100 @@ function saveInvoice() {
   const withholdingTax = parseFloat((parseFloat((document.getElementById('inv-cwt-amt')||{}).value)||0).toFixed(2));
   const wtaxRate = currentInvCwtRate();
   if(withholdingTax > amount) { alert('The withholding tax is larger than the invoice total. Please check the amount.'); return; }
-  state.invoices.push({ id, date, due, terms, customer, vatBase, vat, amount, vatType, status, lines, soRef, custPONo,
-    withholdingTax, wtaxRate, ...(isHistorical?{source:'historical'}:{}) });
+  // ── Split across invoices when the list is longer than one form holds ──
+  const MAX = invMaxLines();
+  const totalsFor = ls => {
+    const sub = ls.reduce((s,l)=>s+(+l.qty||0)*(+l.unitPrice||0), 0);
+    if(vatType==='exclusive') { const r=computeVAT(sub);   return {vatBase:r.vatBase, vat:r.vat, amount:r.amount}; }
+    if(vatType==='inclusive') { const r=vatFromGross(sub); return {vatBase:r.vatBase, vat:r.vat, amount:r.amount}; }
+    return {vatBase:sub, vat:0, amount:sub};
+  };
 
-  // ── Deduct inventory — skip for historical entries ──
-  if(!isHistorical) {
-    lines.forEach(l => {
-      if(!l.itemId) return;
-      const it = (state.inventory||[]).find(i=>i.id===l.itemId);
-      if(!it) return;
-      it.qty = Math.max(0, it.qty - (l.qty||0));
-      const movId = 'MOV-' + String((state.inventoryMovements||[]).length+1).padStart(3,'0');
-      if(!state.inventoryMovements) state.inventoryMovements=[];
-      state.inventoryMovements.push({ id:movId, date, item:l.itemId, type:'out', qty:l.qty||0, ref:id, note:`Sale — Invoice ${id}${soRef?' / SO '+soRef:''}` });
+  const parts = [];
+  if(lines.length <= MAX) {
+    parts.push({ id, lines, ...totalsFor(lines), withholdingTax });
+  } else {
+    // A historical entry is a record of a document that already exists, with a
+    // number already printed on it. Inventing follow-on numbers for it would
+    // clash with the real ones, so it is refused rather than split.
+    if(isHistorical) {
+      alert(`This entry has ${lines.length} item lines, but only ${MAX} fit on one printed invoice.\n\n` +
+            `Because it is marked as a historical entry, it will not be split automatically — ` +
+            `the follow-on numbers would not match the ones already on your pad.\n\n` +
+            `Please enter it as separate invoices using the actual numbers from the pad.`);
+      return;
+    }
+    let curId = id;
+    for(let i=0; i<lines.length; i+=MAX) {
+      parts.push({ id: curId, lines: lines.slice(i, i+MAX), from: i+1, to: Math.min(i+MAX, lines.length) });
+      curId = nextInvNumAfter(curId);
+    }
+    parts.forEach(p => Object.assign(p, totalsFor(p.lines)));
+    // Share the withholding across the invoices in proportion to each one's
+    // total, with the last taking the remainder so the parts always add back up
+    // to exactly the figure that was entered.
+    const grand = parts.reduce((s,p)=>s+p.amount, 0) || 1;
+    let assigned = 0;
+    parts.forEach((p,i) => {
+      p.withholdingTax = (i === parts.length-1)
+        ? +(withholdingTax - assigned).toFixed(2)
+        : +(withholdingTax * (p.amount/grand)).toFixed(2);
+      assigned += p.withholdingTax;
     });
+
+    const list = parts.map(p =>
+      `    ${p.id}   items ${p.from}–${p.to}   ${fmt(p.amount)}`).join('\n');
+    if(!confirm(
+        `This invoice has ${lines.length} item lines, but only ${MAX} fit on one printed form.\n\n` +
+        `Your pad is prenumbered and cannot take a continuation page, so it will be saved as ` +
+        `${parts.length} separate invoices:\n\n${list}\n\n` +
+        `Each carries the same customer, date, terms${soRef?` and SO reference (${soRef})`:''}.\n` +
+        `The withholding tax is divided between them.\n\nSave these ${parts.length} invoices?`)) {
+      return;                       // nothing has been written yet
+    }
   }
+
+  parts.forEach(p => {
+    state.invoices.push({ id:p.id, date, due, terms, customer,
+      vatBase:p.vatBase, vat:p.vat, amount:p.amount, vatType, status,
+      lines:p.lines, soRef, custPONo,
+      withholdingTax:p.withholdingTax, wtaxRate,
+      ...(parts.length>1 ? { splitOf:parts[0].id, splitPart:parts.indexOf(p)+1, splitTotal:parts.length } : {}),
+      ...(isHistorical?{source:'historical'}:{}) });
+
+    // ── Deduct inventory — skip for historical entries ──
+    if(!isHistorical) {
+      p.lines.forEach(l => {
+        if(!l.itemId) return;
+        const it = (state.inventory||[]).find(i=>i.id===l.itemId);
+        if(!it) return;
+        it.qty = Math.max(0, it.qty - (l.qty||0));
+        const movId = 'MOV-' + String((state.inventoryMovements||[]).length+1).padStart(3,'0');
+        if(!state.inventoryMovements) state.inventoryMovements=[];
+        state.inventoryMovements.push({ id:movId, date, item:l.itemId, type:'out', qty:l.qty||0, ref:p.id, note:`Sale — Invoice ${p.id}${soRef?' / SO '+soRef:''}` });
+      });
+    }
+  });
+
   window._invLinkedSO = null;
   recomputeBalances();
 
-  // Auto-create general journal for this invoice if AR and Revenue accounts exist
-  const inv = state.invoices[state.invoices.length-1];
+  // Auto-create general journal for these invoices if AR and Revenue accounts exist
+  const made = parts.map(p => state.invoices.find(i=>i.id===p.id)).filter(Boolean);
   const arAcc  = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('accounts receivable')||n.includes('trade receivable'); });
   const revAcc = state.accounts.find(a=>{ const n=String(a.name||'').toLowerCase(); return n.includes('sales')&&!n.includes('return')||n.includes('revenue'); });
   if(arAcc && revAcc) {
-    if(confirm('✅ Invoice saved!\n\nAuto-create a General Journal entry for this sale?\n(DR: Accounts Receivable | CR: Sales Revenue + Output VAT)\n\nClick Cancel to skip and create manually.')) {
-      createJournalFromInvoice(inv);
+    const many = made.length > 1;
+    if(confirm(`✅ ${many ? made.length+' invoices saved' : 'Invoice saved'}!\n\n` +
+               `Auto-create ${many ? 'a General Journal entry for each' : 'a General Journal entry for this sale'}?\n` +
+               `(DR: Accounts Receivable | CR: Sales Revenue + Output VAT)\n\nClick Cancel to skip and create manually.`)) {
+      made.forEach(createJournalFromInvoice);
     }
   }
 
   save(); closeModal(); render();
+  if(parts.length > 1)
+    toast(`Saved as ${parts.length} invoices: ${parts.map(p=>p.id).join(', ')}`, 'ok', 9000);
 
   // Prompt to create another invoice
   showContinueInvoicePrompt();
@@ -18944,8 +19044,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.3.2';
-const APP_BUILD   = '20261017-1140';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.4.0';
+const APP_BUILD   = '20261017-1205';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
