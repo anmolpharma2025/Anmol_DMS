@@ -7594,18 +7594,26 @@ const SI_FORM = {
   customer: { x:18.0, y:18.15 },
   tin:      { x:18.0, y:20.18 },
   address:  { x:18.0, y:22.20, w:62 },
-  items:    { startY:26.8, rowH:2.17, rows:18,
+  // The item box runs from startY down to endY — endY is where the VAT block
+  // begins, so it is the inside of the box's bottom border. `rows` is how many
+  // ITEM lines fit; the customer PO / clinic line gets one further row of its
+  // own below them, so the box is divided into rows + 1 lines. rowH and the PO
+  // line's position are both worked out from that just below, which means
+  // changing `rows` alone re-spaces the whole box and nothing can fall out of it.
+  items:    { startY:26.8, endY:65.86, rows:25,
               descX:6.0, qtyC:65.6, priceR:79.2, amtR:94.2 },
-  // Customer PO and clinic/branch, sitting just inside the bottom border of the
-  // item box. The box runs from 26.8 to 26.8 + 18 x 2.17 = 65.86, which is
-  // where the VAT block begins, so 64.20 is the last clear line inside it.
-  // When this line prints, the item list gives up its final row (see below) so
-  // the two can never land on top of each other.
-  poBranch: { x:6.0, y:64.20 },
+  poBranch: { x:6.0, y:0 },          // set from the item box below
   vatBlock: { valueR:62.8, rows:{ vatable:66.0, vat:68.2, zero:70.5, exempt:72.7 } },
   totals:   { valueR:94.2, rows:{ gross:66.0, lessVat:68.2, net:70.4,
                                   discount:72.6, addVat:74.8, wtax:77.0, due:79.2 } }
 };
+
+// Divide the item box into rows + 1 evenly spaced lines: one per item, plus the
+// customer PO / clinic line on the last. Derived rather than typed in, so the
+// row pitch always matches the box and the PO line always lands on the final
+// line inside the bottom border.
+SI_FORM.items.rowH = (SI_FORM.items.endY - SI_FORM.items.startY) / (SI_FORM.items.rows + 1);
+SI_FORM.poBranch.y = SI_FORM.items.startY + SI_FORM.items.rows * SI_FORM.items.rowH;
 
 // Physical paper dimensions in millimetres. The page box is given these exact
 // sizes rather than width/height:100%, which is what made alignment drift on
@@ -7682,24 +7690,24 @@ function printInvoiceForm(id, opts) {
   // The customer PO / clinic line occupies the last line inside the item box,
   // so when it prints the item list may only use the rows above it.
   const poLine = poBranchLine(inv);
-  const slots  = I.rows - (poLine ? 1 : 0);   // rows left for content
-  // When the list is too long the "…and N more" note needs a row of its own,
-  // otherwise it lands on top of the PO line at the foot of the box.
-  const overflow = lines.length > slots;
-  const shown    = overflow ? slots - 1 : Math.min(lines.length, slots);
+  // The PO line has a reserved row of its own, so the item capacity is simply
+  // I.rows whether or not it prints. When the list is longer than that, the
+  // "…and N more" note takes the last item row.
+  const overflow = lines.length > I.rows;
+  const shown    = overflow ? I.rows - 1 : lines.length;
   lines.slice(0, shown).forEach((l,i)=>{
     const y = I.startY + i*I.rowH;
-    out += put(I.descX,  y, l.desc||'', 'left', null, 'desc');
-    out += put(I.qtyC,   y, l.qty||'', 'center');
-    out += put(I.priceR, y, n2(l.unitPrice), 'right');
-    out += put(I.amtR,   y, n2((+l.qty||0)*(+l.unitPrice||0)), 'right');
+    out += put(I.descX,  y, l.desc||'', 'left', null, 'desc r');
+    out += put(I.qtyC,   y, l.qty||'', 'center', null, 'r');
+    out += put(I.priceR, y, n2(l.unitPrice), 'right', null, 'r');
+    out += put(I.amtR,   y, n2((+l.qty||0)*(+l.unitPrice||0)), 'right', null, 'r');
   });
   if(overflow)
     out += put(I.descX, I.startY + shown*I.rowH,
-               `…and ${lines.length-shown} more item(s) — see attached list`, 'left', null, 'poline');
+               `…and ${lines.length-shown} more item(s) — see attached list`, 'left', null, 'poline r');
 
   // Customer PO number and clinic / branch, just above the item box border
-  out += put(F.poBranch.x, F.poBranch.y, poLine, 'left', null, 'poline');
+  out += put(F.poBranch.x, F.poBranch.y, poLine, 'left', null, 'poline r');
 
   const V = F.vatBlock;
   out += put(V.valueR, V.rows.vatable, isExempt?'':n2(netVat), 'right');
@@ -7730,6 +7738,14 @@ function printInvoiceForm(id, opts) {
   // switches, so nothing changes for anyone already printing on a laser.
   const fam  = cal.mono ? `'Courier New',Courier,monospace` : `Arial,Helvetica,sans-serif`;
   const wght = cal.bold ? 700 : 400;
+  // 25 rows in the same box means a much tighter pitch than 18 did, so the item
+  // rows get their own size capped to what the pitch can hold. Header fields and
+  // totals keep the calibrated size — only the rows are constrained. The cap is
+  // what stops a raised font setting from running the rows into each other.
+  const MM_PER_PX = 25.4/96;
+  const rowMm     = (SI_FORM.items.rowH/100) * PH;
+  const maxRowPx  = Math.max(5, (rowMm - 0.6) / 1.1 / MM_PER_PX);   // 0.6mm clearance
+  const rowFont   = Math.min(+cal.font || 10.5, maxRowPx);
   const win = window.open('','_blank','width=900,height=1000');
   if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>SI ${inv.id}</title>
@@ -7747,6 +7763,8 @@ function printInvoiceForm(id, opts) {
   .f{position:absolute;font-size:${cal.font}px;font-weight:${wght};line-height:1.1;
      white-space:nowrap;color:#000;-webkit-font-smoothing:none;font-smooth:never}
   .f[style*="width"]{white-space:normal}
+  /* item rows — sized to the row pitch, never larger */
+  .r{font-size:${rowFont.toFixed(2)}px}
   /* Keep a long description out of the quantity column. Monospace is wider, so
      this matters more on a dot matrix than it did on a laser. */
   .desc{max-width:${(SI_FORM.items.qtyC - SI_FORM.items.descX - 4).toFixed(1)}%;overflow:hidden;text-overflow:ellipsis}
@@ -7816,9 +7834,8 @@ function printSIRuler() {
   marks += mark(F.address.x,  F.address.y,  'ADDRESS');
   const I = F.items;
   marks += mark(I.descX,  I.startY,                  'item row 1');
-  marks += mark(I.descX,  I.startY+(I.rows-2)*I.rowH,`item row ${I.rows-1} — last one when the P.O. line prints`);
-  marks += mark(I.descX,  I.startY+(I.rows-1)*I.rowH,`item row ${I.rows} — only without a P.O. line`);
-  // Sits barely a millimetre below row 18, so its label is pushed clear.
+  marks += mark(I.descX,  I.startY+(I.rows-1)*I.rowH, `item row ${I.rows} — last`);
+  // Sits one row below the last item, so its label is pushed clear of it.
   marks += mark(F.poBranch.x, F.poBranch.y, 'P.O. No. / Clinic', 'left', 86);
   marks += mark(I.qtyC,   I.startY,                  'QTY');
   marks += mark(I.priceR, I.startY, 'PRICE',  'right');
@@ -8005,7 +8022,13 @@ function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed 
   const blank = v => (+v) ? n2(v) : '';
   // Invoice number: the trailing digits of the ID, as on the printed pad
   const invNo = String(inv.id).replace(/\D+/g,'') || String(inv.id);
-  const ROWS = 18;   // fixed body height, matching the pre-printed form
+  const ROWS = 25;   // fixed body height, matching the pre-printed form
+  // The item block keeps the same height on the page it had at 18 rows, so the
+  // sheet still fits A4; the rows and their text shrink to share that space
+  // instead. Derived, so changing ROWS alone keeps the block the same height.
+  const BODY_PX = 306;
+  const ROW_H   = Math.max(9, Math.round(BODY_PX / ROWS));
+  const ITEM_FS = Math.min(10.5, Math.max(7, ROW_H - 3));
 
   const win = window.open('','_blank','width=900,height=1000');
   if(!win) { alert('Pop-up blocked. Please allow pop-ups.'); return; }
@@ -8044,7 +8067,7 @@ function printInvoice(id) { auditLog('PRINT','Invoice',id,{description:`Printed 
   /* items */
   .items{width:100%;margin-top:-1.2px;table-layout:fixed}
   .items th{border:1.2px solid #000;padding:3px 5px;font-size:10px;font-weight:400}
-  .items td{border-left:1.2px solid #000;border-right:1.2px solid #000;padding:2px 5px;height:17px}
+  .items td{border-left:1.2px solid #000;border-right:1.2px solid #000;padding:1px 5px;height:${ROW_H}px;font-size:${ITEM_FS}px}
   .items tr:last-child td{border-bottom:1.2px solid #000}
   .items .c-desc{text-align:left}
   .items .c-qty{width:62px;text-align:center}
@@ -18921,8 +18944,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.3.1';
-const APP_BUILD   = '20261015-2210';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.3.2';
+const APP_BUILD   = '20261017-1140';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
