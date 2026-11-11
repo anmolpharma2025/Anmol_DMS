@@ -37,28 +37,41 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" async></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  /* ── THEME: navy on white, with a navy sidebar ────────────────────────────
+     The whole app is coloured from this block. The status colours are NOT the
+     old dark-theme ones lightened — they are darkened, because the originals
+     measured about 2:1 against white (green 2.1, amber 2.0, blue 3.2) and were
+     unreadable. Everything below sits at 5:1 or better on white.
+     The previous dark values are kept at the end of this file under
+     "PREVIOUS DARK THEME" in case you want to go back. */
   :root {
-    --bg-primary: #0f1729;
-    --bg-secondary: #162040;
-    --bg-tertiary: #0a1020;
-    --bg-card: #1a2a4a;
-    --bg-hover: #1e3055;
-    --text-primary: #e8eef8;
-    --text-secondary: #8a9dc0;
-    --text-tertiary: #4a5e80;
-    --border-light: rgba(100,140,200,0.12);
-    --border-mid: rgba(100,140,200,0.22);
-    --border-strong: rgba(100,140,200,0.38);
-    --accent: #4f8ef7;
-    --accent-dark: #2d6ee0;
-    --accent-bg: rgba(79,142,247,0.15);
-    --green: #34c98a;
-    --green-bg: rgba(52,201,138,0.12);
-    --green-border: rgba(52,201,138,0.30);
-    --red: #f05c6e;
-    --red-bg: rgba(240,92,110,0.12);
-    --amber: #f5a623;
-    --amber-bg: rgba(245,166,35,0.12);
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f7fb;
+    --bg-tertiary: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #eaf0fa;
+    --text-primary: #0e1c38;
+    --text-secondary: #51637f;
+    --text-tertiary: #687690;
+    --border-light: rgba(14,28,56,0.09);
+    --border-mid: rgba(14,28,56,0.16);
+    --border-strong: rgba(14,28,56,0.30);
+    --accent: #1b3a7a;
+    --accent-dark: #122a5c;
+    --accent-bg: rgba(27,58,122,0.09);
+    --green: #0d7a52;
+    --green-bg: rgba(13,122,82,0.10);
+    --green-border: rgba(13,122,82,0.28);
+    --red: #c42a3b;
+    --red-bg: rgba(196,42,59,0.09);
+    --amber: #9a6100;
+    --amber-bg: rgba(245,166,35,0.16);
+    /* the navy sidebar has its own colours, so ordinary light panels
+       elsewhere are not dragged dark with it */
+    --sidebar-bg: #142a52;
+    --sidebar-text: #c3d0e6;
+    --sidebar-muted: #8b9cc0;
+    --sidebar-accent: #7aa7f0;
     --radius-md: 8px;
     --radius-lg: 12px;
     --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -330,6 +343,57 @@
     .two-col { grid-template-columns: 1fr; }
     .form-row { grid-template-columns: 1fr; }
   }
+  /* ── NAVY SIDEBAR ─────────────────────────────────────────────────────────
+     Several elements in the sidebar carry their colour as an inline style in
+     the markup, and an inline style beats an ordinary rule — which on a navy
+     panel would leave dark navy text on dark navy. The !important flags below
+     are what make those readable; the attribute selectors match the exact
+     inline text, so they keep working wherever the markup moves. */
+  .sidebar { background: var(--sidebar-bg); border-right-color: rgba(255,255,255,0.10); }
+  .sidebar [style*="background:var(--bg-secondary)"] { background: var(--sidebar-bg) !important; }
+  .sidebar [style*="border-bottom:1px solid var(--border-light)"],
+  .sidebar [style*="border-top:1px solid var(--border-light)"] { border-color: rgba(255,255,255,0.12) !important; }
+  .sidebar [style*="color:var(--text-primary)"] { color: #ffffff !important; }
+  .sidebar [style*="color:var(--text-tertiary)"] { color: var(--sidebar-muted) !important; }
+  .sidebar [style*="color:var(--accent)"] { color: var(--sidebar-accent) !important; }
+  .sidebar .nav-section { color: var(--sidebar-muted); }
+  .sidebar .nav-item { color: var(--sidebar-text); }
+  .sidebar .nav-item:hover { background: rgba(255,255,255,0.08); color: #ffffff; }
+  .sidebar .nav-item.active,
+  .sidebar.collapsed .nav-item.active { background: rgba(255,255,255,0.14); color: #ffffff; border-left-color: #ffffff; }
+  .sidebar .sidebar-version-label { color: var(--sidebar-muted) !important; }
+  /* the toggle chevron is recoloured by inline JS on hover, so both states are pinned here */
+  .sidebar #sidebar-toggle i { color: var(--sidebar-muted) !important; }
+  .sidebar #sidebar-toggle:hover i { color: #ffffff !important; }
+  /* Sign Out uses .btn, whose dark text and border would vanish against navy */
+  .sidebar .btn { color: #ffffff !important; border-color: rgba(255,255,255,0.28) !important; }
+  .sidebar .btn:hover { background: rgba(255,255,255,0.10) !important; border-color: rgba(255,255,255,0.45) !important; }
+
+  /* ── LIGHT-BACKGROUND CORRECTIONS ─────────────────────────────────────────
+     Shadows tuned for a dark page look like smudges on white, and the chart
+     track was --bg-card, which is now white on a white card. */
+  .sidebar-toggle { box-shadow: 0 2px 8px rgba(14,28,56,0.16); }
+  .modal { box-shadow: 0 16px 48px rgba(14,28,56,0.18); }
+  .ss-dropdown { box-shadow: 0 8px 24px rgba(14,28,56,0.14); }
+  .chart-bar-wrap { background: #e9edf5; }
+  .kpi, .card { box-shadow: 0 1px 2px rgba(14,28,56,0.05); }
+
+  /* ── PREVIOUS DARK THEME ──────────────────────────────────────────────────
+     To go back: paste these values over the ones in :root at the top, then
+     delete the "NAVY SIDEBAR" and "LIGHT-BACKGROUND CORRECTIONS" blocks above.
+       --bg-primary:#0f1729;  --bg-secondary:#162040; --bg-tertiary:#0a1020;
+       --bg-card:#1a2a4a;     --bg-hover:#1e3055;
+       --text-primary:#e8eef8; --text-secondary:#8a9dc0; --text-tertiary:#4a5e80;
+       --border-light:rgba(100,140,200,0.12); --border-mid:rgba(100,140,200,0.22);
+       --border-strong:rgba(100,140,200,0.38);
+       --accent:#4f8ef7; --accent-dark:#2d6ee0; --accent-bg:rgba(79,142,247,0.15);
+       --green:#34c98a;  --green-bg:rgba(52,201,138,0.12); --green-border:rgba(52,201,138,0.30);
+       --red:#f05c6e;    --red-bg:rgba(240,92,110,0.12);
+       --amber:#f5a623;  --amber-bg:rgba(245,166,35,0.12);
+     Also revert the login card (search "backdrop-filter:blur(12px)") to
+       background:rgba(22,32,64,0.92); border:1px solid rgba(255,255,255,0.1);
+       box-shadow:0 24px 80px rgba(0,0,0,0.7)
+     ──────────────────────────────────────────────────────────────────────── */
 </style>
 <!-- TOTP for Google Authenticator 2FA -->
 <script>
@@ -426,7 +490,7 @@ const TOTP = {
   <div style="position:absolute;inset:0;background:var(--bg-tertiary);z-index:0"></div>
 
   <!-- Login card -->
-  <div style="position:relative;z-index:2;background:rgba(22,32,64,0.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-lg);padding:40px 44px;width:420px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 24px 80px rgba(0,0,0,0.7)">
+  <div style="position:relative;z-index:2;background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:var(--radius-lg);padding:40px 44px;width:420px;border:1px solid rgba(14,28,56,0.10);box-shadow:0 18px 56px rgba(14,28,56,0.18)">
     <div style="text-align:center;margin-bottom:32px">
       <!-- Logo image (shown when uploaded) -->
       <div id="login-logo-wrap" style="display:none;margin-bottom:14px">
@@ -19049,8 +19113,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.4.1';
-const APP_BUILD   = '20261111-2100';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.5.0';
+const APP_BUILD   = '20261111-2115';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
