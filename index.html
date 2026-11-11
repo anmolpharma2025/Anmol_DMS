@@ -369,6 +369,25 @@
   .sidebar .btn { color: #ffffff !important; border-color: rgba(255,255,255,0.28) !important; }
   .sidebar .btn:hover { background: rgba(255,255,255,0.10) !important; border-color: rgba(255,255,255,0.45) !important; }
 
+  /* ── NAVY TOP BAR ────────────────────────────────────────────────────────
+     Same problem as the sidebar: the pills and buttons along the top carry
+     their colours inline, so they need !important to stay visible on navy.
+     The hover rules deliberately do NOT use !important, so the "Ask AI"
+     button keeps its own gradient instead of being flattened. */
+  .topbar { background: var(--sidebar-bg); border-bottom-color: rgba(255,255,255,0.12); }
+  .topbar h2 { color: #ffffff; }
+  .topbar [style*="border-left:1px solid var(--border-light)"] { border-left-color: rgba(255,255,255,0.18) !important; }
+  .topbar [style*="background:var(--bg-card)"] { background: rgba(255,255,255,0.10) !important; border-color: rgba(255,255,255,0.22) !important; }
+  .topbar [style*="color:var(--text-tertiary)"],
+  .topbar [style*="color:var(--text-secondary)"] { color: var(--sidebar-text) !important; }
+  .topbar .btn { color: #ffffff !important; border-color: rgba(255,255,255,0.28) !important; }
+  .topbar .btn:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.45); }
+  .topbar #fb-status:hover { border-color: rgba(255,255,255,0.50) !important; }
+  /* the green Backup button — its dark green sits at about 1.5:1 on navy,
+     so it gets the lighter green that belongs on a dark surface */
+  .topbar [style*="color:var(--green)"] { color: #5fd3a3 !important;
+     border-color: rgba(95,211,163,0.55) !important; background: rgba(95,211,163,0.14) !important; }
+
   /* ── LIGHT-BACKGROUND CORRECTIONS ─────────────────────────────────────────
      Shadows tuned for a dark page look like smudges on white, and the chart
      track was --bg-card, which is now white on a white card. */
@@ -19113,8 +19132,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.5.0';
-const APP_BUILD   = '20261111-2115';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.5.1';
+const APP_BUILD   = '20261111-2145';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
