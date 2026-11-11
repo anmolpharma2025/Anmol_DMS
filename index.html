@@ -2556,6 +2556,7 @@ const ACTION_MAP = {
   'cancel journal entries':            'cancel_journal',
   'edit journal entries':              'edit_journal',
   'approve purchase requests':         'approve_pr',
+  'reject purchase requests':          'approve_pr',
   'delete purchase requests':          'delete_pr',
   'cancel invoices':                   'edit_invoice',
   'edit invoices':                     'edit_invoice',
@@ -17238,6 +17239,8 @@ function renderPurchaseRequests(c, ta) {
         <button class="btn" style="padding:2px 8px;font-size:11px" onclick="viewPR('${pr.id}')"><i class="ti ti-eye"></i></button>
         ${pr.status==='pending'&&isAdmin()?`
           <button class="btn" style="padding:2px 8px;font-size:11px" onclick="showEditPR('${pr.id}')"><i class="ti ti-edit"></i></button>
+        `:''}
+        ${pr.status==='pending'&&canDoAction('approve_pr')?`
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
         `:''}
@@ -17504,7 +17507,7 @@ ${pr.approvedBy?`<div style="font-size:12px;color:var(--green)"><i class="ti ti-
 ${pr.rejectedBy?`<div style="font-size:12px;color:var(--red)"><i class="ti ti-x" style="margin-right:4px"></i>Rejected by <strong>${pr.rejectedBy}</strong>: ${pr.rejectReason||''}</div>`:''}
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Close</button>
-  ${pr.status==='pending'&&isAdmin()?`
+  ${pr.status==='pending'&&canDoAction('approve_pr')?`
     <button class="btn" style="color:var(--red);border-color:var(--red)" onclick="closeModal();rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
     <button class="btn primary" style="background:var(--green);border-color:var(--green)" onclick="closeModal();approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
   `:''}
@@ -17523,6 +17526,8 @@ function approvePR(id) {
 }
 
 function rejectPR(id) {
+  // Rejecting is the same authority as approving, and this had no check at all.
+  if(!requireAdmin('reject purchase requests')) return;
   const reason = prompt('Reason for rejection (optional):');
   if(reason===null) return; // cancelled
   const pr=(state.purchaseRequests||[]).find(p=>p.id===id);
@@ -19044,8 +19049,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.4.0';
-const APP_BUILD   = '20261017-1205';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.4.1';
+const APP_BUILD   = '20261111-2100';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
