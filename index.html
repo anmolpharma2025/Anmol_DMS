@@ -393,6 +393,12 @@
      track was --bg-card, which is now white on a white card. */
   .sidebar-toggle { box-shadow: 0 2px 8px rgba(14,28,56,0.16); }
   .modal { box-shadow: 0 16px 48px rgba(14,28,56,0.18); }
+  /* Grid children default to min-width:auto, so the item <select> could not
+     shrink below the width of its longest option — that is what pushed the
+     purchase-request rows past the modal edge. Letting them shrink means a long
+     product name can no longer bring the horizontal scrollbar back. */
+  .pr-item-row > * { min-width: 0; }
+  .pr-item-row select, .pr-item-row input { width: 100%; }
   .ss-dropdown { box-shadow: 0 8px 24px rgba(14,28,56,0.14); }
   .chart-bar-wrap { background: #e9edf5; }
   .kpi, .card { box-shadow: 0 1px 2px rgba(14,28,56,0.05); }
@@ -17414,7 +17420,7 @@ function showAddPR() {
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="savePR()"><i class="ti ti-send"></i>Submit Request</button>
-</div>`);
+</div>`, '980px');
   addPRItemRow(); // start with one empty row
 }
 
@@ -17548,7 +17554,7 @@ function showEditPR(id) {
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
   <button class="btn" onclick="closeModal()">Cancel</button>
   <button class="btn primary" onclick="saveEditPR('${id}')"><i class="ti ti-check"></i>Save Changes</button>
-</div>`);
+</div>`, '980px');
 }
 
 function saveEditPR(id) {
@@ -19237,8 +19243,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.6.0';
-const APP_BUILD   = '20261112-2235';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.6.1';
+const APP_BUILD   = '20261112-2320';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
@@ -24567,10 +24573,14 @@ function makeSearchable(selectId, placeholder) {
 }
 
 // Auto-apply searchable to key dropdowns after modal renders
-function showModal(html) {
+// maxWidth is optional — pass e.g. '980px' for a modal that needs more room.
+// It is reset on every call, so a wide modal can never leave the next one wide.
+function showModal(html, maxWidth) {
   // Call the original modal display logic directly (avoid re-wrapping)
   document.getElementById('modal').style.display = 'flex';
-  document.getElementById('modal-inner').innerHTML = html;
+  const _mi = document.getElementById('modal-inner');
+  _mi.style.maxWidth = maxWidth || '';
+  _mi.innerHTML = html;
   // Apply searchable selects to common modal dropdowns
   setTimeout(() => {
     const ids = [
