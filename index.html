@@ -3558,7 +3558,9 @@ function renderUsers(c, ta) {
   if (currentUser.role !== 'admin') { c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary)">Access restricted.</div>'; return; }
   ta.innerHTML = `
     <button class="btn" onclick="showManageRoles()"><i class="ti ti-shield-cog"></i>Manage Roles</button>
-    <button class="btn" onclick="showESignatureManager()"><i class="ti ti-signature"></i>E-Signatures</button>
+    <!-- E-Signatures button removed: documents are signed by hand after printing,
+         so a saved signature would never appear on anything. The manager and any
+         already-stored signatures are left untouched — put this button back to use it. -->
     <button class="btn" onclick="showSetMyPIN()" style="color:var(--amber);border-color:var(--amber)"><i class="ti ti-shield-lock"></i>Set My Login PIN</button>
     <button class="btn primary" onclick="showAddUser()"><i class="ti ti-plus"></i>Add User</button>`;
   const users = getUsers();
@@ -5390,9 +5392,6 @@ function printJournal(groupId, type) {
     return `<tr><td class="acct credit">&nbsp;&nbsp;&nbsp;&nbsp;${creditName}</td><td class="amt">—</td><td class="amt">${fmt(l.amount)}</td></tr>`;
   }).join('');
 
-  const encSigsJSON = JSON.stringify(
-    getUsers().reduce((obj,u)=>{ if(u.encryptedSig) obj[u.name]={encryptedSig:u.encryptedSig,id:u.id}; return obj;},{})
-  );
 
   const w = window.open('','_blank','width=860,height=720');
   if(!w) { alert('Pop-up blocked. Allow pop-ups and try again.'); return; }
@@ -5435,9 +5434,7 @@ function printJournal(groupId, type) {
   /* Signature area */
   .sig-area{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:24px;border-top:1px solid #ccc;padding-top:16px}
   .sig-box{text-align:center}
-  .sig-img{max-width:120px;max-height:48px;display:block;margin:0 auto 4px}
   .sig-line{border-top:1.5px solid #333;margin-top:40px;padding-top:5px;font-size:10px;color:#555}
-  .sig-line.has-sig{margin-top:4px}
   /* Footer */
   .doc-footer{margin-top:16px;padding-top:8px;border-top:1px solid #ddd;display:flex;justify-content:space-between;font-size:9px;color:#999}
   .print-btn{position:fixed;bottom:20px;right:20px;padding:10px 22px;background:#1a3a8f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer}
@@ -5490,12 +5487,10 @@ function printJournal(groupId, type) {
 
 <div class="sig-area">
   <div class="sig-box">
-    <div id="sig-prep-img"></div>
-    <div class="sig-line ${preparedBy?'has-sig':''}">${preparedBy||'___________________________'}<br><span style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Prepared by</span></div>
+    <div class="sig-line">${preparedBy||'___________________________'}<br><span style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Prepared by</span></div>
   </div>
   <div class="sig-box">
-    <div id="sig-approv-img"></div>
-    <div class="sig-line ${approvedBy?'has-sig':''}">${approvedBy||'___________________________'}<br><span style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Approved by</span></div>
+    <div class="sig-line">${approvedBy||'___________________________'}<br><span style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Approved by</span></div>
   </div>
   <div class="sig-box">
     <div class="sig-line">___________________________<br><span style="font-size:9px;text-transform:uppercase;letter-spacing:0.05em">Received by / Date</span></div>
@@ -5509,15 +5504,6 @@ function printJournal(groupId, type) {
 
 <button class="print-btn" onclick="window.print()">🖨 Print</button>
 
-<script>
-(async function(){
-  const encSigs=${encSigsJSON};
-  const compTin='${cp.tin||''}';
-  async function dec(enc64,pwd){try{const b=Uint8Array.from(atob(enc64),c=>c.charCodeAt(0));const s=b.slice(0,16),iv=b.slice(16,28),d=b.slice(28);const e=new TextEncoder();const km=await crypto.subtle.importKey('raw',e.encode(pwd),'PBKDF2',false,['deriveKey']);const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:s,iterations:100000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);const r=await crypto.subtle.decrypt({name:'AES-GCM',iv},k,d);return new TextDecoder().decode(r);}catch(e){return null;}}
-  async function showSig(name,elId){const u=encSigs[name];if(!u)return;const pwd='ANMOLPHARMA_SIG_'+(compTin||'CORP')+'_'+u.id;const url=await dec(u.encryptedSig,pwd);if(!url)return;const el=document.getElementById(elId);if(el)el.innerHTML='<img src="'+url+'" class="sig-img">';}
-  await showSig('${preparedBy}','sig-prep-img');
-  await showSig('${approvedBy}','sig-approv-img');
-})();
 <\/script>
 </body></html>`);
   w.document.close();
@@ -19165,64 +19151,11 @@ ${po.notes?`<div class="notes-box"><strong>Notes:</strong> ${po.notes}</div>`:''
   <tfoot><tr><td colspan="3" style="text-align:right;font-weight:600;border-top:2px solid #111">Total Amount:</td><td style="text-align:right;font-size:15px">₱${total.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr></tfoot>
 </table>
 <div class="sigs" id="po-sigs">
-  <div class="sig"><div style="font-size:9px;text-align:center;color:#888;margin-bottom:2px">DIGITALLY SIGNED</div><div id="esig-prepared"></div></div>
-  <div class="sig"><div style="font-size:9px;text-align:center;color:#888;margin-bottom:2px">DIGITALLY SIGNED</div><div id="esig-approved"></div></div>
+  <div class="sig"><div class="sig-line"><strong>${po.preparedBy||'______________________'}</strong><br>Prepared by / Date</div></div>
+  <div class="sig"><div class="sig-line"><strong>${po.approvedBy||'______________________'}</strong><br>Approved by / Date</div></div>
   <div class="sig"><div class="sig-line"><strong>______________________</strong><br>Supplier acknowledgement / Date</div></div>
 </div>
-<script>
-(async function() {
-  async function aesDecrypt(encBase64, password) {
-    try {
-      const combined = Uint8Array.from(atob(encBase64), c=>c.charCodeAt(0));
-      const salt=combined.slice(0,16), iv=combined.slice(16,28), data=combined.slice(28);
-      const enc = new TextEncoder();
-      const km = await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveKey']);
-      const key = await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:100000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);
-      const dec = await crypto.subtle.decrypt({name:'AES-GCM',iv},key,data);
-      return new TextDecoder().decode(dec);
-    } catch(e){ return null; }
-  }
-  async function sha256(msg) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
-    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  function hashWave(hash, signer, role, ts, vc) {
-    const pts=[];
-    for(let i=0;i<20;i++){const v=parseInt(hash.slice(i*2,i*2+2),16);pts.push(i*14+','+(20+(v%20)-10));}
-    return '<div style="text-align:center">'
-      +'<svg width="280" height="40"><path d="M'+pts.join(' L')+'" fill="none" stroke="#1a3a6b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-      +'<div style="border-top:1px solid #333;padding-top:4px"><div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
-      +'<div style="font-size:9px;color:#888">'+role+'</div>'
-      +'<div style="font-size:8px;font-family:monospace;color:#666;margin-top:3px">🔏 '+vc+' · '+ts+'</div></div></div>';
-  }
-  async function renderSig(signer, userId, tin, docId, docType, role, encSig) {
-    const ts = new Date().toLocaleString('en-PH',{dateStyle:'medium',timeStyle:'short'});
-    const secret='ANMOLPHARMA_ESIG_2025_'+(tin||'CORP');
-    const hash = await sha256(docType+'|'+docId+'|'+signer+'|'+ts+'|'+secret);
-    const vc=hash.slice(0,4).toUpperCase()+'-'+hash.slice(4,8).toUpperCase()+'-'+hash.slice(8,12).toUpperCase()+'-'+hash.slice(12,16).toUpperCase();
-    if(encSig) {
-      const pw = 'ANMOLPHARMA_SIG_'+(tin||'CORP')+'_'+userId;
-      const img = await aesDecrypt(encSig, pw);
-      if(img) return '<div style="text-align:center"><img src="'+img+'" style="max-height:60px;max-width:280px;display:block;margin:0 auto">'
-        +'<div style="border-top:1px solid #333;padding-top:4px;margin-top:4px"><div style="font-size:11px;font-weight:700;color:#1a3a6b">'+signer+'</div>'
-        +'<div style="font-size:9px;color:#888">'+role+'</div>'
-        +'<div style="font-size:8px;font-family:monospace;color:#666;margin-top:3px">🔏 '+vc+' · '+ts+'</div></div></div>';
-    }
-    return hashWave(hash, signer, role, ts, vc);
-  }
-  const tin = '${(getCompanyProfile().tin||'')}';
-  const preparedBy = '${po.preparedBy||''}';
-  const approvedBy = '${po.approvedBy||''}';
-  const prepUserId = '${users.find(u=>u.name===po.preparedBy)?.id||''}';
-  const appUserId  = '${users.find(u=>u.name===po.approvedBy)?.id||''}';
-  const prepEncSig = '${users.find(u=>u.name===po.preparedBy)?.encryptedSig||''}';
-  const appEncSig  = '${users.find(u=>u.name===po.approvedBy)?.encryptedSig||''}';
-  const prep = document.getElementById('esig-prepared');
-  const appr = document.getElementById('esig-approved');
-  if(prep) prep.innerHTML = preparedBy ? await renderSig(preparedBy,prepUserId,tin,'${po.id}','PO','Prepared by',prepEncSig||null) : '<div style="border-top:1px solid #333;margin-top:48px;padding-top:5px;text-align:center;font-size:11px;color:#555">______________________<br>Prepared by</div>';
-  if(appr) appr.innerHTML = approvedBy ? await renderSig(approvedBy,appUserId,tin,'${po.id}','PO-APPROVED','Approved by',appEncSig||null) : '<div style="border-top:1px solid #333;margin-top:48px;padding-top:5px;text-align:center;font-size:11px;color:#555">______________________<br>Approved by</div>';
-  window.print();
-})();
+<script>window.onload=function(){window.print()}<\/script>
 <\/script>
 </body></html>`);
   win.document.close();
@@ -19243,8 +19176,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.6.1';
-const APP_BUILD   = '20261112-2320';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.7.0';
+const APP_BUILD   = '20261112-2345';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
