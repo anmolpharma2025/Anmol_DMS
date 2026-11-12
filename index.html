@@ -709,12 +709,21 @@ const TOTP = {
 </div>
 
 <!-- Firebase SDK (CDN compat mode — works in plain HTML, no build tools) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js" crossorigin="anonymous"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" crossorigin="anonymous"></script>
+<!-- ORDER MATTERS. firebase-app-compat.js must come FIRST: it creates the global
+     `firebase` namespace that every other compat library registers itself onto.
+     It used to sit third, so storage-compat and auth-compat ran before the
+     namespace existed, died on a ReferenceError and never registered. Firestore
+     happened to load after it and worked, which is why cloud sync was fine while
+     uploads reported "Cloud Storage is not enabled". These are ordinary blocking
+     scripts, so they run strictly in the order written here — do not reorder. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"
-  onerror="console.warn('Firebase SDK failed to load — sync disabled. Check internet connection.')"></script>
+  onerror="console.error('Firebase SDK failed to load — sync disabled. Check internet connection.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"
+  onerror="console.error('Firebase Auth SDK failed to load — uploads will be rejected by the Storage rules.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"
+  onerror="console.error('Firebase Storage SDK failed to load — attachments cannot be uploaded.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"
-  onerror="console.warn('Firestore SDK failed to load — sync disabled.')"></script>
+  onerror="console.error('Firestore SDK failed to load — sync disabled.')"></script>
 <script>
 
 // ── FIREBASE INIT ─────────────────────────────────────────────────────────────
@@ -739,7 +748,14 @@ if(typeof firebase !== 'undefined') {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
-    try { window.fbStorage = firebase.storage(); } catch(e) {}
+    // This used to swallow its error, which hid a broken Storage setup
+    // completely — uploads just failed later with a misleading message.
+    if(typeof firebase.storage !== 'function') {
+      console.error('Firebase Storage SDK did not register. Attachments will not upload.');
+    } else {
+      try { window.fbStorage = firebase.storage(); }
+      catch(e) { console.error('Cloud Storage failed to initialise:', e.message); }
+    }
     // Anonymous auth — required by the Storage rules (request.auth != null)
     try {
       if(firebase.auth) {
@@ -1058,7 +1074,14 @@ async function ensureAuthReady(timeoutMs = 8000) {
 
 // Upload a file to Cloud Storage and return its download URL
 async function uploadToStorage(file, path) {
-  if(!window.fbStorage) throw new Error('Cloud Storage is not enabled for this project.');
+  // Say which of the two very different causes it is, rather than blaming the
+  // Firebase project when the SDK simply is not there.
+  if(!window.fbStorage) {
+    if(typeof firebase === 'undefined' || typeof firebase.storage !== 'function')
+      throw new Error('The Cloud Storage library did not load, so the upload cannot start. '
+        + 'Reload the page; if it keeps happening, run checkStorage() in the console.');
+    throw new Error('Cloud Storage did not start up. Run checkStorage() in the console for the reason.');
+  }
 
   try { await ensureAuthReady(); }
   catch(e) { throw new Error('Sign-in required before upload. ' + e.message); }
@@ -4168,8 +4191,14 @@ const AUDIT_COLLECTION = 'companies/anmol/audit_logs';
 
 function auditLog(action, module, recordId, details={}, before=null, after=null) {
   if(!currentUser) return;
+  // Logging must never take down the operation it is recording. This used to
+  // dereference firebase unguarded, so with the SDK missing (offline, or a CDN
+  // that failed to load) every save that writes an audit entry threw before it
+  // finished — the edit was lost, not just the log line.
+  const _fbTs = (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue)
+    ? firebase.firestore.FieldValue.serverTimestamp() : null;
   const entry = {
-    ts:       firebase.firestore.FieldValue.serverTimestamp(),
+    ts:       _fbTs,
     date:     new Date().toISOString(),
     user:     currentUser.name || currentUser.username || 'Unknown',
     userId:   currentUser.id,
@@ -14160,7 +14189,7 @@ function exportToExcel() {
   addSheet('Purchase Orders', (state.purchaseOrders||[]).map(po=>({
     'PO ID':po.id,'Date':po.date,'Supplier':po.supplier,'Status':po.status,
     'Total Amount':(po.lines||[]).reduce((s,l)=>s+(l.lineTotal||0),0),
-    'Notes':po.notes||''
+    'Remarks':po.remarks||'','Notes':po.notes||''
   })));
   addSheet('Purchase Requests', (state.purchaseRequests||[]).map(pr=>({
     'PR ID':pr.id,'Date':pr.date,'Requested By':pr.requestedBy||'','Department':pr.department||'',
@@ -17997,6 +18026,66 @@ function openScannedPO(extracted) {
   }, 300);
 }
 
+// ── PO REMARKS ───────────────────────────────────────────────────────────────
+// Tracks what paperwork the supplier has actually sent. These get set AFTER the
+// goods arrive, which is exactly when showEditPO() refuses to open (it allows
+// pending POs only), so the remark is edited straight from the list instead and
+// works at any status. It is rendered as plain text rather than a <select>
+// because the search on this page matches the text in the row — a dropdown
+// would put every option's text in every row and match everything.
+const PO_REMARK_PRESETS = ['No SI Yet', 'DR Only'];
+const PO_REMARK_COLORS  = { 'No SI Yet':'amber', 'DR Only':'accent' };
+
+function poRemarkChip(po) {
+  const r = (po.remarks||'').trim();
+  const canEdit = typeof canDoAction !== 'function' || canDoAction('edit_po');
+  const tone = PO_REMARK_COLORS[r];
+  const body = r
+    ? `<span class="badge" style="background:${tone?`var(--${tone}-bg)`:'var(--bg-hover)'};color:${tone?`var(--${tone})`:'var(--text-secondary)'};font-size:11px">${esc(r)}</span>`
+    : `<span style="color:var(--text-tertiary);font-size:12px">—</span>`;
+  if(!canEdit) return body;
+  return `<span onclick="setPORemark('${po.id}')" title="Click to set a remark"
+    style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">${body}<i class="ti ti-pencil" style="font-size:11px;color:var(--text-tertiary)"></i></span>`;
+}
+
+function setPORemark(id) {
+  if(!requireAdmin('edit purchase orders')) return;
+  const po = (state.purchaseOrders||[]).find(p=>p.id===id);
+  if(!po) return;
+  const cur = (po.remarks||'').trim();
+  const choice = PO_REMARK_PRESETS.map(v=>`
+    <button class="btn" style="justify-content:flex-start;width:100%;margin-bottom:6px;${v===cur?'border-color:var(--accent);color:var(--accent)':''}"
+      onclick="applyPORemark('${id}', ${jsq(v)})">
+      <i class="ti ti-${v===cur?'circle-check':'circle'}" style="margin-right:6px"></i>${esc(v)}</button>`).join('');
+  showModal(`
+<div class="modal-head"><h3><i class="ti ti-message-2" style="margin-right:6px;color:var(--accent)"></i>Remark — ${esc(id)}</h3>
+  <button class="close-btn" onclick="closeModal()">×</button></div>
+<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">${esc(po.supplier||'')}</div>
+${choice}
+<div class="form-group" style="margin-top:12px"><label>Or type your own</label>
+  <input type="text" id="po-remark-free" value="${esc(cur)}" placeholder="e.g. Waiting for SI from supplier"
+         onkeydown="if(event.key==='Enter'){applyPORemark('${id}', document.getElementById('po-remark-free').value)}"></div>
+<div style="display:flex;gap:8px;justify-content:space-between;margin-top:8px">
+  <button class="btn danger" onclick="applyPORemark('${id}','')"><i class="ti ti-eraser"></i>Clear</button>
+  <div style="display:flex;gap:8px">
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn primary" onclick="applyPORemark('${id}', document.getElementById('po-remark-free').value)">Save</button>
+  </div>
+</div>`);
+}
+
+function applyPORemark(id, value) {
+  const po = (state.purchaseOrders||[]).find(p=>p.id===id);
+  if(!po) return;
+  const before = {...po};
+  po.remarks = String(value||'').trim();
+  stampUpdate(po);
+  auditLog('UPDATE','Purchase Order',id,{description:`Remark on ${id}: ${po.remarks||'(cleared)'}`},before,po);
+  save(); closeModal(); render();
+}
+window.setPORemark = setPORemark;
+window.applyPORemark = applyPORemark;
+
 function renderPurchaseOrders(c, ta) {
   const approvedPRs = (state.purchaseRequests||[]).filter(p=>p.status==='approved');
   ta.innerHTML = `
@@ -18031,6 +18120,7 @@ function renderPurchaseOrders(c, ta) {
     if(!q) return true;
     return po.id.toLowerCase().includes(q) || po.supplier.toLowerCase().includes(q) ||
       po.status.toLowerCase().includes(q) || (po.date||'').includes(q) ||
+      (po.remarks||'').toLowerCase().includes(q) ||
       po.lines.some(l=>(l.desc||'').toLowerCase().includes(q));
   });
   const filterStatus = window._poStatusFilter || '';
@@ -18046,15 +18136,15 @@ function renderPurchaseOrders(c, ta) {
 </div>
 ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 12px;background:var(--amber-bg);border-radius:var(--radius-md);font-size:12px;color:var(--amber)"><i class="ti ti-filter"></i>Showing <strong>${filterStatus}</strong> POs only <button class="btn" style="padding:1px 8px;font-size:11px;margin-left:6px" onclick="window._poStatusFilter='';render()">Clear</button></div>`:''}
 <div style="margin-bottom:8px">
-  <input type="text" placeholder="🔍  Search by PO no., supplier, item, status…"
+  <input type="text" placeholder="🔍  Search by PO no., supplier, item, status, remarks…"
     value="${window._poFilter||''}"
     oninput="window._poFilter=this.value;filterTable()"
     style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
 </div>
 <table>
-  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Payment Terms</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>PO No.</th><th>Date</th><th>Delivery Date</th><th>Supplier</th><th style="text-align:right">Total Value</th><th>Payment Terms</th><th>Created By</th><th>Status</th><th>Remarks</th><th>Actions</th></tr></thead>
   <tbody>
-  ${displayed.length===0?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase orders found${window._poFilter?' for "'+window._poFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
+  ${displayed.length===0?`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase orders found${window._poFilter?' for "'+window._poFilter+'"':filterStatus?' with status "'+filterStatus+'"':''}.</td></tr>`:''}
   ${displayed.map(po=>{
     const poTotal=po.lines.reduce((s,l)=>s+(l.lineTotal||0),0);
     return `<tr>
@@ -18072,6 +18162,7 @@ ${filterStatus?`<div style="display:flex;align-items:center;gap:8px;margin-botto
       </td>
       <td style="font-size:12px;color:var(--text-secondary)"><i class="ti ti-user" style="font-size:11px;margin-right:3px"></i>${po.preparedBy||'—'}</td>
       <td><span class="badge" style="background:${(SO_STATUS_COLORS[po.status]||'var(--text-secondary)') + '22'};color:${SO_STATUS_COLORS[po.status]||'var(--text-secondary)'}">${po.status}</span></td>
+      <td>${poRemarkChip(po)}</td>
       <td><div class="action-btns">
         <button class="btn primary" style="padding:3px 9px;font-size:11px" onclick="viewPO('${po.id}')"><i class="ti ti-eye"></i>View</button>
         <button class="btn" style="padding:3px 9px;font-size:11px" onclick="showEditPO('${po.id}')"><i class="ti ti-edit"></i></button>
@@ -18091,6 +18182,7 @@ function savePO() {
   const date         = document.getElementById('po-date').value;
   const deliveryDate = document.getElementById('po-del').value;
   const notes        = document.getElementById('po-notes')?.value||'';
+  const remarks      = (document.getElementById('po-remarks')?.value||'').trim();
   const preparedBy   = document.getElementById('po-by')?.value||currentUser?.name||'';
   const paymentTerms = document.getElementById('po-payment-terms')?.value||'on_account';
   const dueDate      = document.getElementById('po-due')?.value||'';
@@ -18107,7 +18199,7 @@ function savePO() {
   const id = nextRefNum('PO', state.purchaseOrders||[]);
   if(!state.purchaseOrders) state.purchaseOrders=[];
   const prRef = window._poPRRef || '';
-  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, prRef, status:'pending' });
+  state.purchaseOrders.push({ id, date, deliveryDate, dueDate, supplier, lines, notes, preparedBy, paymentTerms, purchaseType, category, supplierInvoiceNo, prRef, remarks, status:'pending' });
   auditLog('CREATE','Purchase Order',id,{description:`Created PO ${id} for ${supplier} — ${lines.length} item(s)${prRef?' from '+prRef:''}`});
   // Mark PR as converted
   if(prRef) {
@@ -18371,7 +18463,13 @@ function showEditPO(id) {
   <tbody id="po-lines-body"></tbody></table>
 </div>
 <div id="po-grand-total" style="text-align:right;font-size:14px;font-weight:700;margin-bottom:8px"></div>
-<div class="form-group"><label>Notes</label><input type="text" id="po-notes" value="${po.notes||''}" placeholder="Notes or delivery instructions"></div>
+<div class="form-row">
+  <div class="form-group"><label>Notes</label><input type="text" id="po-notes" value="${po.notes||''}" placeholder="Notes or delivery instructions"></div>
+  <div class="form-group"><label>Remarks</label>
+    <input type="text" id="po-remarks" list="po-remark-list" value="${esc(po.remarks||'')}" placeholder="e.g. No SI Yet">
+    <datalist id="po-remark-list">${PO_REMARK_PRESETS.map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
+  </div>
+</div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal();window._editingPOId=null">Cancel</button>
   <button class="btn primary" onclick="saveEditPO()"><i class="ti ti-check"></i>Update PO</button>
@@ -18395,6 +18493,7 @@ function saveEditPO() {
   po.deliveryDate = document.getElementById('po-del').value||po.deliveryDate;
   po.paymentTerms = document.getElementById('po-terms').value||po.paymentTerms;
   po.notes        = document.getElementById('po-notes').value.trim();
+  po.remarks      = (document.getElementById('po-remarks')?.value||'').trim();
   po.lines        = (window._poLines||[]).filter(l=>l.desc||l.itemId).map(l=>({
     ...l, qty:parseFloat(l.qty)||1, unitPrice:parseFloat(l.unitPrice)||0,
     lineTotal:(parseFloat(l.qty)||1)*(parseFloat(l.unitPrice)||0)
@@ -18498,7 +18597,13 @@ ${pr?`<div style="padding:8px 12px;background:var(--accent-bg);border:1px solid 
   <div class="form-group"><label>Supplier Invoice No. <span style="font-size:10px;color:var(--text-tertiary)">(if available at ordering)</span></label>
     <input type="text" id="po-inv-no" placeholder="e.g. SI-2026-001">
   </div>
-  <div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+  <div class="form-row">
+    <div class="form-group"><label>Notes</label><input type="text" id="po-notes" placeholder="Delivery instructions or notes"></div>
+    <div class="form-group"><label>Remarks</label>
+      <input type="text" id="po-remarks" list="po-remark-list" placeholder="e.g. No SI Yet">
+      <datalist id="po-remark-list">${PO_REMARK_PRESETS.map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
+    </div>
+  </div>
 </div>
 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
   <button class="btn" onclick="closeModal()">Cancel</button>
@@ -19132,8 +19237,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.5.1';
-const APP_BUILD   = '20261111-2145';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.6.0';
+const APP_BUILD   = '20261112-2235';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
