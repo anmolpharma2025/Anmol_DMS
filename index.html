@@ -4481,6 +4481,17 @@ function filterTable() {
         ? rows.map(soRowHtml).join('')
         : `<tr><td colspan="12" style="text-align:center;padding:32px;color:var(--text-tertiary)">No sales orders found${q?' for "'+q+'"':''}.</td></tr>`;
 
+    } else if(page === 'purchaserequests') {
+      // Rebuilt from the data rather than hidden by on-screen text: the item
+      // descriptions being searched are not all shown in the row, so a plain
+      // text filter over what is on screen could never find them.
+      const q = (window._prFilter||'').toLowerCase();
+      const rows = (state.purchaseRequests||[]).filter(pr => prMatches(pr,q))
+        .sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+      tbody.innerHTML = rows.length
+        ? rows.map(prRowHtml).join('')
+        : `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase requests match "${esc(q)}".</td></tr>`;
+
     } else {
       // Other pages: plain text match over the rows already on screen
       const box = document.querySelector('#content input[type="search"], #content input[placeholder*="Search" i]');
@@ -17368,37 +17379,45 @@ ${si.notes?`<div style="margin-top:12px;font-size:11px;color:#555"><strong>Notes
 }
 
 // ── PURCHASE REQUEST MODULE ───────────────────────────────────────────────────
-function renderPurchaseRequests(c, ta) {
-  ta.innerHTML = `<button class="btn primary" onclick="showAddPR()"><i class="ti ti-plus"></i>New Purchase Request</button>`;
-  if(!state.purchaseRequests) state.purchaseRequests=[];
-  const prs = [...state.purchaseRequests].sort((a,b)=>(b.id||'').localeCompare(a.id||''));
-  const pending  = prs.filter(p=>p.status==='pending').length;
-  const approved = prs.filter(p=>p.status==='approved').length;
-  const converted= prs.filter(p=>p.status==='converted').length;
+// The item descriptions live inside pr.items, not in the row's visible text, so
+// a plain on-screen text filter can never find them. The matcher and the row
+// builder are shared with filterTable() below, which rebuilds only the table
+// body — re-rendering the whole page on every keystroke is what made the
+// invoice and sales-order search boxes stutter.
+function prMatches(pr, q) {
+  if(!q) return true;
+  const hay = [pr.id, pr.date, pr.requestedBy, pr.department, pr.purpose,
+               pr.status, pr.priority, pr.notes,
+               ...(pr.items||[]).map(i => `${i.desc||''} ${i.unit||''}`)]
+    .join(' ').toLowerCase();
+  return hay.includes(q);
+}
 
-  c.innerHTML = `
-<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
-  <div class="kpi"><div class="kpi-label">Total PRs</div><div class="kpi-value">${prs.length}</div></div>
-  <div class="kpi"><div class="kpi-label">Pending Approval</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
-  <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--green)">${approved}</div></div>
-  <div class="kpi"><div class="kpi-label">Converted to PO</div><div class="kpi-value" style="color:var(--accent)">${converted}</div></div>
-</div>
-<table>
-  <thead><tr><th>PR No.</th><th>Date</th><th>Requested By</th><th>Department</th><th>Purpose</th><th>Items</th><th>Est. Total</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
-  <tbody>
-  ${prs.length===0?`<tr><td colspan="10">${emptyState('ti-clipboard-list','No Purchase Requests','Create a purchase request to start the procurement process.','New Purchase Request','showAddPR()')}</td></tr>`:''}
-  ${prs.map(pr=>{
-    const total=pr.items?.reduce((s,i)=>s+(i.estTotal||0),0)||0;
-    const sc=pr.status==='approved'?'var(--green)':pr.status==='rejected'?'var(--red)':pr.status==='converted'?'var(--accent)':'var(--amber)';
-    return `<tr>
+// Item descriptions for the Items column, so a match is visible in the list.
+function prItemSummary(pr) {
+  const items = pr.items||[];
+  if(!items.length) return '<span style="color:var(--text-tertiary)">—</span>';
+  const names = items.map(i => (i.desc||'').trim()).filter(Boolean);
+  const shown = names.slice(0,3).join(', ');
+  const more  = names.length > 3 ? ` +${names.length-3} more` : '';
+  return `<div style="font-weight:600">${items.length}</div>`
+       + (shown ? `<div style="font-size:11px;color:var(--text-secondary);line-height:1.35;max-width:260px;white-space:normal">${esc(shown)}${more}</div>` : '');
+}
+
+function prRowHtml(pr) {
+  const total = (pr.items||[]).reduce((s,i)=>s+(i.estTotal||0),0)||0;
+  const sc = pr.status==='approved'?'var(--green)':pr.status==='rejected'?'var(--red)':pr.status==='converted'?'var(--accent)':'var(--amber)';
+  const pc = pr.priority==='urgent'?'var(--red)':pr.priority==='high'?'var(--amber)':'var(--text-secondary)';
+  const pbg= pr.priority==='urgent'?'var(--red-bg)':pr.priority==='high'?'rgba(245,158,11,0.12)':'rgba(100,120,160,0.1)';
+  return `<tr>
       <td class="mono" style="font-weight:600">${pr.id}</td>
-      <td>${pr.date}</td>
-      <td>${pr.requestedBy||'—'}</td>
-      <td style="font-size:12px">${pr.department||'—'}</td>
-      <td style="font-size:12px;max-width:160px;color:var(--text-secondary)">${pr.purpose||'—'}</td>
-      <td style="text-align:center">${(pr.items||[]).length}</td>
+      <td>${pr.date||''}</td>
+      <td>${esc(pr.requestedBy||'—')}</td>
+      <td style="font-size:12px">${esc(pr.department||'—')}</td>
+      <td style="font-size:12px;max-width:160px;color:var(--text-secondary)">${esc(pr.purpose||'—')}</td>
+      <td style="text-align:left">${prItemSummary(pr)}</td>
       <td style="text-align:right">${fmt(total)}</td>
-      <td><span class="badge" style="background:${pr.priority==='urgent'?'var(--red-bg)':pr.priority==='high'?'rgba(245,158,11,0.12)':'rgba(100,120,160,0.1)'};color:${pr.priority==='urgent'?'var(--red)':pr.priority==='high'?'var(--amber)':'var(--text-secondary)'}">${pr.priority||'normal'}</span></td>
+      <td><span class="badge" style="background:${pbg};color:${pc}">${(pr.priority||'normal').toUpperCase()}</span></td>
       <td><span class="badge" style="background:${sc}22;color:${sc}">${(pr.status||'pending').toUpperCase()}</span></td>
       <td><div class="action-btns">
         <button class="btn" style="padding:2px 8px;font-size:11px" onclick="viewPR('${pr.id}')"><i class="ti ti-eye"></i></button>
@@ -17409,12 +17428,42 @@ function renderPurchaseRequests(c, ta) {
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--green);border-color:var(--green)" onclick="approvePR('${pr.id}')"><i class="ti ti-check"></i>Approve</button>
           <button class="btn" style="padding:2px 8px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="rejectPR('${pr.id}')"><i class="ti ti-x"></i>Reject</button>
         `:''}
-        ${pr.status==='approved'?`<button class="btn primary" style="padding:2px 8px;font-size:11px" onclick="convertPRtoPO('${pr.id}')"><i class="ti ti-truck-delivery"></i>Create PO</button>`:''}
-        ${pr.status==='converted'?`<span style="font-size:11px;color:var(--accent)"><i class="ti ti-link"></i> ${pr.poRef||'PO created'}</span>`:''}
+        ${pr.status==='approved'?`<button class="btn primary" style="padding:2px 8px;font-size:11px" onclick="convertPRtoPO('${pr.id}')"><i class="ti ti-arrow-right"></i>To PO</button>`:''}
+        ${pr.status==='converted'?`<span style="font-size:11px;color:var(--accent)"><i class="ti ti-link"></i> ${esc(pr.poRef||'PO created')}</span>`:''}
         <button class="btn danger" style="padding:2px 7px;font-size:11px" onclick="deletePR('${pr.id}')"><i class="ti ti-trash"></i></button>
       </div></td>
     </tr>`;
-  }).join('')}
+}
+
+function renderPurchaseRequests(c, ta) {
+  ta.innerHTML = `<button class="btn primary" onclick="showAddPR()"><i class="ti ti-plus"></i>New Purchase Request</button>`;
+  if(!state.purchaseRequests) state.purchaseRequests=[];
+  window._prFilter = window._prFilter || '';
+  const prs = [...state.purchaseRequests].sort((a,b)=>(b.id||'').localeCompare(a.id||''));
+  const pending  = prs.filter(p=>p.status==='pending').length;
+  const approved = prs.filter(p=>p.status==='approved').length;
+  const converted= prs.filter(p=>p.status==='converted').length;
+
+  const shown = prs.filter(pr => prMatches(pr, (window._prFilter||'').toLowerCase()));
+  c.innerHTML = `
+<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+  <div class="kpi"><div class="kpi-label">Total PRs</div><div class="kpi-value">${prs.length}</div></div>
+  <div class="kpi"><div class="kpi-label">Pending Approval</div><div class="kpi-value" style="color:var(--amber)">${pending}</div></div>
+  <div class="kpi"><div class="kpi-label">Approved</div><div class="kpi-value" style="color:var(--green)">${approved}</div></div>
+  <div class="kpi"><div class="kpi-label">Converted to PO</div><div class="kpi-value" style="color:var(--accent)">${converted}</div></div>
+</div>
+<div style="margin-bottom:8px">
+  <input type="text" placeholder="🔍  Search by PR no., requester, department, purpose, status, or item description…"
+    value="${esc(window._prFilter||'')}"
+    oninput="window._prFilter=this.value;filterTable()"
+    style="width:100%;padding:8px 12px;border:1px solid var(--border-mid);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+</div>
+<table>
+  <thead><tr><th>PR No.</th><th>Date</th><th>Requested By</th><th>Department</th><th>Purpose</th><th>Items</th><th>Est. Total</th><th>Priority</th><th>Status</th><th>Actions</th></tr></thead>
+  <tbody>
+  ${prs.length===0?`<tr><td colspan="10">${emptyState('ti-clipboard-list','No Purchase Requests','Create a purchase request to start the procurement process.','New Purchase Request','showAddPR()')}</td></tr>`:''}
+  ${shown.length===0&&prs.length?`<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text-tertiary)">No purchase requests match "${esc(window._prFilter)}".</td></tr>`:''}
+  ${shown.map(prRowHtml).join('')}
   </tbody>
 </table>`;
 }
@@ -17459,6 +17508,7 @@ function showAddPR() {
       <span>Description</span><span>Unit</span><span style="text-align:right">Qty</span><span style="text-align:right">Est. Unit Price</span><span></span>
     </div>
     <div id="pr-item-rows"></div>
+    ${prItemDatalistHTML()}
   </div>
 </div>
 <div class="form-group"><label>Additional Notes</label>
@@ -17471,60 +17521,62 @@ function showAddPR() {
   addPRItemRow(); // start with one empty row
 }
 
-function addPRItemRow() {
-  const container = document.getElementById('pr-item-rows');
-  if(!container) return;
-  const idx = container.children.length;
-  const inv = state.inventory||[];
-  const itemOpts = inv.map(it=>`<option value="${it.id}" data-unit="${it.unit||''}" data-price="${it.costPrice||0}">${it.name}</option>`).join('');
-  const row = document.createElement('div');
-  row.className = 'pr-item-row';
-  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
-  row.innerHTML = `
-    <select onchange="prItemSelect(this,${idx})" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
-      <option value="">— Select item or type below —</option>${itemOpts}
-    </select>
-    <input type="text" id="pr-unit-${idx}" placeholder="pcs/box…" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
-    <input type="number" id="pr-qty-${idx}" value="1" min="1" oninput="calcPRTotal(${idx})" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
-    <input type="number" id="pr-price-${idx}" value="0" min="0" oninput="calcPRTotal(${idx})" placeholder="Est. price" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
-    <button type="button" onclick="this.closest('.pr-item-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 5px">×</button>`;
-  // Also store description
-  const descEl = document.createElement('input');
-  descEl.type='hidden'; descEl.id=`pr-desc-${idx}`;
-  row.appendChild(descEl);
-  container.appendChild(row);
+// The item list that the Description boxes suggest from. Typing is not limited
+// to these — a purchase request often asks for something not stocked yet — so
+// this is a datalist on a normal text box rather than a dropdown.
+function prItemDatalistHTML() {
+  return `<datalist id="pr-item-list">${(state.inventory||[])
+    .map(it=>`<option value="${esc(it.name||'')}">`).join('')}</datalist>`;
 }
 
-function prItemSelect(sel, idx) {
-  const opt = sel.options[sel.selectedIndex];
-  if(!opt.value) return;
-  const inv = (state.inventory||[]).find(i=>i.id===opt.value);
-  if(inv) {
-    const unitEl=document.getElementById(`pr-unit-${idx}`); if(unitEl) unitEl.value=inv.unit||'';
-    const priceEl=document.getElementById(`pr-price-${idx}`); if(priceEl) priceEl.value=inv.costPrice||0;
-    const descEl=document.getElementById(`pr-desc-${idx}`); if(descEl) descEl.value=inv.name||opt.text;
-    calcPRTotal(idx);
+// Fills in unit and estimated price when what was typed names a stocked item.
+// Anything else is kept exactly as typed.
+function prItemTyped(el) {
+  const row = el.closest('.pr-item-row'); if(!row) return;
+  const name = String(el.value||'').trim().toLowerCase();
+  const it = (state.inventory||[]).find(i => String(i.name||'').trim().toLowerCase() === name);
+  el.dataset.itemId = it ? it.id : '';
+  if(it) {
+    const u = row.querySelector('.pri-unit'), pz = row.querySelector('.pri-price');
+    if(u)  u.value  = it.unit || '';
+    if(pz) pz.value = it.costPrice || 0;
   }
 }
 
-function calcPRTotal(idx) {
-  const qty=parseFloat(document.getElementById(`pr-qty-${idx}`)?.value)||0;
-  const price=parseFloat(document.getElementById(`pr-price-${idx}`)?.value)||0;
-  // total shown in PR summary (optional — can add a total row later)
+function addPRItemRow() {
+  const container = document.getElementById('pr-item-rows');
+  if(!container) return;
+  const row = document.createElement('div');
+  row.className = 'pr-item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center';
+  // Fields are found by class, never by an index baked into an id: the old ids
+  // were numbered on creation, so deleting a row in the middle left the
+  // remaining ids out of step with their positions and those items were
+  // silently dropped when the request was saved.
+  row.innerHTML = `
+    <input type="text" class="pri-desc" list="pr-item-list" placeholder="Type an item, or pick from the list…"
+           oninput="prItemTyped(this)" autocomplete="off" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+    <input type="text" class="pri-unit" placeholder="pcs/box…" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+    <input type="number" class="pri-qty" value="1" min="1" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+    <input type="number" class="pri-price" value="0" min="0" placeholder="Est. price" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font);outline:none">
+    <button type="button" onclick="this.closest('.pr-item-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 5px">×</button>`;
+  container.appendChild(row);
+  const d = row.querySelector('.pri-desc'); if(d) d.focus();
 }
 
+// prItemSelect() and calcPRTotal() were removed with the item dropdown:
+// the Description box is a plain text field now, and prItemTyped() above
+// fills in the unit and price when what is typed names a stocked item.
 function savePR() {
   const rows = [...document.querySelectorAll('.pr-item-row')];
-  const items = rows.map((row,idx)=>{
-    const qty=parseFloat(row.querySelector(`#pr-qty-${idx}`)?.value)||0;
-    const price=parseFloat(row.querySelector(`#pr-price-${idx}`)?.value)||0;
-    const unit=row.querySelector(`#pr-unit-${idx}`)?.value||'';
-    const descHidden=row.querySelector(`#pr-desc-${idx}`)?.value||'';
-    const selVal=row.querySelector('select')?.value||'';
-    const selText=row.querySelector('select')?.options[row.querySelector('select').selectedIndex]?.text||'';
-    const desc=descHidden||selText||'';
+  const items = rows.map(row=>{
+    const d     = row.querySelector('.pri-desc');
+    const desc  = (d?.value||'').trim();
+    const unit  = (row.querySelector('.pri-unit')?.value||'').trim();
+    const qty   = parseFloat(row.querySelector('.pri-qty')?.value)||0;
+    const price = parseFloat(row.querySelector('.pri-price')?.value)||0;
     if(!desc||qty<=0) return null;
-    return { itemId:selVal, desc, unit, qty, unitPrice:price, estTotal:qty*price };
+    return { itemId:(d?.dataset.itemId||''), desc, unit, qty, unitPrice:price, estTotal:qty*price };
   }).filter(Boolean);
   if(!items.length){ alert('Please add at least one item.'); return; }
   if(!state.purchaseRequests) state.purchaseRequests=[];
@@ -17586,13 +17638,14 @@ function showEditPR(id) {
   <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:4px;font-size:11px;color:var(--text-secondary);font-weight:600;padding:0 4px">
     <span>Description</span><span>Unit</span><span style="text-align:right">Qty</span><span style="text-align:right">Est. Unit Price</span><span></span>
   </div>
+  ${prItemDatalistHTML()}
   <div id="pr-item-rows">
     ${pr.items.map((it,idx)=>`
     <div class="pr-item-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
-      <input type="text" id="pr-desc-${idx}" value="${it.desc||''}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
-      <input type="text" id="pr-unit-${idx}" value="${it.unit||''}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
-      <input type="number" id="pr-qty-${idx}" value="${it.qty||1}" min="1" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
-      <input type="number" id="pr-price-${idx}" value="${it.unitPrice||0}" min="0" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <input type="text" class="pri-desc" list="pr-item-list" oninput="prItemTyped(this)" autocomplete="off" data-item-id="${it.itemId||''}" value="${esc(it.desc||'')}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="text" class="pri-unit" value="${esc(it.unit||'')}" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font)">
+      <input type="number" class="pri-qty" value="${it.qty||1}" min="1" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
+      <input type="number" class="pri-price" value="${it.unitPrice||0}" min="0" style="padding:7px 8px;border:1px solid var(--border-mid);border-radius:var(--radius-sm);background:var(--bg-primary);color:var(--text-primary);font-size:12px;text-align:right;font-family:var(--font)">
       <button type="button" onclick="this.closest('.pr-item-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;padding:2px 5px">×</button>
     </div>`).join('')}
   </div>
@@ -17608,13 +17661,14 @@ function saveEditPR(id) {
   const pr = (state.purchaseRequests||[]).find(p=>p.id===id);
   if(!pr) return;
   const rows = [...document.querySelectorAll('.pr-item-row')];
-  const items = rows.map((row,idx)=>{
-    const desc  = row.querySelector(`#pr-desc-${idx}`)?.value||'';
-    const unit  = row.querySelector(`#pr-unit-${idx}`)?.value||'';
-    const qty   = parseFloat(row.querySelector(`#pr-qty-${idx}`)?.value)||0;
-    const price = parseFloat(row.querySelector(`#pr-price-${idx}`)?.value)||0;
+  const items = rows.map(row=>{
+    const d     = row.querySelector('.pri-desc');
+    const desc  = (d?.value||'').trim();
+    const unit  = (row.querySelector('.pri-unit')?.value||'').trim();
+    const qty   = parseFloat(row.querySelector('.pri-qty')?.value)||0;
+    const price = parseFloat(row.querySelector('.pri-price')?.value)||0;
     if(!desc||qty<=0) return null;
-    return { desc, unit, qty, unitPrice:price, estTotal:qty*price };
+    return { itemId:(d?.dataset.itemId||''), desc, unit, qty, unitPrice:price, estTotal:qty*price };
   }).filter(Boolean);
   if(!items.length) { alert('Add at least one item.'); return; }
   pr.requestedBy = document.getElementById('epr-by')?.value||pr.requestedBy;
@@ -19237,8 +19291,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.7.1';
-const APP_BUILD   = '20261114-1145';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.8.1';
+const APP_BUILD   = '20261114-1240';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
