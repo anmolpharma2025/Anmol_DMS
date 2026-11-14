@@ -14395,17 +14395,69 @@ const IMPORT_REQUIRED = {
   'Collections':       ['Collection ID'],
 };
 
+// ── IMPORT HEADER / VALUE NORMALISATION ──────────────────────────────────────
+// Real spreadsheets do not use the template's exact headers. A file that
+// imported as all-zero amounts had " TOTAL " and " Net Amount " — padded with
+// spaces and capitalised differently — so r['Total'] was undefined, and the
+// mappers' `+r['Total']||0` turned that silently into 0. Every row is passed
+// through here first, so all 18 mappers match their columns regardless of
+// capitalisation or stray spaces, without any of them changing.
+const _impKey = k => String(k).replace(/\s+/g,' ').trim().toLowerCase();
+const _XL_EPOCH = Date.UTC(1899,11,30);   // Excel's day 0 in the 1900 system
+
+function _impValue(key, v) {
+  if(v == null) return v;
+  // Excel hands dates over as serial numbers (46179 = 2026-06-06). Only a
+  // column actually named like a date is converted, and only within the
+  // plausible serial range, so an ordinary number is never mangled.
+  if(typeof v === 'number' && /(^|\b)date\b/.test(_impKey(key)) && v > 0 && v < 100000) {
+    const d = new Date(_XL_EPOCH + Math.round(v)*86400000);
+    return isNaN(d) ? v : d.toISOString().slice(0,10);
+  }
+  // Money typed as text — "₱1,234.56", "(250.00)" for a negative. The pattern
+  // must match the WHOLE string, so "GENPHARMA, INC." stays text.
+  if(typeof v === 'string') {
+    const s = v.trim();
+    if(/\d/.test(s) && /^\(?\s*[-+]?\s*[₱$€£]?\s*[\d,]+(\.\d+)?\s*\)?$/.test(s)) {
+      const neg = /^\(.*\)$/.test(s);
+      const n = parseFloat(s.replace(/[()₱$€£,\s]/g,''));
+      if(isFinite(n)) return neg ? -n : n;
+    }
+  }
+  return v;
+}
+
+// Looks like an ordinary row to every mapper, but finds its columns
+// case-insensitively and ignoring surrounding spaces.
+function normalizeImportRow(r) {
+  const t = {};
+  for(const k in r) t[_impKey(k)] = _impValue(k, r[k]);
+  // configurable, and passed straight through by the trap below: a proxy must
+  // return the real value of a non-configurable property or the engine throws.
+  Object.defineProperty(t, '__rawKeys', {value:Object.keys(r), enumerable:false, configurable:true});
+  return new Proxy(t, {
+    get: (o,p) => (p === '__rawKeys' || typeof p !== 'string') ? o[p] : o[_impKey(p)],
+    has: (o,p) => typeof p === 'string' ? (p === '__rawKeys' || _impKey(p) in o) : (p in o)
+  });
+}
+
+// Money to two decimals. A VAT split in a spreadsheet arrives as
+// 147321.42857142855, and storing that raw leaves the stray decimals in the
+// record for ever.
+function money2(v) { const n = +v; return isFinite(n) ? Math.round(n*100)/100 : 0; }
+
 // Returns an error string when the file's headers do not match the chosen type
 function importHeaderProblem(sheetName, rows) {
   const need = IMPORT_REQUIRED[sheetName];
   if(!need || !rows || !rows.length) return '';
-  const have = new Set(Object.keys(rows[0]));
-  const missing = need.filter(col => !have.has(col));
+  // Compared on normalised names, so " SI ID " and "si id" both count as found.
+  const have = new Set((rows[0].__rawKeys || Object.keys(rows[0])).map(_impKey));
+  const missing = need.filter(col => !have.has(_impKey(col)));
   if(!missing.length) return '';
   // Does it look like a different type instead?
   let looksLike = '';
   for(const [type, req] of Object.entries(IMPORT_REQUIRED)) {
-    if(req.every(col => have.has(col))) { looksLike = type; break; }
+    if(req.every(col => have.has(_impKey(col)))) { looksLike = type; break; }
   }
   return `This sheet is missing the column(s): ${missing.join(', ')}.` +
          (looksLike ? ` It looks like ${looksLike} data instead.` : '') +
@@ -14432,7 +14484,8 @@ function previewImport(event) {
         `<div style="font-size:11px;margin-top:3px;color:var(--text-secondary)">Pick the matching type above, or export a fresh template.</div>`;
       return;
     }
-    const rows = XLSX.utils.sheet_to_json(ws);
+    const rawRows = XLSX.utils.sheet_to_json(ws);
+    const rows = rawRows.map(normalizeImportRow);
     const problem = importHeaderProblem(sheetName, rows);
     if(problem) {
       _importData = null; _importSheet = null;
@@ -14443,7 +14496,15 @@ function previewImport(event) {
     }
     _importData = rows;
     _importSheet = sheetName;
-    document.getElementById('import-preview').innerHTML = `<span style="color:var(--green)">✓ Found ${_importData.length} rows in "${sheetName}".</span> Ready to import.`;
+    // Show the columns that were actually read. A file whose money column was
+    // named " TOTAL " imported every amount as 0 with no warning at all, so the
+    // headers are put in front of the user before they commit to the import.
+    const cols = (rawRows[0] ? Object.keys(rawRows[0]) : []);
+    document.getElementById('import-preview').innerHTML =
+      `<span style="color:var(--green)">✓ Found ${_importData.length} rows in "${sheetName}".</span> Ready to import.` +
+      `<div style="font-size:11px;margin-top:5px;color:var(--text-secondary)">Columns read: ${
+        cols.map(c=>'<code>'+esc(String(c).trim())+'</code>').join(', ')||'(none)'}</div>` +
+      `<div style="font-size:11px;margin-top:3px;color:var(--text-tertiary)">Capitalisation and extra spaces in the headings are ignored. Check that the amount and date columns are listed above.</div>`;
   };
   reader.readAsBinaryString(file);
 }
@@ -14479,7 +14540,7 @@ function runImport() {
   else if(sheetName==='Sales Returns') { if(!state.salesReturns) state.salesReturns=[]; merge(state.salesReturns, _importData, 'Return ID', r=>({ id:r['Return ID'], date:r['Date']||'', customer:r['Customer']||'', invoiceRef:r['Invoice Ref']||'', amount:+r['Amount']||0, reason:r['Reason']||'' })); }
   else if(sheetName==='Collections') { if(!state.collections) state.collections=[]; merge(state.collections, _importData, 'OR No', r=>({ id:r['OR No'], date:r['Date']||'', customer:r['Customer']||'', invoice:r['Invoice']||'', amount:+r['Amount']||0, netCash:+r['Net Cash']||+r['Amount']||0, mode:r['Mode']||'', reference:r['Reference']||'', receivedBy:r['Received By']||'' }), 'collections'); }
   else if(sheetName==='Deposits') { if(!state.deposits) state.deposits=[]; merge(state.deposits, _importData, 'Deposit ID', r=>({ id:r['Deposit ID'], date:r['Date']||'', bankAccount:r['Bank Account']||'', amount:+r['Amount']||0, source:r['Source']||'', ref:r['Reference']||'', description:r['Description']||'', status:r['Status']||'pending' })); }
-  else if(sheetName==='Supplier Invoices') { if(!state.supplierInvoices) state.supplierInvoices=[]; merge(state.supplierInvoices, _importData, 'SI ID', r=>({ id:r['SI ID'], date:r['Date']||'', dueDate:r['Due Date']||'', supplier:r['Supplier']||'', supplierInvNo:r['Supplier Inv No']||'', poRef:r['PO Ref']||'', subtotal:+r['Net Amount']||0, vat:+r['VAT']||0, total:+r['Total']||0, payments:[], status:r['Status']||'unpaid' }), 'supplierInvoices'); }
+  else if(sheetName==='Supplier Invoices') { if(!state.supplierInvoices) state.supplierInvoices=[]; merge(state.supplierInvoices, _importData, 'SI ID', r=>({ id:r['SI ID'], date:r['Date']||'', dueDate:r['Due Date']||'', supplier:r['Supplier']||'', supplierInvNo:r['Supplier Inv No']||'', poRef:r['PO Ref']||'', subtotal:money2(r['Net Amount']), vat:money2(r['VAT']), total:money2(r['Total']), payments:[], status:String(r['Status']||'unpaid').trim().toLowerCase() }), 'supplierInvoices'); }
   else if(sheetName==='Purchase Orders') { if(!state.purchaseOrders) state.purchaseOrders=[]; merge(state.purchaseOrders, _importData, 'PO ID', r=>({ id:r['PO ID'], date:r['Date']||'', supplier:r['Supplier']||'', status:r['Status']||'pending', lines:[], notes:r['Notes']||'' }), 'purchaseOrders'); }
   else if(sheetName==='Purchase Requests') { if(!state.purchaseRequests) state.purchaseRequests=[]; merge(state.purchaseRequests, _importData, 'PR ID', r=>({ id:r['PR ID'], date:r['Date']||'', requestedBy:r['Requested By']||'', department:r['Department']||'', description:r['Description']||'', estimatedCost:+r['Estimated Cost']||0, status:r['Status']||'pending' }), 'purchaseRequests'); }
   else if(sheetName==='Purchases') { if(!state.purchases) state.purchases=[]; merge(state.purchases, _importData, 'Purchase ID', r=>({ id:r['Purchase ID'], date:r['Date']||'', vendor:r['Vendor']||'', category:r['Category']||'', vatBase:+r['VAT Base']||0, vat:+r['Input VAT']||0, amount:+r['Total Amount']||0, status:r['Status']||'pending', notes:r['Notes']||'' })); }
@@ -19176,8 +19237,8 @@ window.onerror = function(msg, src, line, col, err) {
 window.addEventListener('unhandledrejection', function(e) {
   console.error('Unhandled promise rejection:', e.reason);
 });
-const APP_VERSION = '1.7.0';
-const APP_BUILD   = '20261112-2345';   // bump on every deploy so devices can be checked
+const APP_VERSION = '1.7.1';
+const APP_BUILD   = '20261114-1145';   // bump on every deploy so devices can be checked
 console.log('%cPharmaHub ' + APP_VERSION + ' (build ' + APP_BUILD + ')', 'color:#1a3a8f;font-weight:bold');
 
 // URLs are persisted in localStorage — set them ONCE via the Updates button
